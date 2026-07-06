@@ -23,7 +23,24 @@ gantt
     Enterprise hardening (v1.0)       :p5, after p4, 90d
 ```
 
-## 2. Scope by capability area
+## 2. Phase gate process
+
+Each phase ends with a formal gate. A phase is exited — and its version cut — only when:
+
+1. All acceptance criteria listed under the phase's exit criteria pass in CI (see `./AcceptanceCriteria.md`).
+2. Every feature in the phase's scope meets the Definition of Done (`./AcceptanceCriteria.md`, section 1).
+3. The demo milestone is performed live from the Docker Compose stack (air-gapped from Phase 3 onward).
+4. No open critical defect or unwaived critical security finding exists against phase scope.
+5. Documentation of record in `/docs` reflects what shipped.
+
+Cross-phase engineering principles that hold from Phase 0 onward:
+
+- **Simulation-first**: every connector-, agent-, or report-facing feature is developed and demoed against the simulated enterprise data packs before live integrations; simulation and live share code paths (AC-035).
+- **Isolation always-on**: the cross-tenant sweep test grows with every phase's new endpoints; a phase cannot exit with an isolation gap.
+- **No metric without caveats**: a metric that cannot state its purpose, formula, inputs, grain, caveats/limitations, and gaming risks does not ship.
+- **Anti-goal enforcement**: any surface resembling individual surveillance or stack ranking fails the gate regardless of other criteria (FEAT-200).
+
+## 3. Scope by capability area
 
 Legend: ● = primary delivery in this phase, ◐ = partial/extended, — = not in phase.
 

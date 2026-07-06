@@ -66,6 +66,20 @@ Conventions:
 - **Kafka tests** assert the full envelope (`eventId, tenantId, source, entityType, entityId, eventType, occurredAt, ingestedAt, schemaVersion, payload, traceparent`) and idempotent consumption: publishing the same `eventId` twice must produce exactly one state change.
 - **DLQ tests:** poison messages must land on `.<group>.dlq` with error metadata, and replay must succeed after the fix (mirrors the runbook in `../operations/OperationsGuide.md`).
 
+### 3.1 Database migration testing
+
+Flyway migrations are production code and get their own suite in `eip-app`:
+
+- **Clean migrate:** empty database → full migration chain → schema snapshot compared against the committed expected snapshot (drift fails).
+- **Baseline upgrade:** for every supported previous release, a committed `pg_dump` baseline is restored and migrated forward; data-preserving assertions run on seeded rows (this is what makes the rolling upgrade promise in `../operations/OperationsGuide.md` §7 testable).
+- **RLS after migration:** every migration run is followed by the RLS probe suite — a migration that drops or weakens a policy fails immediately.
+- **Forward-only discipline:** no `U` (undo) migrations; a test asserts none exist. Reverting means a new forward migration.
+- **Partitioning:** partition-creation and pruning functions are tested across month boundaries and leap cases with a pinned clock.
+
+### 3.2 Container hygiene
+
+Singleton containers per Gradle module keep integration wall-clock low; `testcontainers.reuse.enable=true` is recommended locally and forbidden in CI (clean state per run). Tests must never depend on execution order or leak data across methods — each test creates its own tenant or truncates via the builder API's cleanup hooks.
+
 ## 4. Architecture verification (Spring Modulith)
 
 A dedicated `ModularityTests` class in `eip-app` runs on every PR:

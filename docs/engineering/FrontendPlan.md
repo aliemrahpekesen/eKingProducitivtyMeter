@@ -114,7 +114,19 @@ Every metric surface renders the anti-surveillance invariant: definition popover
 
 ## 4. Dashboard architecture
 
-- **Widget grid:** dashboards are a responsive 12-column grid of widgets; a widget = `{ metricKeys[], visualization (line|bar|heatmap|gauge|table|stat), groupBy, localFilterOverrides }`. Widget definitions serialize into the saved-view `Dashboard` resource.
+- **Widget grid:** dashboards are a responsive 12-column grid of widgets; a widget = `{ metricKeys[], visualization (line|bar|heatmap|gauge|table|stat), groupBy, localFilterOverrides }`. Widget definitions serialize into the saved-view `Dashboard` resource:
+
+```ts
+interface WidgetConfig {
+  id: string;
+  title: string;
+  metricKeys: MetricKey[];               // from /metric-definitions
+  visualization: "line" | "bar" | "heatmap" | "gauge" | "table" | "stat";
+  groupBy?: ("teamId" | "sprintId" | "workItemType" | "environment")[];
+  localFilterOverrides?: Partial<GlobalFilters>;
+  layout: { x: number; y: number; w: number; h: number }; // 12-col grid units
+}
+```
 - **Saved views:** load/save/share via `/api/v1/dashboards`; ETag/If-Match on save; per-persona shipped defaults are seed data, cloned on first edit.
 - **Global filters:** time range, team(s), sprint — held in typed router search params (shareable URLs), applied to every widget query; widgets may override locally. Changing a global filter invalidates only affected query keys.
 - **Data flow:** each widget issues one `POST /metrics/query` (batched per dashboard where metric grain and filters coincide) through a `useMetricQuery(request)` hook; responses cached by structural request key.
@@ -124,6 +136,15 @@ Every metric surface renders the anti-surveillance invariant: definition popover
 ## 5. Real-time updates
 
 - **SSE** for agent runs (`/agent-runs/{id}/events`) and job/queue monitors: a typed `useSse(url, eventSchemas)` hook wraps `EventSource` (with fetch-based fallback to attach the bearer header), parses events against generated payload types, supports `Last-Event-ID` resume, and feeds updates into the relevant TanStack Query cache entries so components stay purely query-driven.
+
+```ts
+const { status } = useSse(run.eventsUrl, {
+  onEvent: (e: AgentRunEvent) =>
+    queryClient.setQueryData(qk.ai.agentRun(run.id), (prev) => applyRunEvent(prev, e)),
+  resume: true,               // sends Last-Event-ID on reconnect
+  fallback: { pollQueryKey: qk.ai.agentRun(run.id), activeMs: 3000, backgroundMs: 15000 },
+});
+```
 - **Polling fallback:** if SSE is unavailable (proxy strips streaming, air-gapped reverse proxies), the hook downgrades to interval polling of the run/job resource (`refetchInterval` 3s active / 15s background) with identical component behavior. The choice is automatic and surfaced in a connection badge on monitor screens.
 - No client-side WebSocket layer in v1; SSE + polling covers all live surfaces.
 
