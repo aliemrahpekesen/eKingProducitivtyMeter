@@ -40,6 +40,14 @@ Conventions:
 
 - **Framework:** JUnit 5 (`@ParameterizedTest` encouraged for formula-style logic), AssertJ for all assertions. No Hamcrest, no bare `assertEquals`.
 - **No mocking of owned types where avoidable.** If a collaborator is an EIP-owned class, use the real object or a hand-rolled in-memory fake living next to the production interface (e.g., `InMemoryCheckpointStore implements CheckpointStore`). Mockito is reserved for third-party interfaces we do not own (HTTP clients, LLM provider SPI edges) and for verifying interactions that have no observable state.
+
+  | Collaborator | Preferred double | Example |
+  |---|---|---|
+  | Owned domain object | The real object | `WorkItem`, `Sprint`, metric value objects |
+  | Owned port/SPI | Hand-rolled fake in `testFixtures` | `InMemoryCheckpointStore`, `FakeLlmProvider`, `InMemoryVectorStore` |
+  | Infrastructure at integration level | Testcontainers (real) | Postgres, Kafka, Redis, MinIO, mock OIDC |
+  | Third-party HTTP API | WireMock recording/stub | Jira, GitHub, SonarQube APIs |
+  | Third-party interface, unit level | Mockito mock | Low-level HTTP client, clock-adjacent library seams |
 - **Naming:** `methodUnderTest_condition_expectedOutcome` or BDD-style `@DisplayName`. One logical assertion cluster per test.
 - **Domain purity:** `eip-core` and metric formula classes in `eip-analytics` must be testable without Spring context. A unit test that boots `@SpringBootTest` is a smell and is rejected in review.
 - **Time and randomness:** all production code takes `Clock` / seeded `RandomGenerator` via injection. Tests pin `Clock.fixed(...)`. UUIDv7 event IDs are generated through an injectable `EventIdGenerator`.
@@ -141,6 +149,10 @@ Example golden cases (illustrative rows; the full set covers every metric in the
 | `dora/mttr` | 3 Incidents restored after 1h, 2h, 6h | MTTR (mean) | 3h |
 | `quality/bug-aging` | 4 open Bugs aged 2, 5, 10, 40 days at as-of date | Bug aging buckets | 2×"<7d", 1×"7–30d", 1×">30d" |
 | `risk/release-readiness` | Release with 90% scope done, quality gate green, 1 open critical SecurityFinding | Release readiness score | Matches the published formula in the metric definition; critical finding caps score at "not ready" |
+| `flow/throughput-weekly` | 14 items done across 2 weeks (9 in week 1, 5 in week 2) | Throughput | [9, 5] items/week |
+| `flow/lead-time` | 3 Stories created → done after 5, 10, 15 days | Lead time (median) | 10d |
+| `quality/escaped-defects` | Sprint with 8 Stories done; 2 Bugs later linked to them from production | Escaped defects | 2 (rate 25%) |
+| `team/knowledge-concentration` | Repository where 85% of Commits in 90 days touch files owned by one Member | Knowledge concentration (bus factor) | Team-level flag "high concentration"; output contains no per-individual ranking |
 
 Rules: golden expectations are computed independently of the engine (spreadsheet or script committed beside the data); a change in expected values requires review by the analytics stream owner and an entry in the metric's changelog; every metric definition's documented formula, grain, and caveats are the authority the test encodes.
 
@@ -150,7 +162,15 @@ All AI tests run without any real LLM:
 
 - **Fake LLM provider.** `FakeLlmProvider` implements the LLM provider SPI with scripted, deterministic responses (matched by prompt fingerprint) and records prompts for assertion. It is the default provider in `test` profile and enforces token budgets so budget/guardrail logic is exercised.
 - **Schema validation of agent outputs.** Every canonical agent (Data Ingestion, Data Quality, Engineering Metrics, Delivery Risk, Sprint Review, Release Notes, Documentation, Use Case Diagram, Architecture Diagram, Executive Summary, Incident Analysis, Code Quality, Team Health, RAG Retrieval, Report Composition, Validation, Security Review, Configuration Assistant) declares a JSON Schema for its structured output; tests validate fake-provider outputs and — critically — verify that malformed LLM output triggers the repair/reject path, not a crash or silent acceptance.
-- **Eval harness.** `eip-ai` ships an offline eval harness: golden prompts and reference responses generated from simulation data packs (e.g., "Sprint Review for simulated Team Alpha, Sprint 14"). Evals score structure validity, citation presence (every claim cites a source entity), numeric fidelity (numbers in narrative match metric store values exactly), and grounding (no entity mentioned that is absent from the retrieval set). Evals run nightly with the fake provider (regression) and optionally against a local Ollama/vLLM model in a dedicated non-blocking job.
+- **Eval harness.** `eip-ai` ships an offline eval harness: golden prompts and reference responses generated from simulation data packs (e.g., "Sprint Review for simulated Team Alpha, Sprint 14"). Evals run nightly with the fake provider (regression) and optionally against a local Ollama/vLLM model in a dedicated non-blocking job. Scoring dimensions:
+
+  | Dimension | Checks | Pass bar |
+  |---|---|---|
+  | Structure validity | Output conforms to the agent's JSON Schema | 100% (hard) |
+  | Citation presence | Every factual claim cites a source entity | 100% of claims (hard) |
+  | Numeric fidelity | Numbers in narrative match metric store values exactly | 100% (hard) |
+  | Grounding | No entity mentioned that is absent from the retrieval set | 100% (hard) |
+  | Narrative quality | Rubric-scored coherence/usefulness (model-judged, local model) | Trend-tracked, non-blocking |
 - **Validation Agent regression suite.** The Validation Agent (which checks other agents' outputs) has its own golden suite: a corpus of known-good and deliberately corrupted agent outputs (wrong numbers, fabricated citations, tenant-leaking references, individual-ranking language). The suite asserts the Validation Agent flags every corrupted sample and passes every good one; any regression blocks merge.
 - **RAG tests:** permission-aware retrieval tests assert that a query by a `TEAM_LEAD` of Team A never retrieves chunks whose metadata belongs to Team B or `TENANT_B`; incremental re-index tests assert updated documents replace stale chunks.
 - **MCP tests:** MCP server capability tests assert allow-listing and per-capability RBAC + audit; MCP client tests run against a local stub MCP server.
@@ -297,3 +317,15 @@ Line coverage proves execution, not verification. Two supplements target the hig
 - Every E2E failure uploads the Playwright trace, the Compose logs bundle, and the seeded pack manifest, so failures are diagnosable without rerunning.
 - Test-suite wall-clock is budgeted per stage (§14); a stage exceeding its budget for 3 consecutive days is treated as a defect owned by DevX/infra.
 - Ownership: each stream (see `../implementation/PhaseBasedImplementationPlan.md` §3) owns the health of tests in its modules — including quarantine debt (§15) and coverage ratchets (§1). Cross-cutting harness code (kit, builders infrastructure, eval harness runner, E2E fixtures) is owned by DevX/infra with stream contributions.
+
+## 20. Acceptance criteria for this strategy
+
+This strategy is itself verifiable. It is correctly implemented when:
+
+- **Given** a clean checkout and a running Docker daemon, **when** a developer runs `./gradlew check integrationTest`, **then** the full PR-equivalent backend suite passes with no network access beyond the local containers.
+- **Given** a new connector implementation, **when** it does not subclass `ConnectorContractTestKit`, **then** an ArchUnit rule fails the build with a message pointing to §5.3.
+- **Given** a PR that changes a metric formula, **when** no golden dataset case changes with it, **then** either the golden suite fails (behavior changed) or review rejects it (dead change) — there is no path to silently altering a metric.
+- **Given** a PR that removes an OpenAPI path or narrows an event schema, **when** CI runs, **then** the contract stage fails unless the PR carries the documented breaking-change approval.
+- **Given** any test writing data for `TENANT_A`, **when** the same suite queries as `TENANT_B`, **then** zero rows, chunks, artifacts, or events are visible — in every layer from repository test to E7.
+- **Given** the air-gapped CI profile, **when** the full nightly suite runs, **then** every stage except the explicitly network-permitting recording-drift job completes successfully.
+- **Given** a flaky test, **when** it has been quarantined for more than 5 working days, **then** CI reports it as a policy violation against the owning stream (§15).

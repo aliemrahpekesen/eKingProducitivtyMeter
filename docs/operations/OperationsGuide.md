@@ -333,3 +333,20 @@ For UI-down situations; all commands assume the Compose deployment (translate to
 | Export Keycloak realm | `kc.sh export --realm eip --file /backups/realm-eip.json` |
 
 All mutating admin APIs require `system:operate` and are audited; the CLI paths above go through the same authorization as the UI.
+
+## 15. Operational readiness checklist
+
+An EIP installation is production-ready when every item holds. Re-verify after major upgrades and annually:
+
+- [ ] Pre-flight checklist (§2.3) completed and archived
+- [ ] Activation sequence (§2.2) runs green for every production tenant
+- [ ] All §4 alert rules provisioned, routed to a monitored channel, and test-fired once
+- [ ] Backup jobs running on schedule (§6.1) and the most recent quarterly restore drill (§6.3) passed within RTO
+- [ ] Secrets master key escrowed under dual control; rotation rehearsed (§3.3)
+- [ ] On-call rotation staffed with access to this guide, the Admin Console, Grafana, and the break-glass procedure (§9 T4)
+- [ ] Support bundle generation (§11) tested from both the UI and the headless script
+- [ ] Housekeeping jobs (§10) enabled with retention values matching the organization's compliance policy
+- [ ] Upgrade procedure (§7) rehearsed once on a staging copy, including rollback
+- [ ] Security operations routine (§12) scheduled with named owners
+
+Operators inheriting an existing installation should start with §1 (component map), then run this checklist as an audit.
