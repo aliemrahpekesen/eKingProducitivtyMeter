@@ -28,6 +28,20 @@ Chosen over Ant Design for enterprise-density work:
 
 What we accept: fewer "enterprise mega-components" (e.g., AntD ProTable) — we build one `EipDataTable` (TanStack Table + Mantine styling: server-side cursor pagination, column config, row selection, density toggle) and reuse it everywhere.
 
+### 1.2 Design tokens
+
+Tokens live in `src/design/tokens.css` as CSS custom properties and are the single source for the Mantine theme and the generated ECharts theme:
+
+| Token group | Examples | Consumers |
+|---|---|---|
+| Color: semantic | `--eip-color-surface`, `--eip-color-text-secondary`, `--eip-color-danger` | Mantine theme, custom components |
+| Color: chart | `--eip-chart-cat-1..12` (categorical), `--eip-chart-seq-*`, `--eip-chart-diverging-*`, `--eip-chart-risk-low/med/high` | ECharts theme only — chart series never use semantic UI colors |
+| Spacing / density | `--eip-space-1..8`, `--eip-control-height-compact` | Mantine `spacing`/`size` scales, `EipDataTable` density toggle |
+| Typography | `--eip-font-sans`, `--eip-font-mono`, `--eip-text-xs..xl` | Everything; mono for ids, cursors, traceIds |
+| Elevation / radius | `--eip-shadow-1..3`, `--eip-radius-sm/md` | Cards, drawers, popovers |
+
+Light and dark values are defined per token; ECharts re-themes by regenerating the theme object from computed styles on scheme change. Chart color/form guidance (categorical vs sequential use, contrast checks) is enforced by a lint-time palette validator in `src/design`.
+
 ## 2. Application shell
 
 - **Layout:** left nav (persona-grouped sections), top bar with tenant/org switcher, global search, time-range picker, user menu; content outlet with breadcrumbs.
@@ -38,6 +52,32 @@ What we accept: fewer "enterprise mega-components" (e.g., AntD ProTable) — we 
   - `<Can permission="connector:manage">` component-level gate hides/disables mutating controls; disabled-with-tooltip is preferred over hidden for discoverability, hidden for security-sensitive areas (audit, secrets).
   - Permissions arrive once from the session endpoint and live in an auth context; gates never call the API per check.
 - **Auth:** OIDC code flow + PKCE against Keycloak (or configured IdP), silent refresh, local-accounts form fallback for air-gapped installs.
+
+Route guard sketch (TanStack Router):
+
+```ts
+export const connectorsRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: "connectors",
+  beforeLoad: ({ context }) => {
+    context.auth.require("connector:read"); // throws RedirectToForbidden(missing)
+  },
+  component: lazyRouteComponent(() => import("../features/connectors/ConnectorsScreen")),
+});
+```
+
+Default home view per role (clonable saved views, `/api/v1/dashboards` seeds):
+
+| Role | Default home |
+|---|---|
+| `PLATFORM_ADMIN` | `/admin` (admin dashboard) |
+| `TENANT_ADMIN` | `/admin/connectors` |
+| `ENGINEERING_MANAGER` | `/dashboards/productivity` |
+| `TEAM_LEAD` | `/dashboards/sprints` |
+| `MEMBER` | `/dashboards/kanban` |
+| `RELEASE_MANAGER` | `/dashboards/releases` |
+| `EXECUTIVE_VIEWER` | `/dashboards/delivery-risk` |
+| `SECURITY_AUDITOR` | `/admin/audit` |
 
 ## 3. Screen inventory
 

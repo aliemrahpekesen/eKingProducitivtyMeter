@@ -212,6 +212,8 @@ EIP participates in the Model Context Protocol in both directions: as an MCP cli
 
 ## 11. Report Generation Center & Artifacts Library
 
+The generation engine (FEAT-170 to FEAT-173) plus the full catalog of output types (FEAT-174 to FEAT-191). Every GeneratedReport is produced asynchronously, rendered through versioned templates, validated for citation completeness, and stored as an immutable version in the Artifacts Library with RBAC-scoped access. Drafted communications are never auto-sent; humans stay in the loop for anything leaving the platform.
+
 | ID | Name | Description | Priority | Phase | Dependencies |
 |----|------|-------------|----------|-------|--------------|
 | FEAT-170 | Report Generation Center | Central UI + API to request, configure, schedule, and track report generation jobs (`eip.reports.jobs`), with per-report-type parameter forms, run history, and failure diagnostics. | P0 | 3 | FEAT-011, FEAT-076, FEAT-130 |
@@ -239,6 +241,8 @@ EIP participates in the Model Context Protocol in both directions: as an MCP cli
 
 ## 12. Security & Audit
 
+Security features that are product surface (secrets handling, audit, governance) as opposed to engineering practice (which the Definition of Done in `./AcceptanceCriteria.md` covers). Secrets are never in plaintext, always masked in UI, and every access is audited; the audit trail itself is append-only and tenant-scoped.
+
 | ID | Name | Description | Priority | Phase | Dependencies |
 |----|------|-------------|----------|-------|--------------|
 | FEAT-195 | Secrets encryption | AES-256-GCM envelope encryption for all stored secrets with master key from env/file/Vault via a pluggable KMS SPI. Secrets are never persisted or logged in plaintext and are always masked in UI and API responses. | P0 | 0 | FEAT-006 |
@@ -249,6 +253,8 @@ EIP participates in the Model Context Protocol in both directions: as an MCP cli
 | FEAT-200 | Metric governance guardrails | Enforced anti-goals: no individual-surveillance or stack-ranking views; individual-grain queries restricted; every metric surface shows context, uncertainty, and limitations; governance settings audited. | P0 | 2 | FEAT-090, FEAT-197 |
 
 ## 13. Observability
+
+Self-observability of the platform, distinct from the observability data EIP ingests from customer systems (see the Prometheus/Grafana/OTLP connectors in section 4). The stack is OpenTelemetry SDK → OTel Collector → Prometheus + Grafana with optional Tempo/Loki, plus Micrometer metrics and structured JSON logging; every API request is traceable end-to-end into Kafka consumers via `traceparent`.
 
 | ID | Name | Description | Priority | Phase | Dependencies |
 |----|------|-------------|----------|-------|--------------|

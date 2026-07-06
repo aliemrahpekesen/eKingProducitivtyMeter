@@ -24,6 +24,20 @@ Coverage is measured with JaCoCo (backend) and Vitest coverage (frontend) and en
 
 ## 2. Unit testing conventions
 
+Layout and ownership:
+
+| Location | Contains | Owned by |
+|---|---|---|
+| `<module>/src/test/java` | Unit tests for that module | Owning stream |
+| `<module>/src/testFixtures/java` | Dataset builders, fakes, shared constants (published to dependent modules) | Owning stream |
+| `<module>/src/integrationTest/java` | Testcontainers suites (`@Tag("integration")`) | Owning stream |
+| `/backend/eip-app/src/gatling` | Performance scenarios | DevX/infra + owning stream |
+| `/frontend/src/**/*.test.tsx` | Vitest component/hook tests | Frontend |
+| `/frontend/e2e` | Playwright journeys and E2E scenarios | Frontend + owning stream |
+| `/simulation/golden` | Golden datasets with expected metric values | Analytics |
+
+Conventions:
+
 - **Framework:** JUnit 5 (`@ParameterizedTest` encouraged for formula-style logic), AssertJ for all assertions. No Hamcrest, no bare `assertEquals`.
 - **No mocking of owned types where avoidable.** If a collaborator is an EIP-owned class, use the real object or a hand-rolled in-memory fake living next to the production interface (e.g., `InMemoryCheckpointStore implements CheckpointStore`). Mockito is reserved for third-party interfaces we do not own (HTTP clients, LLM provider SPI edges) and for verifying interactions that have no observable state.
 - **Naming:** `methodUnderTest_condition_expectedOutcome` or BDD-style `@DisplayName`. One logical assertion cluster per test.
