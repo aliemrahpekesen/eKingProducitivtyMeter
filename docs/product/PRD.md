@@ -141,7 +141,7 @@ Requirement IDs are stable; do not renumber. Priority: P0 = must-have for the ph
 | FR-038 | Schema evolution SHALL be supported via `schemaVersion` in the envelope and versioned normalizers; unknown versions route to DLQ with alerting. | P0 | 1 |
 | FR-039 | Operators SHALL be able to replay raw staging data through normalizers for a tenant/connector/time-range (backfill and re-normalization). | P1 | 2 |
 | FR-040 | Ingestion lag (event `occurredAt` → canonical model visibility) SHALL be measured and exposed as a platform metric per connector. | P0 | 1 |
-| FR-041 | Data-quality checks (missing links, orphaned refs, stale checkpoints, duplicate rates) SHALL be computed and surfaced; the Data Quality agent (FR-070) consumes them. | P1 | 2 |
+| FR-041 | Data-quality checks (missing links, orphaned refs, stale checkpoints, duplicate rates) SHALL be computed and surfaced; the Data Quality agent (FR-082) consumes them. | P1 | 2 |
 
 ### 5.3 Analytics (FR-050–FR-062)
 
@@ -161,7 +161,7 @@ Requirement IDs are stable; do not renumber. Priority: P0 = must-have for the ph
 | FR-061 | Tenant admins SHALL be able to configure metric parameters (e.g., WorkflowState-to-WIP-stage mapping, working calendar, failure classification) per tenant. | P0 | 2 |
 | FR-062 | Historical metric series SHALL be immutable per computation version; definition changes create a new series version rather than silently rewriting history. | P1 | 2 |
 
-### 5.4 Dashboards (FR-070 numbering note: dashboards use FR-065–FR-074; agents start at FR-080)
+### 5.4 Dashboards (FR-065–FR-074)
 
 | ID | Requirement | Priority | Phase |
 | --- | --- | --- | --- |
@@ -189,7 +189,7 @@ Requirement IDs are stable; do not renumber. Priority: P0 = must-have for the ph
 | FR-087 | Agent outputs SHALL include source citations and confidence/uncertainty statements; the Validation agent SHALL check generated outputs against retrieved evidence before publication. | P0 | 3 |
 | FR-088 | Guardrails SHALL include tenant-data isolation in prompts, allow-listed tools per agent, output schema validation, and budget enforcement with hard stops. | P0 | 3 |
 | FR-089 | Optional Python AI workers SHALL be supported only as isolated processes behind Kafka queues/REST; default AI orchestration is Java + LangChain4j. | P1 | 4 |
-| FR-090 | Users SHALL be able to trigger agents on demand (e.g., "generate sprint review for Sprint N") and via schedules (FR-105). | P0 | 3 |
+| FR-090 | Users SHALL be able to trigger agents on demand (e.g., "generate sprint review for Sprint N") and via schedules (FR-112). | P0 | 3 |
 | FR-091 | Agent run history, artifacts, budgets consumed, and audit records SHALL be browsable by authorized users per tenant. | P0 | 3 |
 | FR-092 | The Configuration Assistant agent SHALL help admins configure connectors and metrics via guided, tool-calling interactions, restricted to admin-permitted actions. | P1 | 4 |
 

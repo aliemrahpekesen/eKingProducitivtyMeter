@@ -334,7 +334,23 @@ Normalizers are table-driven; these two mappings are the reference examples (ful
 | earliest review `submitted_at` | firstReviewAt | min() over CodeReview |
 | branch name / title / body issue keys | WorkItem RELATES_TO links | Regex `[A-Z][A-Z0-9]+-\d+` and `#\d+` → ExternalRef lookup |
 
-## 13. Cross-Cutting Validation Rules
+## 13. Domain Events per Context
+
+Every canonical entity mutation publishes to a context topic using the standard envelope (§1.6). Consumers (analytics, RAG indexer, report engine) subscribe per context; ordering is per key `tenantId+entityId`; delivery is at-least-once with idempotent consumers deduplicating on `eventId`.
+
+| Context | Kafka topic | entityType values | Representative eventType values |
+|---|---|---|---|
+| Work Management | `eip.domain.workitem` | WorkItem, Sprint, Board, WorkflowState, Dependency, Risk | `workitem.created`, `workitem.transitioned`, `sprint.closed`, `dependency.linked` |
+| Source Control | `eip.domain.scm` | Repository, Branch, Commit, PullRequest, CodeReview | `pullrequest.opened`, `pullrequest.merged`, `codereview.submitted`, `commit.ingested` |
+| Build & Release | `eip.domain.cicd` | Pipeline, Build, Deployment, Release, Environment, Artifact | `build.finished`, `deployment.succeeded`, `release.released` |
+| Quality | `eip.domain.quality` | QualityGate, SecurityFinding, TechnicalDebtItem, CoverageSnapshot | `qualitygate.evaluated`, `securityfinding.opened`, `securityfinding.resolved` |
+| Operations | `eip.domain.ops` | Service, ApiEndpoint, Incident, Alert, SlaSlo, LogReference, TraceReference | `incident.detected`, `incident.resolved`, `alert.firing`, `slo.breached` |
+| Analytics outputs | `eip.analytics.metrics` | Metric (values) | `metric.computed` |
+| AI / Reports | `eip.ai.jobs`, `eip.ai.results`, `eip.reports.jobs` | GeneratedReport, agent jobs | `report.requested`, `report.ready` |
+
+Failed processing lands in the consumer group's DLQ (`.<group>.dlq`) with the original envelope intact for replay.
+
+## 14. Cross-Cutting Validation Rules
 
 1. Every tenant-scoped entity write is rejected unless `tenantId` matches the session tenant (defense in depth above RLS).
 2. Normalizers must be idempotent: re-processing the same raw payload yields byte-identical canonical state (dedup on `eventId`; upsert keyed by ExternalRef).
