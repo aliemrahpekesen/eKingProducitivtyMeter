@@ -279,7 +279,7 @@ Response `202 Accepted`, `Location: /api/v1/agent-runs/018f3c2e-4444-7bbb-cc33-0
 }
 ```
 
-The client then opens the SSE stream at `eventsUrl` (§4.7) or polls the run resource (`FrontendPlan.md` §7).
+The client then opens the SSE stream at `eventsUrl` (§4.7) or polls the run resource (`FrontendPlan.md` §5).
 
 ## 7. Worked example 3 — problem+json error
 
@@ -333,5 +333,5 @@ Expensive endpoints (`/metrics/query`, `/knowledge-bases/{id}/query`, exports) h
 - One OpenAPI document for the whole API, generated at build (CI stage 5) and committed diff-checked; tags = catalog areas above.
 - **operationId naming:** `<area><Verb><Resource>` in lowerCamelCase — `connectorsTestConnection`, `analyticsQueryMetrics`, `agentRunsStreamEvents`, `reportsDownloadArtifactContent`. operationIds are API-stable: renaming one is a breaking change (they seed generated client method names).
 - Component schema names match the Response column of the catalog; shared primitives (`Page*`, `Problem`, `JobRef`) live under `components.schemas` once.
-- Every endpoint documents its required permission via a custom `x-eip-permission` extension (drives the frontend permission gates, `FrontendPlan.md` §3) and idempotency/ETag requirements via `x-eip-idempotent` / `x-eip-etag`.
-- **Generated TypeScript client:** `openapi-typescript` + a thin typed fetch wrapper generated into `/frontend/src/api/generated` in CI; frontend code never hand-writes request/response types (`FrontendPlan.md` §2). SSE endpoints are declared with `text/event-stream` content and consumed via a hand-written typed SSE helper (codegen limitation), with event payload schemas still sourced from OpenAPI components.
+- Every endpoint documents its required permission via a custom `x-eip-permission` extension (drives the frontend permission gates, `FrontendPlan.md` §2) and idempotency/ETag requirements via `x-eip-idempotent` / `x-eip-etag`.
+- **Generated TypeScript client:** `openapi-typescript` + a thin typed fetch wrapper generated into `/frontend/src/api/generated` in CI; frontend code never hand-writes request/response types (`FrontendPlan.md` §1). SSE endpoints are declared with `text/event-stream` content and consumed via a hand-written typed SSE helper (codegen limitation), with event payload schemas still sourced from OpenAPI components.

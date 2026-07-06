@@ -84,7 +84,7 @@ Note: FEAT-020 through FEAT-037 deliberately mirror the admin surface: orgs, bus
 
 ## 4. Connectors
 
-The Connector SPI contract for every connector: JSON Schema configuration, `validate()`, `testConnection()`, `healthCheck()`, `fullSync()`, `incrementalSync(checkpoint)`, webhook intake where supported, rate limiting, retry with exponential backoff + jitter, idempotent upserts, checkpointing, dedup, and simulation/mock mode.
+The canonical connector list, built on a single pluggable SPI. The SPI contract for every connector: JSON Schema configuration, `validate()`, `testConnection()`, `healthCheck()`, `fullSync()`, `incrementalSync(checkpoint)`, webhook intake where supported, rate limiting, retry with exponential backoff + jitter, idempotent upserts, checkpointing, dedup, and simulation/mock mode. Phase placement follows the canonical roadmap: Jira + GitHub + simulation in Phase 1, the remaining P1 connectors (GitLab, SonarQube, Generic CI/CD, Prometheus) in Phase 2, and all remaining connectors in Phase 5.
 
 | ID | Name | Description | Priority | Phase | Dependencies |
 |----|------|-------------|----------|-------|--------------|
@@ -111,6 +111,8 @@ The Connector SPI contract for every connector: JSON Schema configuration, `vali
 
 ## 5. Ingestion & Normalization
 
+The data spine: collectors land source payloads in raw staging, normalizers produce the canonical model, and domain events flow over Kafka to analytics, RAG, and report consumers. Delivery guarantees are at-least-once with idempotent consumers, ordered per key (tenantId+entityId), with checkpoints per connector+stream — so re-ingestion, replays, and crashes never corrupt the canonical model.
+
 | ID | Name | Description | Priority | Phase | Dependencies |
 |----|------|-------------|----------|-------|--------------|
 | FEAT-075 | Raw staging layer | Collectors land source payloads unmodified into `raw_*` JSONB tables (blobs to object storage) with tenant, source, and checkpoint metadata, decoupling collection from normalization and enabling replay. | P0 | 1 | FEAT-001, FEAT-006 |
@@ -125,6 +127,8 @@ The Connector SPI contract for every connector: JSON Schema configuration, `vali
 
 ## 6. Analytics & Metrics
 
+The canonical metric set — flow, DORA, quality, delivery risk, ops, and team health — computed by a single metric engine over domain events. Every metric definition includes purpose, formula, inputs, grain, caveats/limitations, and gaming risks; this is a product requirement, not documentation polish. Per the platform anti-goals, nothing in this area supports individual surveillance or stack ranking.
+
 | ID | Name | Description | Priority | Phase | Dependencies |
 |----|------|-------------|----------|-------|--------------|
 | FEAT-090 | Metric engine & definitions | Computes metrics from domain events into queryable time series. Every metric definition ships with purpose, formula, inputs, grain, caveats/limitations, and gaming risks, surfaced in UI tooltips and the metric catalog. | P0 | 2 | FEAT-076, FEAT-077 |
@@ -138,6 +142,8 @@ The Connector SPI contract for every connector: JSON Schema configuration, `vali
 | FEAT-098 | Metrics API & time series store | `/api/v1` metric query endpoints (dimensions, time ranges, roll-ups by Team/BusinessUnit/Organization) over PostgreSQL time-series tables, publishing computed values on `eip.analytics.metrics`. | P0 | 2 | FEAT-090, FEAT-005 |
 
 ## 7. Dashboards
+
+User-facing and operator-facing visualization built on one shared framework (ECharts + React). User dashboards (productivity, delivery risk, sprint, kanban, release, quality, operational health) render metric-engine values only — no client-side recomputation — and always expose metric caveats and data freshness. Operator dashboards (admin, system health, job/queue/cache/connector monitors) make the platform itself observable to its administrators.
 
 | ID | Name | Description | Priority | Phase | Dependencies |
 |----|------|-------------|----------|-------|--------------|

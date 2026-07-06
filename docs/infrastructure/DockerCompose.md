@@ -159,6 +159,20 @@ secrets:
 
 ## 4. Startup Orchestration
 
+```mermaid
+flowchart LR
+  PG[(postgres)] --> KCW[keycloak]
+  PG --> MIG[eip-migrate: Flyway + eip.* topics]
+  KF[(kafka)] --> MIG
+  MIG -->|exit 0| APP[eip-app]
+  MIG -->|exit 0| WRK[eip-workers xN]
+  RD[(redis)] --> APP
+  MO[(minio)] --> INIT[minio-init: buckets] --> APP
+  KCW --> APP
+  APP --> FE[frontend nginx :80/:443]
+  FE --> SEED[eip-sim-seed - simulation profile]
+```
+
 Order is enforced entirely by healthcheck-gated `depends_on`; no sleep loops or external scripts:
 
 1. Stateful services start in parallel: postgres, redis, kafka, minio, keycloak (keycloak waits on postgres).

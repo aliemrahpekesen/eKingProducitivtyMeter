@@ -212,7 +212,23 @@ Every problem+json response carries `traceId` (from `traceparent`) and `tenantId
 2. **JSON Schema for connector configs** (and LLM provider / MCP server configs): each connector publishes its configuration schema via the Connector SPI (`ConnectorDescriptor.configSchema()`); the platform validates submitted configs against the schema server-side (networknt json-schema-validator, draft 2020-12) before `validate()`/`testConnection()`, and serves the schema to the frontend, which renders JSON-Schema-driven forms (`FrontendPlan.md` §6). Schemas are versioned with the connector; migration of stored configs is a connector responsibility on upgrade.
 3. Secrets inside configs are declared in-schema (`"format": "eip-secret"`), stored via the envelope-encryption secrets SPI, and returned masked.
 
-## 12. Testing layers per module
+## 12. Observability conventions
+
+- **OpenTelemetry SDK everywhere:** traces, metrics, and logs exported to the OTel Collector (→ Prometheus + Grafana + Tempo/Loki, optional per install). Auto-instrumentation for HTTP server/client, JDBC, and Kafka; manual spans for connector SPI operations (`connector.sync`, `connector.testConnection`), agent steps (`agent.plan`, `agent.tool_call`, `llm.call`), and report rendering.
+- **Trace continuity across async hops:** the event envelope's `traceparent` field carries the W3C trace context through the outbox and Kafka, so a Jira webhook can be traced webhook intake → raw topic → normalizer → domain event → metric recompute → dashboard query.
+- **Micrometer metric naming:** `eip.<module>.<thing>` with mandatory tags `tenant` (bounded cardinality: tenant id) and module-specific tags — e.g., `eip.ingestion.events.processed{topic,group,outcome}`, `eip.analytics.metric.compute.duration{metricKey}`, `eip.ai.llm.tokens{provider,model,agent,direction}`, `eip.outbox.lag.seconds`, `eip.connector.calls{connector,outcome}`.
+- **Golden signals per worker role** (dashboards shipped in `/infra/grafana`): consumer lag, DLQ depth, outbox lag, sync duration/failure rate, LLM latency/cost, report render time.
+- Health: liveness = process up; readiness = DB + Kafka + Redis reachable; the aggregate `/api/v1/system/health` endpoint composes these with worker heartbeats (rows in a `worker_heartbeat` table refreshed every 10s).
+
+## 13. Security & secrets conventions
+
+- **Secrets:** AES-256-GCM envelope encryption; data keys per secret, master key from env/file/Vault via the pluggable KMS SPI in `eip-core` (`com.eip.core.secrets`). Secrets never appear in plaintext at rest or in logs, are masked in every API response (`"•••• last4"`), access is audited, and rotation re-wraps data keys without re-encrypting payload history. Connector/LLM/MCP configs declare secret fields with `"format": "eip-secret"` in their JSON Schemas.
+- **Tenant isolation is layered:** JWT → tenant context → Postgres RLS session variable → RLS policy on every tenant-scoped table (`DatabasePlan.md` §5). Application-level `WHERE tenant_id = ?` is written anyway (belt and braces) but RLS is the enforcement boundary; an RLS regression test suite runs in CI.
+- **AuthN/AuthZ:** OIDC resource server (Keycloak default, pluggable IdP) + local accounts fallback; method-level guards (`@PreAuthorize("hasPermission(...)")`) backed by the RBAC permission evaluator in `eip-tenancy`; every mutating endpoint's permission is declared in OpenAPI via `x-eip-permission` (`APIDesign.md` §10).
+- **Audit:** all mutating admin/config actions, secret accesses, LLM calls (prompts redacted per policy), MCP invocations, DLQ discards, and act-as-tenant usages write structured audit events in the same transaction as the action (or the same consumer offset commit for async actions).
+- Air-gapped posture: no outbound calls except configured connectors and LLM providers; dependency resolution, container images, and model weights all mirror-able (`../infrastructure/` docs).
+
+## 14. Testing layers per module
 
 The full strategy, tooling versions, and coverage gates live in `../testing/TestingStrategy.md`; the per-module contract is:
 
@@ -226,11 +242,11 @@ The full strategy, tooling versions, and coverage gates live in `../testing/Test
 
 Connector simulation/mock mode doubles as the test fixture source, so connector tests never need vendor sandboxes.
 
-## 13. Local run story
+## 15. Local run story
 
 Local development runs the API app (profile `local`) and one combined worker against the Docker Compose stack (Postgres 16, Kafka KRaft, Redis 7, MinIO, Keycloak, OTel Collector + Prometheus + Grafana) defined in `/infra/docker-compose`; setup, seed data packs, and troubleshooting are documented in `../infrastructure/LocalDevelopment.md`. `./gradlew :eip-app:bootRun -Plocal` and `./gradlew :eip-workers:bootRun -Plocal` are the only commands a new developer needs after `docker compose up -d`.
 
-## 14. Build & CI pipeline stages
+## 16. Build & CI pipeline stages
 
 | Stage | Runs | Gate |
 |---|---|---|
@@ -238,12 +254,12 @@ Local development runs the API app (profile `local`) and one combined worker aga
 | 2. Unit tests | `test` (all modules, parallel) | Green + JaCoCo line ≥ 80% on changed modules |
 | 3. Modulith verification | `ModularityTests`, generated module docs diff | No dependency-rule violations |
 | 4. Persistence & integration tests | Testcontainers suites | Green |
-| 5. API contract | OpenAPI generation + openapi-diff vs `main` | No undocumented breaking change (see `APIDesign.md` §4) |
+| 5. API contract | OpenAPI generation + openapi-diff vs `main` | No undocumented breaking change (see `APIDesign.md` §3) |
 | 6. Security | OWASP dependency-check, Trivy on image, secret scan | No critical CVEs unwaived |
 | 7. Package | Boot jars for `eip-app` + `eip-workers`, multi-arch container images, SBOM (CycloneDX) | Reproducible image labels (git SHA) |
-| 8. Deploy demo | Compose-based demo stack, seed simulation data, smoke tests + Playwright E2E (`FrontendPlan.md` §11) | Smoke green |
+| 8. Deploy demo | Compose-based demo stack, seed simulation data, smoke tests + Playwright E2E (`FrontendPlan.md` §10) | Smoke green |
 
-## 15. Definition of done — backend stories
+## 17. Definition of done — backend stories
 
 A backend story is done only when all of the following hold:
 
@@ -253,7 +269,7 @@ A backend story is done only when all of the following hold:
 - [ ] Events published via the outbox with the canonical envelope; consumer idempotent with DLQ path tested.
 - [ ] Errors map to the taxonomy (§10); no raw stack traces or cross-tenant leakage in responses.
 - [ ] Config additions are validated `@ConfigurationProperties` records with metadata; connector config changes update the JSON Schema and its version.
-- [ ] Tests at every applicable layer of §12; new metric logic ships with a golden-dataset test including caveats/limitations text.
+- [ ] Tests at every applicable layer of §14; new metric logic ships with a golden-dataset test including caveats/limitations text.
 - [ ] OpenAPI updated (operationId conventions per `APIDesign.md` §12); generated TS client compiles.
 - [ ] Micrometer metrics + trace spans on new external calls and jobs; structured log events with tenantId.
 - [ ] Audited action types registered for any new mutating admin/AI capability.

@@ -166,6 +166,26 @@ Full details in `../architecture/SecurityModel.md`; MCP-specific application:
 - Server-role health: the `McpServerEndpoint` reports through standard platform health endpoints and OTel metrics (call rate, error rate, p95 latency per tool, rate-limit rejections).
 - Lifecycle states for a registered server: `REGISTERED → VERIFIED → ACTIVE ↔ SUSPENDED (admin or drift) → RETIRED`; only `ACTIVE` servers serve agent calls.
 
+Observability metrics (Micrometer → OTel → Prometheus/Grafana):
+
+| Metric | Role | Alerting guidance |
+|---|---|---|
+| `eip.mcp.client.call.latency` (per server/tool) | Client | Alert p95 above per-tool timeout budget minus margin. |
+| `eip.mcp.client.circuit.state` | Client | Alert on OPEN longer than 5 minutes. |
+| `eip.mcp.client.schema_violations` | Client | Any sustained nonzero rate → admin review of the tool. |
+| `eip.mcp.client.injection_flags` | Client | Security signal — route to security alerting, not just ops. |
+| `eip.mcp.server.call.rate/errors` (per tool/token) | Server | Error-rate and auth-failure-rate alerts. |
+| `eip.mcp.server.rate_limited` | Server | Capacity/abuse signal per token. |
+
+All MCP spans carry `traceparent`, linking an external client's report-generation call through the agent run to individual LLM calls in Tempo.
+
+Deployment topology notes:
+
+- **Docker Compose (local/demo):** `McpServerEndpoint` served by the single `eip-app` container; the mock MCP server (Section 9) runs as an optional compose service for demos of the client role.
+- **Kubernetes/OpenShift:** the MCP server endpoint scales with `eip-app` replicas behind the ingress; `McpClientGateway` runs inside `eip-workers` pods (where agent runs execute), so egress NetworkPolicies for registered MCP servers attach to the worker pods, not the API pods.
+- **Air-gapped:** both roles function fully within the perimeter; no MCP feature requires external egress. Registered servers are in-perimeter by construction of the egress policy.
+- Rollout alignment: MCP (both roles) ships in **Phase 4** of the canonical roadmap, after the Phase 3 AI core (LLM provider SPI, RAG, first agents) it depends on.
+
 ## 7. Sequence Diagrams
 
 ### 7.1 Agent invoking an external MCP tool
