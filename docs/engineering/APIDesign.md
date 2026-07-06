@@ -43,7 +43,7 @@ This document defines the REST API of the Engineering Intelligence Platform (EIP
 - Path-versioned major (`/api/v1`); additive changes (new fields, endpoints, enum values clients must tolerate) are non-breaking within v1.
 - Breaking changes require v2 side-by-side; v1 then enters deprecation: responses carry `Deprecation: true` and `Sunset: <RFC 3339>` headers plus a `Link: <migration doc>; rel="deprecation"`.
 - Minimum deprecation window: 2 minor product releases or 6 months, whichever is longer (on-premise upgrade cadence).
-- OpenAPI diff (CI stage 5, `BackendPlan.md` §14) blocks unannounced breaking changes.
+- OpenAPI diff (CI stage 5, `BackendPlan.md` §16) blocks unannounced breaking changes.
 
 ## 4. Endpoint catalog
 

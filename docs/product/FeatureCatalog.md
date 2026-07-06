@@ -161,7 +161,7 @@ User-facing and operator-facing visualization built on one shared framework (ECh
 
 ## 8. AI Agents
 
-Agent infrastructure plus the 18 canonical agents. All agents run in the `eip-ai` agent runtime with tool-calling, budgets, guardrails, and full LLM-call audit.
+Agent infrastructure plus the 18 canonical agents: Data Ingestion, Data Quality, Engineering Metrics, Delivery Risk, Sprint Review, Release Notes, Documentation, Use Case Diagram, Architecture Diagram, Executive Summary, Incident Analysis, Code Quality, Team Health, RAG Retrieval, Report Composition, Validation, Security Review, and Configuration Assistant. All agents run in the `eip-ai` plan/execute runtime with tool-calling, budgets, guardrails, and full LLM-call audit; all function air-gapped against local LLMs via the provider SPI.
 
 | ID | Name | Description | Priority | Phase | Dependencies |
 |----|------|-------------|----------|-------|--------------|
@@ -189,6 +189,8 @@ Agent infrastructure plus the 18 canonical agents. All agents run in the `eip-ai
 
 ## 9. RAG
 
+Retrieval-augmented generation grounded in the tenant's own engineering data: ingestion → chunking → embedding (configurable model) → vector store (pgvector default, Qdrant via the VectorStore SPI) → permission-aware retrieval. Isolation and citations are non-negotiable: retrieval always enforces tenant and RBAC scope, and every retrieved chunk cites its source.
+
 | ID | Name | Description | Priority | Phase | Dependencies |
 |----|------|-------------|----------|-------|--------------|
 | FEAT-155 | RAG ingestion & chunking | Pipeline from canonical entities and Documents to retrieval corpus: content extraction, configurable chunking, and metadata enrichment (tenant, source, entity type, permissions, timestamps). | P0 | 3 | FEAT-077, FEAT-076 |
@@ -199,6 +201,8 @@ Agent infrastructure plus the 18 canonical agents. All agents run in the `eip-ai
 | FEAT-160 | RAG audit logging | Audit of retrieval operations: who/which agent retrieved what corpus scope, filters applied, and which documents were cited into generated outputs. | P1 | 3 | FEAT-158, FEAT-197 |
 
 ## 10. MCP
+
+EIP participates in the Model Context Protocol in both directions: as an MCP client, enterprise MCP servers become tools available to agents; as an MCP server, selected internal capabilities are exposed to enterprise AI clients. Both directions are default-deny (allow-listed), per-capability RBAC-guarded, and fully audited.
 
 | ID | Name | Description | Priority | Phase | Dependencies |
 |----|------|-------------|----------|-------|--------------|

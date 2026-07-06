@@ -264,6 +264,22 @@ Degradation principle in both roles: **fail closed on authorization, fail fast o
 - **End-to-end:** simulation-mode scenario where an agent run (Incident Analysis) calls the mock external server, its result is cited in output, and the Validation Agent traces the claim to the audited MCP call; and the reverse path where the test MCP client triggers report generation and retrieves the resulting artifact.
 - **Security regression suite:** adversarial fixtures (description injection, result injection, rug-pull tool mutation, oversized payloads, egress to unregistered origin) run in CI; any new defense gets a corresponding fixture.
 
+Mock MCP server scripting interface (per test scenario):
+
+```json
+{
+  "scenario": "circuit-breaker-recovery",
+  "tools": [{ "name": "search_change_requests", "inputSchema": "fixtures/itsm-input.json" }],
+  "script": [
+    { "onCall": 1, "respond": { "delayMs": 20000 } },
+    { "onCall": "2-6", "respond": { "error": "internal_error" } },
+    { "onCall": "7+", "respond": { "fixture": "fixtures/itsm-result-ok.json" } }
+  ]
+}
+```
+
+This makes failure-path tests deterministic and reviewable: the scenario file *is* the test specification for gateway behavior (call 1 times out, calls 2–6 open the circuit, half-open probe on call 7 recovers).
+
 ## 10. Acceptance Criteria
 
 - [ ] Given a discovered but not allow-listed external tool, when any agent run attempts to use it, then resolution fails with an authorization error and an audit event; no network call is made.
