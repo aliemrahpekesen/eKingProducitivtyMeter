@@ -209,7 +209,25 @@ SLOs are measured from the metrics above, evaluated over a rolling 30 days, with
 | Report success rate | `eip_report_jobs_total{outcome="ok"}` / all terminal report jobs | 99% | 1% failed jobs (excluding user-cancelled) |
 | AI job completion | Agent runs completing without platform-caused failure (`outcome!="ok"` excluding validation/budget outcomes attributable to tenant policy) | 98% | 2% |
 
+Burn-rate alert windows (applied to the availability, freshness, and report-success SLOs):
+
+| Window pair | Burn rate threshold | Budget consumed if sustained | Action |
+|---|---|---|---|
+| 5m / 1h | 14× | 2% of 30d budget in 1h | page on-call (critical) |
+| 30m / 6h | 6× | 5% in 6h | page on-call (critical) |
+| 2h / 24h | 3× | 10% in 24h | ops channel (warning) |
+| 6h / 72h | 1× | steady full-budget pace | weekly ops review (info) |
+
 Error-budget policy: when a budget is exhausted, feature rollout to that deployment pauses in favor of reliability work; budget burn is visible on the System Health dashboard and reported in the operations review. The freshness SLO deliberately excludes connector-target outages (tracked separately via `eip_connector_health`) — EIP cannot be fresher than the tool it reads.
+
+### 8.1 Meta-Monitoring
+
+The observability pipeline itself is monitored so that "no data" is never mistaken for "no problem":
+
+- Collector health: exporter queue drops, refused spans/metrics, memory-limiter activations (Collector's own metrics scraped by Prometheus).
+- Absence alerts: `absent(up{job="eip-app"})`, `absent_over_time(eip_ingestion_events_total[30m])` during business hours with connectors enabled, and the `EipAuditSilence` rule (§7).
+- Prometheus self-metrics: rule evaluation failures, TSDB head cardinality (guards the label budgets from §1), remote-write lag in enterprise long-term-store setups.
+- Dead-man switch: a `Watchdog` always-firing alert routed to a heartbeat integration; its silence means the alerting path itself is down.
 
 ## 9. Health Check Endpoints
 

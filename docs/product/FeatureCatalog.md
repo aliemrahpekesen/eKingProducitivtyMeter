@@ -26,7 +26,20 @@ Conventions:
 | 13 | Observability | 6 | 5 | 1 | 0 |
 | | **Total** | **142** | **58** | **52** | **32** |
 
+### 1.1 ID conventions
+
+- IDs are allocated in per-area blocks with gaps reserved for growth (e.g., Platform 001-019, Admin 020-049, Connectors 050-074). An ID, once published, is never reused or renumbered; retired features are marked deprecated in place.
+- A feature's phase is the phase in which it reaches its exit criteria (see `./Roadmap.md`); earlier partial work may land behind flags.
+
+### 1.2 Feature count by phase
+
+| Phase | 0 – Foundations | 1 – Ingestion core | 2 – Analytics & dashboards | 3 – AI core | 4 – Agents/MCP/outputs | 5 – Hardening |
+|-------|-----------------|--------------------|----------------------------|-------------|------------------------|---------------|
+| Features | 20 | 19 | 28 | 25 | 34 | 16 |
+
 ## 2. Platform & Tenancy
+
+The load-bearing foundation: multi-tenancy, identity, authorization, the API contract, deployment topology, and the runtime shape (modular monolith + workers). Everything else in the catalog depends on this area, which is why it is almost entirely P0 and Phase 0, with the deployment-hardening tail (K8s GA, HA, backup/restore) landing in Phase 5.
 
 | ID | Name | Description | Priority | Phase | Dependencies |
 |----|------|-------------|----------|-------|--------------|
@@ -43,6 +56,8 @@ Conventions:
 | FEAT-011 | Frontend application shell | React 18 + TypeScript + Vite single-page app with TanStack Query, shared component library, ECharts dashboard primitives, theming, and i18n-ready message catalogs. | P0 | 0 | FEAT-005 |
 
 ## 3. Admin & Configuration
+
+Everything a platform or tenant administrator configures, in one coherent admin surface: organizational structure, users and roles, data sources and their credentials, AI settings (LLM providers, RAG, MCP, agent workflows), analytical settings (templates, metric definitions, risk rules), and operational settings (retention, notifications, scheduled jobs, queue/cache/storage/observability). Every configuration change here is audited (FEAT-197) and RBAC-guarded (FEAT-004).
 
 | ID | Name | Description | Priority | Phase | Dependencies |
 |----|------|-------------|----------|-------|--------------|

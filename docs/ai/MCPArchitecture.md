@@ -36,7 +36,14 @@ Tool results returned by external MCP servers are validated before entering an a
 
 Validation failures return a structured tool error to the agent (counted against the run's `maxToolCalls`) and are audited; they never surface raw invalid payloads to the model.
 
-### 2.3 Prompt-injection defenses
+### 2.3 Transport and version handling
+
+- **Streamable HTTP** is the primary transport for enterprise servers: the gateway maintains a connection pool per registered server, honors server-sent session semantics, and supports resumable streams where the server does. TLS verification is mandatory; custom CA bundles are configurable per server (air-gapped PKI).
+- **stdio** is supported only for servers co-located in self-hosted `eip-workers` images (admin-declared command + args, no shell interpolation, resource-limited child processes). stdio servers are for on-prem packaging convenience, not for arbitrary command execution — the command allow-list is part of deployment configuration, not runtime configuration.
+- **Protocol version negotiation** happens at `initialize`; the gateway pins the negotiated version per server and re-negotiates on reconnect. Servers negotiating an unsupported version are marked incompatible in the health monitor rather than partially used.
+- Capability flags from the handshake (tool list change notifications, resource subscriptions) are recorded; where a server supports `tools/list_changed` notifications, the gateway uses them to trigger immediate drift checks instead of waiting for the scheduled probe.
+
+### 2.4 Prompt-injection defenses
 
 MCP tool results are **untrusted input**, exactly like RAG content from external sources:
 
@@ -68,6 +75,22 @@ The `McpServerEndpoint` (in `eip-ai`, mounted by `eip-app`) exposes selected int
 | `eip.trigger_report_generation` | `{templateId, scopeParams, formats[]}` | `{runId, status: queued}` | `reports:generate` | Enqueues an async agent run on `eip.ai.jobs`; caller polls `eip.list_generated_reports` or a `runId` status resource. Idempotency key supported. Quota-gated; unavailable when no LLM provider is configured. |
 
 The server also exposes read-only MCP **resources** for run status (`eip://runs/{runId}`) and report artifacts (`eip://reports/{reportId}`), subject to the same RBAC. No prompts are exposed in the initial scope.
+
+Design notes on the exposed surface:
+
+- Outputs mirror the REST `/api/v1` contracts (same DTO shapes, same cursor pagination, same RFC 7807-style error semantics translated to JSON-RPC errors) so MCP is a thin protocol adapter, not a second API to maintain.
+- Metric results always include caveats — an external assistant consuming `eip.query_metrics` receives the same anti-misuse framing a human dashboard user sees, preserving the platform's anti-ranking stance beyond its own UI.
+- `eip.trigger_report_generation` is the only mutating capability in the initial scope; expansion of mutating capabilities requires a security review per capability (see `../architecture/SecurityModel.md`).
+
+### 3.3 Service token lifecycle
+
+| Stage | Behavior |
+|---|---|
+| Issue | Admin creates a token bound to (tenant, RBAC principal, capability subset, expiry ≤ 1 year); secret shown once, stored hashed (Argon2id). |
+| Use | Bearer auth on `/api/v1/mcp`; last-used timestamp tracked; every call audited under the token principal. |
+| Rotate | New secret issued for the same principal with overlap window (default 24 h) so clients can switch without downtime; rotation audited. |
+| Revoke | Immediate: hash invalidated, in-flight calls complete, subsequent calls 401 + audit event. |
+| Expire | Automatic revoke at expiry; admin UI warns 14 days ahead; expired-token usage attempts are audited distinctly. |
 
 ## 4. Configuration Model
 
@@ -101,6 +124,30 @@ Example client-role registration (secrets are vault references, never inline):
 ```
 
 Configuration changes are versioned and audited; a change to `allowedTools` takes effect on the next run, never mid-run.
+
+Example server-role capability configuration:
+
+```json
+{
+  "tenantId": "tenant-a",
+  "endpoint": "/api/v1/mcp",
+  "capabilities": {
+    "eip.query_metrics": { "enabled": true, "rateLimitPerMinute": 120 },
+    "eip.query_work_items": { "enabled": true, "rateLimitPerMinute": 120 },
+    "eip.retrieve_citations": { "enabled": true, "rateLimitPerMinute": 60, "maxK": 20 },
+    "eip.list_generated_reports": { "enabled": true, "rateLimitPerMinute": 60 },
+    "eip.trigger_report_generation": {
+      "enabled": false,
+      "rateLimitPerMinute": 6,
+      "maxConcurrentRuns": 2,
+      "allowedTemplates": ["sprint-review-standard", "exec-summary-quarterly"]
+    }
+  },
+  "resources": { "runStatus": true, "reportArtifacts": true }
+}
+```
+
+Both screens surface a read-only "effective access" view per token / per agent, computed from the intersection of capability flags, allow-lists, and RBAC — the same resolution the runtime performs — so admins can verify configuration without test calls.
 
 ## 5. Security Model
 

@@ -154,6 +154,10 @@ Deny-by-default: a chunk is returned only if the caller's effective permissions 
 4. **Staleness bound.** ACL sync lag is bounded by connector sync frequency; the admin UI shows per-source ACL freshness. For revocation-sensitive sources, webhook-driven ACL updates apply immediately where the source supports them.
 5. **No cross-principal caching.** Retrieval caches key on `(tenantId, principalGrantHash, queryHash)` — results are never shared across differing permission sets.
 
+Identity mapping details: the tenancy module maintains `identity_mapping (tenantId, eipPrincipalId, sourceSystem, sourceIdentity)` rows populated by connector user-sync where available (Jira/Confluence account IDs, Git usernames/emails) and by admin-managed mapping for the rest. Unmapped principals resolve to public-only grants for that source — never to broad access. Group-based ACLs (Confluence groups, Jira roles) are expanded to grant keys at ACL-sync time, so query-time resolution is a set lookup, not a recursive expansion.
+
+Service principals: MCP service tokens and scheduled report runs execute retrieval under their bound RBAC principal with explicitly assigned grant keys — there is no implicit "system can read everything" path (see `MCPArchitecture.md` Section 3.1).
+
 ## 9. Tenant Isolation Guarantees
 
 - Every RAG table carries `tenant_id` with Postgres RLS enabled — the same platform-wide row-level tenant isolation as all EIP data.
@@ -221,6 +225,22 @@ Every generated statement that relies on retrieved content must be attributable:
 - The Validation Agent's citation check (see `AgentArchitecture.md` Section 5.16) verifies that (a) every cited `chunkId` existed in the run's retrieval results, (b) every `sourceUrl` resolves to a registered source, and (c) factual claims derived from retrieval carry at least one citation. Statements failing (c) are flagged and either cited on revision or removed.
 - Rendered outputs (markdown/HTML/PDF via `eip-reports`) preserve citations as hyperlinks to the source tool (`ExternalRef` URLs), and `GeneratedReport` entities store the machine-readable citation list for downstream indexing and audit.
 
+Machine-readable citation entry:
+
+```json
+{
+  "n": 3,
+  "chunkId": "018f6b2e-9c1a-7d3b-a4f2-1e8c9d0a7b41",
+  "sourceUrl": "https://confluence.internal.example.com/spaces/PLAT/pages/12345#release-criteria",
+  "title": "Platform Release Criteria",
+  "headingPath": "Release Criteria > Quality Gates",
+  "sourceModifiedAt": "2026-06-28T14:02:11Z",
+  "retrievalAuditId": "018f6b2f-1122-7abc-9def-334455667788"
+}
+```
+
+The `retrievalAuditId` back-reference makes every citation independently verifiable against the audit trail: which principal retrieved it, in which run, with which filters.
+
 ## 13. Audit Logging of Retrievals
 
 Every retrieval is audited: `rag_retrieval_audit (id, tenantId, principal, runId?, query (redacted per policy), appliedFilters, mode, k, returnedChunkIds[], scores[], latencyMs, timestamp, traceparent)`. This answers "who retrieved what, when, under which permissions" — required for access reviews and for investigating any suspected permission leak. Fetches of full chunks (`ragFetchChunk`) are audited individually. Audit rows are immutable, tenant-scoped, exportable, and correlated to agent-run and LLM-call audit trails via `runId` and `traceparent`.
@@ -231,6 +251,8 @@ Every retrieval is audited: `rag_retrieval_audit (id, tenantId, principal, runId
 - **Metrics:** recall@k (primary, k ∈ {5, 10, 20}), nDCG@10, MRR, and citation-resolution rate on end-to-end agent runs. Permission tests assert zero leakage: recall against forbidden chunks must be 0 by construction.
 - **Regression gating:** chunking-parameter changes, embedding-model changes, re-ranker changes, and vector-store migrations must be evaluated against golden sets before promotion; results are stored per configuration version.
 - **Online signals:** citation click-through and Validation Agent citation-failure rates feed back into eval-case candidates.
+- **Harness:** the eval harness runs as a CI job against the Docker Compose dev stack with a pinned simulation pack and pinned local embedding model; results are written to a versioned eval-results table and compared against the current baseline with configurable tolerance (default: recall@10 must not drop more than 1 point absolute). The same harness runs on demand inside a deployment against tenant data with tenant-admin approval, producing tenant-specific quality reports without exporting any content.
+- **Chunking ablations:** the harness supports parameter sweeps (size/overlap per source type) on the simulation corpus to justify defaults in Section 4; sweep results are documented alongside the profile definitions.
 
 ## 15. Sizing and Performance Guidance
 
@@ -239,6 +261,19 @@ Every retrieval is audited: `rag_retrieval_audit (id, tenantId, principal, runId
 - **HNSW tuning:** start `m=16, ef_construction=200`, query-time `ef_search=80`; raise `ef_search` for recall-sensitive report runs (per-request override), lower for interactive assist.
 - **Indexing throughput:** dominated by embedding; a single mid-size GPU via vLLM/Ollama sustains ~1–3k chunks/min. Size initial full indexing windows accordingly and prefer incremental sync thereafter.
 - Scale-out path: partition indexing consumers by tenant, add read replicas for retrieval-heavy deployments, and move to Qdrant per Section 6 criteria.
+
+Observability (Micrometer → OTel → Prometheus/Grafana, per the platform observability stack):
+
+| Metric | Type | Alerting guidance |
+|---|---|---|
+| `eip.rag.index.backlog` (per tenant/source) | gauge | Alert when oldest-pending exceeds 2× source sync interval. |
+| `eip.rag.index.failures` (by error class) | counter | Alert on parse-failure rate > 2% of documents. |
+| `eip.rag.retrieval.latency` (p50/p95, by mode) | histogram | Alert p95 > 300 ms sustained (no-rerank hybrid). |
+| `eip.rag.retrieval.empty_rate` | gauge | Trend signal — a spike often indicates ACL sync or index-space misconfiguration. |
+| `eip.rag.acl.freshness_seconds` (per source) | gauge | Alert beyond configured staleness threshold. |
+| `eip.rag.embed.throughput` | gauge | Capacity planning for re-index windows. |
+
+All retrieval spans carry `traceparent`, so a slow agent run can be traced from LLM call to retrieval to SQL/HNSW timing in Tempo.
 
 ## 16. Failure Modes
 

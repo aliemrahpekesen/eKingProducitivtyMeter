@@ -12,11 +12,11 @@ Local development uses the same files but runs only the infrastructure services 
   .env.example            # documented contract; copy to .env per install
   keycloak/eip-realm.json # pre-seeded realm (dev/demo; production imports its own)
   nginx/frontend.conf     # SPA + reverse-proxy config for the frontend container
-  nginx/tls/              # operator-provided cert/key (Section 9)
+  nginx/tls/              # operator-provided cert/key (Section 8)
   otel/collector.yaml     # OTel Collector pipeline config
   prometheus/prometheus.yml
   postgres/00-extensions.sql  # CREATE EXTENSION IF NOT EXISTS vector;
-  backup/                 # backup helper scripts (Section 8)
+  backup/                 # backup helper scripts (Section 7)
 ```
 
 One `compose.yaml`, four profiles:
@@ -44,7 +44,7 @@ docker compose --profile core --profile observability up -d
 
 ## 2. Service Catalog
 
-All EIP images are non-root, read-only-rootfs-compatible, and expose healthchecks. Resource limits below are the compose `deploy.resources.limits` specification for a small production install (Section 11 for sizing).
+All EIP images are non-root, read-only-rootfs-compatible, and expose healthchecks. Resource limits below are the compose `deploy.resources.limits` specification for a small production install (Section 10 for sizing).
 
 | Service | Image | Purpose | Ports (host:container) | Volumes | Healthcheck | depends_on (condition) | Limits (CPU / mem) |
 |---|---|---|---|---|---|---|---|
@@ -225,17 +225,17 @@ Default: the `frontend` nginx terminates TLS on 443 using operator-provided cert
 
 - Mount cert/key at `nginx/tls/tls.crt` and `nginx/tls/tls.key`; set `EIP_PUBLIC_URL` to the https URL. `frontend.conf` redirects 80 → 443, serves the SPA, and proxies `/api` → `eip-app:8080` and `/auth` → `keycloak:8180` (with correct `X-Forwarded-*` headers so Keycloak and the app generate https URLs).
 - Alternative: run the stack behind an existing enterprise reverse proxy/LB; leave the frontend on port 80 bound to localhost and let the external proxy terminate TLS. The only requirement is that `X-Forwarded-Proto`/`Host` reach nginx intact.
-- Internal (container-to-container) traffic is plaintext on the compose network; the network is not host-exposed. Installs requiring encrypted internal hops must graduate to Kubernetes (Section 13).
+- Internal (container-to-container) traffic is plaintext on the compose network; the network is not host-exposed. Installs requiring encrypted internal hops must graduate to Kubernetes (Section 12).
 
 ## 9. Upgrade Procedure
 
 EIP releases are upgrade-safe between consecutive minor versions (expand-contract migrations; see `./KubernetesOpenShift.md` Section 13 for the schema policy).
 
 1. Read the release notes; back up (Section 7) — mandatory before any upgrade.
-2. Update `EIP_VERSION` in `.env`; `docker compose pull` (or load the air-gapped bundle, Section 12).
+2. Update `EIP_VERSION` in `.env`; `docker compose pull` (or load the air-gapped bundle, Section 11).
 3. Stop application layer only: `docker compose stop frontend eip-app eip-workers` (infra keeps running; downtime window starts).
 4. `docker compose up -d` — recreates `eip-migrate` first (new image runs Flyway forward), then app, workers, frontend in dependency order.
-5. Verify: migration job exit 0, app readiness `UP`, smoke test (Section 14). Typical downtime: 1–3 minutes.
+5. Verify: migration job exit 0, app readiness `UP`, smoke test (Section 13). Typical downtime: 1–3 minutes.
 6. Rollback: application images are backward-compatible with the expanded schema for one version — restore `EIP_VERSION`, `up -d` again. If a contract migration already ran (called out in release notes), rollback requires the pre-upgrade `pg_dump`.
 
 Infrastructure images (postgres, kafka, keycloak, etc.) are upgraded independently and deliberately, never as a side effect of an EIP release.

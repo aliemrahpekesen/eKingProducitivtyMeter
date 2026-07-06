@@ -32,7 +32,7 @@ Notes:
    ```bash
    cp infra/docker-compose/.env.example infra/docker-compose/.env
    ```
-   The example file contains working dev defaults (Section 12); editing it is only required to resolve port conflicts.
+   The example file contains working dev defaults (Section 14); editing it is only required to resolve port conflicts.
 3. Install frontend dependencies:
    ```bash
    cd frontend && pnpm install && cd ..
@@ -46,6 +46,35 @@ Notes:
 ## 3. Dev Infrastructure Stack (Docker Compose)
 
 Local development runs the **infrastructure only** in containers; the backend and frontend run on the host for fast iteration. The stack is defined in `/infra/docker-compose/compose.yaml` and shared with the demo deployment (`./DockerCompose.md`); the dev workflow simply omits the application services by starting only the `core` (and optionally `observability`, `ai-local`, `simulation`) profiles without `eip-app`/`eip-workers`/`frontend`.
+
+```mermaid
+flowchart LR
+  subgraph host [Host processes]
+    FE[Vite dev server :5173]
+    APP[eip-app :8080 / :8081]
+    WRK[eip-workers optional]
+  end
+  subgraph compose [Docker Compose - core profile]
+    PG[(postgres+pgvector :5432)]
+    RD[(redis :6379)]
+    KF[(kafka KRaft :29092)]
+    MO[(minio :9000/:9001)]
+    KC[keycloak :8180]
+  end
+  subgraph obs [observability profile - optional]
+    OC[otel-collector :4317/:4318] --> PR[prometheus :9090] --> GF[grafana :3000]
+  end
+  subgraph ai [ai-local profile - optional]
+    OL[ollama :11434]
+  end
+  FE -- "/api proxy" --> APP
+  FE -- OIDC redirect --> KC
+  APP --> PG & RD & KF & MO
+  APP -- token validation --> KC
+  APP -. OTLP .-> OC
+  APP -. LLM SPI .-> OL
+  WRK --> PG & RD & KF & MO
+```
 
 `make dev-up` is specified as:
 
@@ -159,7 +188,35 @@ The simulation connector (part of the canonical connector list, see `../architec
 - The connector supports `fullSync()` and `incrementalSync(checkpoint)` like any real connector — incremental mode replays the pack's event timeline so you can develop checkpointing, dedup, and streaming analytics realistically.
 - Every other connector's SPI mandates a `simulation/mock mode`; integration tests for connector logic run against recorded fixtures, never live SaaS endpoints.
 
-## 8. Common Tasks
+## 8. Testing Locally
+
+The local test pyramid, all runnable offline:
+
+| Layer | Tooling | Command | Infra needed |
+|---|---|---|---|
+| Unit (backend) | JUnit 5, AssertJ | `./gradlew :<module>:test` | none |
+| Module boundaries | ArchUnit + Spring Modulith verification tests | included in `test` | none |
+| Integration (backend) | Testcontainers: pgvector Postgres, Kafka (KRaft), Redis, MinIO, mock OIDC | `./gradlew test` (tagged `@IntegrationTest`) | Docker daemon only — tests never touch the `dev-up` stack |
+| Connector contract | `AbstractConnectorContractTest` against recorded fixtures + simulation mode | per-connector test classes in `eip-connectors` | none |
+| Frontend unit/component | Vitest + Testing Library | `pnpm --dir frontend test` | none |
+| End-to-end | Playwright: login via Keycloak, simulation sync, dashboard assertions | `make e2e` | full local stack |
+
+Rules:
+
+- Integration tests own their containers via Testcontainers and run against a schema created by Flyway from scratch — they must pass with `make dev-down` executed, guaranteeing no hidden coupling to developer-local state.
+- Tests never call external SaaS APIs. Connector tests use fixtures; AI tests use a stub LLM provider (`EIP_LLM_PROVIDER=stub`) that returns canned completions and records prompts for assertions.
+- `make test` is the same entry point CI uses; a change is not done until `make test` and `make lint` pass locally.
+
+## 9. Debugging and Inspection
+
+- **Remote debug:** `./gradlew :eip-app:bootRun --debug-jvm` listens on 5005; the committed IntelliJ configs include an attach configuration.
+- **Actuator (port 8081):** `/actuator/health` (component detail), `/actuator/prometheus` (Micrometer metrics), `/actuator/modulith` (module structure and event externalization), `/actuator/flyway` (applied migrations), `/actuator/loggers` (runtime log-level changes, e.g. `io.eip.connectors=DEBUG` while debugging a sync).
+- **Database:** `docker compose -f infra/docker-compose/compose.yaml exec postgres psql -U eip eip`. Remember RLS: as a superuser you bypass tenant policies; to reproduce app-visible data use `SET eip.tenant_id = 'demo';` after `SET ROLE eip_app;`.
+- **Kafka:** console consumer per the Common Tasks table (Section 10); `kafka-consumer-groups.sh --describe --all-groups` shows lag per worker consumer group — the first thing to check when dashboards lag behind ingestion.
+- **Redis:** `docker compose ... exec redis redis-cli` — `KEYS eip:lock:*` lists live Redisson locks during sync debugging.
+- **Traces:** with `OBS=1`, spans flow app → otel-collector; the `traceparent` field on every Kafka event envelope lets you follow one entity end-to-end from connector fetch to dashboard query.
+
+## 10. Common Tasks
 
 | Task | Procedure |
 |---|---|
@@ -170,7 +227,7 @@ The simulation connector (part of the canonical connector list, see `../architec
 | Reset all local data | `make db-reset` (drops/recreates the `eip` database and re-runs Flyway) then `make seed-demo`. Kafka topics and MinIO buckets are cleared by `make dev-down PURGE=1` (removes volumes) followed by `make dev-up`. |
 | Inspect Kafka traffic | `docker compose -f infra/docker-compose/compose.yaml exec kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic eip.domain.workitem --from-beginning` |
 
-## 9. Troubleshooting
+## 11. Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
@@ -181,7 +238,7 @@ The simulation connector (part of the canonical connector list, see `../architec
 | Frontend login loops back to Keycloak | Clock skew, or `eip-frontend` client redirect URI does not match the Vite origin | Confirm you are on `http://localhost:5173` (not `127.0.0.1`, which is a different origin for the registered redirect). |
 | `pnpm dev` API calls return 401 | Backend not running with `local` profile (issuer mismatch) | Restart backend with `--spring.profiles.active=local`; verify issuer in the JWT `iss` claim is `http://localhost:8180/realms/eip`. |
 
-## 10. IDE Setup (IntelliJ IDEA)
+## 12. IDE Setup (IntelliJ IDEA)
 
 - Open the repo root; IntelliJ imports the Gradle multi-module build. Set Project SDK and the Gradle JVM to **JDK 21**.
 - Import code style: `Settings → Editor → Code Style → Import Scheme` from `/scripts/idea/eip-codestyle.xml` (2-space continuation, 120-col, import order matching the Spotless config so IDE formatting and `make lint` agree).
@@ -194,7 +251,7 @@ The simulation connector (part of the canonical connector list, see `../architec
 - Recommended plugins: Spring Modulith support comes via standard Spring plugin; install the Mermaid plugin to preview `/docs` diagrams.
 - Enable annotation processing (MapStruct/Lombok-free codebase is the default; only springdoc and MapStruct processors are configured).
 
-## 11. Make Target Catalog
+## 13. Make Target Catalog
 
 All developer entry points are `make` targets; targets are thin wrappers so the underlying commands stay copy-pasteable.
 
@@ -210,7 +267,7 @@ All developer entry points are `make` targets; targets are thin wrappers so the 
 | `make api-client` | Regenerate OpenAPI document and the frontend TypeScript client. |
 | `make hooks` | Install git pre-commit hooks (runs `make lint`). |
 
-## 12. Environment Variable Reference (local dev)
+## 14. Environment Variable Reference (local dev)
 
 The `local` Spring profile hardcodes dev defaults; environment variables override them (Spring relaxed binding). The same names are the contract used by the compose deployment (`./DockerCompose.md`) and Kubernetes manifests (`./KubernetesOpenShift.md`).
 
@@ -233,7 +290,7 @@ The `local` Spring profile hardcodes dev defaults; environment variables overrid
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP export target (silent no-op when collector absent) |
 | `EIP_WORKER_PROFILES` | (unset; CLI arg in dev) | Worker group selection for `eip-workers` |
 
-## 13. Performance Tips
+## 15. Performance Tips
 
 - **Testcontainers reuse:** put `testcontainers.reuse.enable=true` in `~/.testcontainers.properties`. The shared Postgres (pgvector), Kafka, and Redis test containers are declared reusable, cutting integration-test warm-up from ~40 s to ~3 s after first run.
 - **Gradle configuration cache and build cache:** both are enabled in `gradle.properties` (`org.gradle.configuration-cache=true`, `org.gradle.caching=true`). Do not disable them; if a plugin breaks the configuration cache, fix or report it rather than turning the cache off.

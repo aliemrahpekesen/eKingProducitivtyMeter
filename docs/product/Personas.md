@@ -122,6 +122,9 @@ Alignment with the platform role model (see FEAT-004/FEAT-023 in `./FeatureCatal
 - **How EIP helps:** Every LLM call is audited (prompt, model, tokens, cost, latency; prompts redacted per policy); secrets use AES-256-GCM envelope encryption with a pluggable KMS SPI, are masked in UI, and every access is audited; MCP client/server capabilities are allow-listed with per-capability RBAC and audit; Postgres RLS enforces row-level tenant isolation; the Security Review agent assists audits.
 - **Key screens/reports:** Audit Log viewer (filterable by actor, action, entity, tenant), LLM Usage audit view, Secret Access audit view, MCP invocation audit, SecurityFinding aging dashboard, exportable audit evidence packs.
 - **Permissions:** `SECURITY_AUDITOR` (read/audit only; no configuration rights — separation of duties from `PLATFORM_ADMIN`).
+- **Usage pattern:** Quarterly deep audits plus spot checks after any new connector, LLM provider, or MCP capability is enabled; subscribes to audit anomaly alerts rather than watching dashboards.
+- **Representative quote:** "'The AI is on-prem' is a claim. The egress log and the call audit are the proof."
+- **Key journeys & use cases:** J-08; UC-004, UC-018; audits the outcomes of UC-002, UC-003, UC-013, UC-014, UC-015.
 - **Success criteria:** Quarterly audit evidence exported in under an hour; zero unaudited LLM calls or secret accesses; air-gap posture verifiable from configuration and egress logs.
 
 ### 2.9 VP Engineering / CTO — "Kenji"
@@ -132,6 +135,9 @@ Alignment with the platform role model (see FEAT-004/FEAT-023 in `./FeatureCatal
 - **How EIP helps:** Organization-level rollups on consistent metric definitions; the Executive Summary agent generates a quarterly engineering health report — narrative plus charts, every claim cited to underlying Metrics and with limitations stated; technical debt ratio and security finding aging tracked as first-class trends.
 - **Key screens/reports:** Executive Overview dashboard (org rollups, trends, outliers), quarterly Engineering Health report (generated, scheduled), Top Risks summary.
 - **Permissions:** `EXECUTIVE_VIEWER`.
+- **Usage pattern:** Consumes the scheduled quarterly report end-to-end; glances at the Executive Overview before leadership meetings; almost never drills below the second citation level — the narrative must carry the load.
+- **Representative quote:** "Give me three trends, one surprise, and the honest error bars."
+- **Key journeys & use cases:** J-05; UC-009 (org grain), UC-011, UC-012 (as consumer).
 - **Success criteria:** Quarterly report requires no manual data collation; identifies at least one systemic issue per quarter early enough to act; leadership discussions cite EIP data with its caveats.
 
 ### 2.10 Agile Coach — "Rosa"
@@ -141,7 +147,10 @@ Alignment with the platform role model (see FEAT-004/FEAT-023 in `./FeatureCatal
 - **Pain points today:** Before/after evidence for process changes is anecdotal; each team's Jira configuration makes cross-team comparison unreliable; metric misuse by management poisons adoption.
 - **How EIP helps:** Normalized WorkItem model and WorkflowState mapping make flow metrics comparable across differently configured Boards; every metric ships with caveats/limitations and gaming risks she can teach from; Team Health signals (load balance, review bottlenecks, knowledge concentration) are team-level only and explicitly anti-toxic-ranking; the Team Health agent summarizes patterns with uncertainty stated.
 - **Key screens/reports:** Cross-team Flow comparison (opt-in, anonymizable team labels), Cycle time/flow efficiency trend views, Sprint predictability history, Team Health summary, experiment before/after report.
-- **Permissions:** `ENGINEERING_MANAGER` (multi-team metric read) without `dashboard:configure` for teams she does not own; granted per engagement by the `TENANT_ADMIN`.
+- **Permissions:** `ENGINEERING_MANAGER` template (multi-team metric read) without `dashboard:configure` for teams she does not own; granted per engagement by the `TENANT_ADMIN`.
+- **Usage pattern:** Engagement-based: baseline measurement at kickoff, weekly experiment tracking during the engagement, before/after report at close; uses simulation-mode tenants for training workshops.
+- **Representative quote:** "The moment a flow metric becomes a target for a team ranking, it stops measuring flow."
+- **Key journeys & use cases:** J-02 (comparison variant), J-09 (training); UC-009, UC-010 (secondary), UC-011, UC-016.
 - **Success criteria:** Every coaching engagement has a baseline and follow-up measurement; at least one experiment per quarter shows a measured flow improvement; teams volunteer for measurement rather than resisting it.
 
 ## 3. Persona-to-capability matrix
@@ -170,10 +179,58 @@ Capabilities are the platform's major functional areas (see `../architecture/` a
 | Simulation/mock mode | A | ○ | ○ | | ○ | | | | ○ | ○ |
 | Self-observability (OTel → Grafana) | ● | | | | | | ○ | | | |
 
-## 4. Cross-cutting persona requirements
+## 4. Persona value by roadmap phase
+
+Rollout guidance: which persona first receives day-to-day value at each implementation phase (canonical roadmap, Phases 0–5). Use this to sequence onboarding and training per audience — do not onboard a persona before their phase, or first impressions will be of an empty product.
+
+| Phase | Personas activated | First value delivered |
+|---|---|---|
+| 0 — Foundations | Platform Administrator; CISO/Security Officer (audit core) | Deployable stack, tenancy/RBAC/secrets in place, audit log live from day one |
+| 1 — Ingestion core + first connectors | Platform Administrator (fully); Engineering Manager (early data validation) | Jira + GitHub synced, normalized model browsable, simulation connector for demos |
+| 2 — Analytics & dashboards | Engineering Manager, Team Lead/Scrum Master, Developer, Product Manager, SRE/Ops, Agile Coach | Flow/DORA/quality/ops dashboards with metric definitions and drill-down |
+| 3 — AI core | Team Lead (Sprint Review agent), Release Manager (Release Notes agent), Product Manager (Delivery Risk), CISO (LLM audit) | First generated, cited artifacts; RAG over Confluence; local LLM operation |
+| 4 — Full agent suite + MCP + outputs | VP Engineering/CTO (Executive Summary, scheduling), SRE (Incident Analysis agent), all report consumers | Scheduled reports, presentations, diagrams, notification delivery, MCP tools |
+| 5 — Enterprise hardening | Platform Administrator, CISO (certification checklist, HA, backup/restore) | Production-grade K8s/OpenShift GA, upgrade and recovery confidence |
+
+## 5. Screen inventory by persona (frontend planning input)
+
+Consolidated list of distinct screens implied by the persona definitions; each screen names its primary personas and the earliest phase it can exist. This table is the seed for frontend information architecture.
+
+| Screen | Primary personas | Earliest phase |
+|---|---|---|
+| Admin Console: tenants, connectors, secrets | Platform Admin | 0–1 |
+| Admin Console: LLM providers, model routing, RAG corpora, MCP registry | Platform Admin | 3–4 |
+| Access management (roles, permissions, permission preview) | Platform Admin, Tenant Admin | 0 |
+| Connector Health, Sync Checkpoints, DLQ inspector | Platform Admin | 1 |
+| Delivery Health dashboard (multi-team) | Engineering Manager, Agile Coach | 2 |
+| Sprint dashboard + blocked-items drill-down | Team Lead/SM, Engineering Manager | 2 |
+| Kanban flow view (cycle time scatter, WIP aging) | Team Lead/SM, Developer, Agile Coach | 2 |
+| Quality dashboard (coverage, smells, gates, debt) | Developer, Release Manager, Eng. Manager | 2 |
+| Risk view (epic risk, delay prediction, dependencies) | Product Manager, Eng. Manager | 3 |
+| Release Readiness + Release detail | Release Manager | 3 |
+| Ops dashboard + Incident timeline | SRE/Ops | 2 (metrics) / 4 (agent) |
+| Executive Overview | VP Eng/CTO | 4 |
+| Report Generation Center + artifact library | all report producers/consumers | 3 |
+| Audit views (general, LLM usage, secret access, MCP, RAG) | CISO/Security Officer | 0 (general) / 3–4 (AI/MCP) |
+| RAG console (test queries, corpus status) | Platform/Tenant Admin | 3 |
+| Simulation tenant management | Platform Admin | 1 |
+
+## 6. Anti-personas and misuse boundaries
+
+EIP explicitly does not serve the following intents, and the product enforces the boundary rather than merely discouraging it:
+
+| Anti-persona / intent | Why out of scope | Enforcement in product |
+|---|---|---|
+| "Performance ranker" — a manager seeking per-person productivity scores, commit counts, or leaderboards | Anti-goal of the platform; such metrics are invalid and corrosive | No individual-ranking view, metric, or export exists (PRD FR-057); team-health metrics computed at team grain only (FR-055); release-blocking ethics guardrail (NFR-071) |
+| "Data exfiltrator" — anyone routing engineering data to external SaaS AI without approval | Violates on-prem/air-gap posture | LLM providers are registered and audited; unapproved endpoints are inactive by default; egress observable via OTel dashboards (NFR-051) |
+| "Shadow admin" — a power user accumulating both configuration and audit rights | Breaks separation of duties | SoD constraint blocks `SECURITY_AUDITOR` + `secret:rotate` combinations (see UC-002 in `./UseCases.md`) |
+| "Cross-tenant analyst" — a consultant comparing tenants' data inside one deployment | Violates tenant isolation | Postgres RLS on tenant_id; no cross-tenant query path except platform-level operational metadata for `PLATFORM_ADMIN` |
+
+## 7. Cross-cutting persona requirements
 
 1. **Trust and anti-surveillance (all personas).** Every metric surface shows the metric's purpose, formula, inputs, grain, caveats/limitations, and gaming risks. No screen ranks named individuals. This is a product invariant, testable in UI acceptance criteria.
 2. **Tenant isolation (all personas).** No persona except `PLATFORM_ADMIN` ever sees cross-tenant data; enforcement is row-level (tenant_id + Postgres RLS), not UI-level.
 3. **Citations (all AI consumers).** Generated narratives (Sprint Review, Release Notes, Executive Summary, Incident Analysis) always carry source citations to canonical entities so any persona can verify claims.
 4. **Separation of duties (Deniz vs. Helena).** The Platform Administrator configures; the Security Officer audits. `SECURITY_AUDITOR` deliberately lacks write permissions, and `PLATFORM_ADMIN` actions are themselves audited and reviewable by Helena.
 5. **Air-gap parity (Deniz, Helena, all consumers).** Every capability above must function with local LLMs (Ollama/vLLM) and no external egress; SaaS LLM providers are optional, per-tenant, and off by default.
+6. **Traceability.** Persona needs trace forward to journeys (`./UserJourneys.md`), formal use cases (`./UseCases.md`), features (`./FeatureCatalog.md`), and requirements (`./PRD.md`); the per-persona "Key journeys & use cases" bullets and the matrix in section 3 are the binding cross-references and must be updated together with those documents.

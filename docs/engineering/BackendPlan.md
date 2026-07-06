@@ -22,6 +22,18 @@ The `/backend` Gradle build contains exactly the modules from the monorepo plan.
 
 Dependency rules are enforced, not documented-only: any dependency not listed above fails the Modulith verification test (section 3) and a Gradle `java-library` API/implementation split keeps transitive leakage out.
 
+Build conventions applied by `buildSrc` plugins to every module:
+
+```kotlin
+// buildSrc/src/main/kotlin/eip.java-conventions.gradle.kts (excerpt)
+plugins { `java-library`; id("com.diffplug.spotless"); id("net.ltgt.errorprone") }
+java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
+tasks.withType<JavaCompile> { options.compilerArgs.addAll(listOf("-parameters", "-Werror")) }
+tasks.test { useJUnitPlatform(); systemProperty("spring.threads.virtual.enabled", "true") }
+```
+
+Two additional convention plugins: `eip.boot-app-conventions` (only `eip-app` and `eip-workers`; produces boot jars and container images) and `eip.modulith-conventions` (adds `spring-modulith-starter-core`, test fixtures, and the `ModularityTests` source set to every application module).
+
 ```mermaid
 graph TD
   APP[eip-app] --> TEN[eip-tenancy]
@@ -68,8 +80,10 @@ public record ConnectorProperties(
    - `demo` — full stack with simulated enterprise data packs (`/simulation`), Keycloak, seeded tenants; used for demos and Playwright E2E.
    - `prod` — hardened defaults: OIDC required, TLS, secrets from KMS SPI, structured JSON logs only, RLS enforced, actuator restricted.
    Worker role selection uses additional profiles (section 9), never a fourth environment profile.
-4. **No `@Transactional` on controllers.** Transactions live in application services; controllers translate DTO ↔ domain and nothing else.
+4. **No `@Transactional` on controllers.** Transactions live in application services; controllers translate DTO ↔ domain and nothing else. Layering inside a module is `api` (controllers, only in `eip-app`) → application service → domain → infrastructure (repositories, clients); MapStruct-free — mapping is explicit static factory methods on DTO records.
 5. **Time and IDs.** `Clock` is injected everywhere (testability); entity IDs are UUIDv7 generated in `eip-core`.
+6. **Actuator.** `health` (liveness/readiness groups), `info`, `prometheus` exposed; everything else disabled in `prod`. Worker processes expose the same actuator on a management port for K8s probes.
+7. **Logging.** Structured JSON (Logback + logstash encoder) in `demo`/`prod`, human-readable in `local`; every log line carries `tenantId`, `traceId`, `spanId` from MDC populated by the tenant-context filter and OTel instrumentation. Log levels are runtime-adjustable via actuator `loggers` for `system:operate` holders only.
 
 ## 3. Spring Modulith usage
 
@@ -101,6 +115,7 @@ Formatting: Spotless + Google Java Format; static analysis: Error Prone + NullAw
 - **Why JdbcClient over jOOQ:** the analytics SQL is Postgres-16-specific (JSONB operators, window functions, `date_bin`, RLS session settings) and benefits from being literal SQL reviewable by DBAs; jOOQ's code generation adds a build-time schema dependency and a large API surface for little gain when we do not need type-safe dynamic query construction — the metric query endpoint composes from a small, closed grammar (grain, time range, group-by) that a query-builder class over JdbcClient covers safely with named parameters (no string concatenation of user input). One fewer license/codegen moving part on-premise.
 - Flyway owns all schema migration (`db/migration/V*__*.sql`), including RLS policies (`CREATE POLICY tenant_isolation ... USING (tenant_id = current_setting('eip.tenant_id')::uuid)`). Every table carries `tenant_id`; the tenant context filter sets `eip.tenant_id` per transaction via a `ConnectionCustomizer` in `eip-tenancy`.
 - Hibernate `ddl-auto=validate` in all profiles; schema truth lives in Flyway only.
+- Schema conventions, representative DDL, indexing, partitioning of high-volume event/raw tables, retention, and pgvector setup are specified in `DatabasePlan.md`; this plan defers to it entirely for the physical model.
 
 ## 6. Transactions and the transactional outbox
 
@@ -110,6 +125,7 @@ Formatting: Spotless + Google Java Format; static analysis: Error Prone + NullAw
 - A poller (Quartz job, section 8) selects unpublished rows `FOR UPDATE SKIP LOCKED` in `occurred_at` order per partition key, publishes to Kafka with acks=all, marks `published_at`, and retries with capped backoff on failure. Rows older than the retention window with exhausted attempts land in an operator-visible dead-letter state surfaced via the Jobs API.
 - **Why not Debezium:** Debezium requires Kafka Connect plus Postgres logical replication slots — two more stateful services to operate in on-premise and air-gapped installs, with WAL-slot disk-growth failure modes that enterprise DBAs must learn. The poller is plain Java in the codebase we already ship, delivers the same at-least-once guarantee (consumers are idempotent, deduping on `eventId` per the ingestion model), and its ~1s polling latency is irrelevant for analytics/RAG/report consumers. If a future tenant needs sub-100ms fan-out, CDC can replace the poller behind the same outbox table without touching producers.
 - Event envelope fields are exactly the canonical set: `eventId (UUIDv7), tenantId, source, entityType, entityId, eventType, occurredAt, ingestedAt, schemaVersion, payload, traceparent`.
+- Poller mechanics, batch sizes, ordering guarantees per partition key, and outbox monitoring metrics are specified in `EventModel.md` §9; the DLQ policy for exhausted publications in `EventModel.md` §10.
 
 ## 7. Resilience stack (Resilience4j)
 
@@ -123,7 +139,28 @@ Every connector gets a named Resilience4j instance set, configured per connector
 | Bulkhead | Semaphore bulkhead, default 10 concurrent calls per connector instance | Caps virtual-thread fan-out per external system; prevents one tenant's full sync from starving others. |
 | TimeLimiter | 30s per call, 2h per full sync run | Sync-level timeout enforced by the sync engine, call-level by Resilience4j. |
 
-Order: Bulkhead → RateLimiter → CircuitBreaker → Retry → TimeLimiter around the client call. All decorators emit Micrometer metrics (`eip.connector.calls`, tags: connector, tenant, outcome) exported via OpenTelemetry.
+Order: Bulkhead → RateLimiter → CircuitBreaker → Retry → TimeLimiter around the client call. All decorators emit Micrometer metrics (`eip.connector.calls`, tags: connector, tenant, outcome) exported via OpenTelemetry. Connector-level semantics (which SPI operations are retryable, checkpoint interaction on failure) are defined in `ConnectorFramework.md` §5.
+
+Configuration is layered: platform defaults in YAML, per-connector-type overrides shipped with the connector, per-instance overrides from the connector's validated config:
+
+```yaml
+resilience4j:
+  retry:
+    configs:
+      connector-default: { max-attempts: 5, wait-duration: 500ms,
+        enable-exponential-backoff: true, exponential-max-wait-duration: 30s,
+        enable-randomized-wait: true }
+    instances:
+      jira: { base-config: connector-default }
+      sonarqube: { base-config: connector-default, max-attempts: 3 }
+  circuitbreaker:
+    configs:
+      connector-default: { sliding-window-size: 20, failure-rate-threshold: 50,
+        wait-duration-in-open-state: 60s, permitted-number-of-calls-in-half-open-state: 5 }
+  bulkhead:
+    configs:
+      connector-default: { max-concurrent-calls: 10 }
+```
 
 ## 8. Scheduled jobs
 
@@ -147,7 +184,8 @@ Order: Bulkhead → RateLimiter → CircuitBreaker → Retry → TimeLimiter aro
 
   A single process may combine profiles (local/demo run everything in one worker); prod scales each role independently.
 - **Consumer group conventions:** group id = `eip.<module>.<purpose>` (e.g., `eip.ingestion.normalize-workitems`, `eip.analytics.dora`); one group per logical consumer, DLQ topic per group named `<topic>.<group>.dlq` per the ingestion model. Consumers are idempotent (dedup on `eventId` against a processed-events table with TTL), commit offsets after successful processing, and forward poison messages to the DLQ with the failure cause in headers after 3 delivery attempts.
-- Kafka listener concurrency maps to partition count; processing inside a partition is single-threaded to preserve per-key ordering (`tenantId+entityId`).
+- Kafka listener concurrency maps to partition count; processing inside a partition is single-threaded to preserve per-key ordering (`tenantId+entityId`). Full consumer conventions (offset management, poison-message headers, lag SLOs, backpressure) are in `EventModel.md` §8–§12.
+- Workers are horizontally scalable per role; the only stateful coordination is Quartz's JDBC store and Redisson locks. Graceful shutdown drains in-flight Kafka batches and pauses Quartz triggers before SIGTERM deadline (30s).
 
 ## 10. Error handling taxonomy
 
@@ -166,12 +204,12 @@ Sealed hierarchy in `com.eip.core.error`, mapped centrally to RFC 7807 problem+j
 | ├ `LlmProviderException` (budget exceeded, provider down, guardrail block) | 502/402-semantics-as-409/422 | `/problems/llm/*` |
 | └ `InternalException` (catch-all; logged with traceId, generic detail to client) | 500 | `/problems/internal` |
 
-Every problem+json response carries `traceId` (from `traceparent`) and `tenantId`-safe detail only. Worked example in `APIDesign.md` §10.
+Every problem+json response carries `traceId` (from `traceparent`) and `tenantId`-safe detail only. Worked example in `APIDesign.md` §7.
 
 ## 11. Validation strategy
 
 1. **Bean Validation (Jakarta)** on all request DTO records, config-property records, and domain factory methods; groups for create vs update.
-2. **JSON Schema for connector configs** (and LLM provider / MCP server configs): each connector publishes its configuration schema via the Connector SPI (`ConnectorDescriptor.configSchema()`); the platform validates submitted configs against the schema server-side (networknt json-schema-validator, draft 2020-12) before `validate()`/`testConnection()`, and serves the schema to the frontend, which renders JSON-Schema-driven forms (`FrontendPlan.md` §8). Schemas are versioned with the connector; migration of stored configs is a connector responsibility on upgrade.
+2. **JSON Schema for connector configs** (and LLM provider / MCP server configs): each connector publishes its configuration schema via the Connector SPI (`ConnectorDescriptor.configSchema()`); the platform validates submitted configs against the schema server-side (networknt json-schema-validator, draft 2020-12) before `validate()`/`testConnection()`, and serves the schema to the frontend, which renders JSON-Schema-driven forms (`FrontendPlan.md` §6). Schemas are versioned with the connector; migration of stored configs is a connector responsibility on upgrade.
 3. Secrets inside configs are declared in-schema (`"format": "eip-secret"`), stored via the envelope-encryption secrets SPI, and returned masked.
 
 ## 12. Testing layers per module

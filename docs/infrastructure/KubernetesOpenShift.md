@@ -37,6 +37,35 @@ Supported platforms: Kubernetes 1.28+ (any conformant distribution) and OpenShif
 
 Multi-tenancy of EIP itself is application-level (tenant_id + Postgres RLS); one EIP installation serves many tenants — do **not** deploy per-tenant namespaces.
 
+```mermaid
+flowchart TB
+  ING[Ingress / OpenShift Route] --> FE[frontend]
+  subgraph sys [eip-system]
+    FE --> APP[eip-app x3]
+    FE --> KC[keycloak - optional bundled IdP]
+    APP --> KC
+    WI[eip-workers-ingestion]
+    WA[eip-workers-analytics]
+    WAI[eip-workers-ai]
+    WR[eip-workers-reports]
+    MIG[Job: eip-migrate] -.gates rollout.-> APP
+    CRON[CronJobs: report-schedules, rag-reindex]
+    OC[otel-collector gateway x2]
+  end
+  subgraph data [eip-data]
+    PG[(CloudNativePG cluster x3)]
+    KF[(Strimzi Kafka x3, KRaft)]
+    RD[(redis)]
+    MO[(MinIO tenant x4)]
+  end
+  subgraph obs [eip-observability]
+    PR[prometheus] --> GF[grafana]
+  end
+  APP & WI & WA & WAI & WR --> PG & KF & RD & MO
+  APP & WI & WA & WAI & WR -. OTLP .-> OC --> PR
+  KEDA[KEDA - Kafka lag] -.scales.-> WI & WA & WAI & WR
+```
+
 ## 3. Workload Catalog
 
 | Component | Kind | Replicas (small / prod) | Scaling | Notes |

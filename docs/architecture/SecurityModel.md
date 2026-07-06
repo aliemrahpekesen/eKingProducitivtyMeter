@@ -73,6 +73,30 @@ Trust decisions: ingested tool content (TB4) and LLM output (TB5) are treated as
 - **Service tokens for API automation.** Long-lived credentials for CI/scripts: created by TENANT_ADMIN (tenant-scoped) or PLATFORM_ADMIN (platform-scoped), bound to a role + optional permission subset, stored as SHA-256 hash, prefix-identifiable (`eipt_...`), expiring (default 90 days, max 365), revocable immediately, last-used timestamp tracked, creation/revocation/use audited.
 - **Session policy.** Access tokens ≤ 15 min, refresh via OIDC (refresh token rotation, reuse detection at the IdP); idle timeout 30 min and absolute session lifetime 12 h enforced platform-side; concurrent session limit configurable; logout triggers OIDC back-channel logout where supported. Cookies (if used for the SPA BFF mode): `Secure`, `HttpOnly`, `SameSite=Lax`, CSRF token on mutating requests.
 
+Authentication and per-request enforcement flow:
+
+```mermaid
+sequenceDiagram
+    participant U as User (React SPA)
+    participant KC as Keycloak / enterprise IdP
+    participant A as eip-app (/api/v1)
+    participant PG as PostgreSQL (RLS)
+    participant AU as Audit log
+    U->>KC: Authorization Code + PKCE
+    KC-->>U: ID/access token (≤15 min) + refresh token
+    U->>A: GET /api/v1/... (Bearer JWT)
+    A->>A: validate JWT (issuer, audience, signature via cached JWKS, expiry)
+    A->>A: resolve TenantContext + effective permissions (roles → permission catalog)
+    A->>A: endpoint permission check, then resource-level scope check
+    A->>PG: SET LOCAL eip.tenant_id = :tenant; query
+    PG-->>A: rows filtered by RLS policy (backstop)
+    A-->>U: 200 response
+    A->>AU: audit event on sensitive action (actor, target, outcome, traceId)
+    Note over A,AU: 403 paths emit access.denied with the same correlation fields
+```
+
+Service tokens follow the same request path from the JWT-validation step onward: the token hash is looked up, expiry/revocation checked, and its bound role + permission subset becomes the effective permission set.
+
 ## 4. Authorization — RBAC
 
 Deny-by-default RBAC: roles bundle fine-grained permissions; every `/api/v1` endpoint declares required permissions; service-layer checks repeat the enforcement (defense in depth against controller gaps).
@@ -130,6 +154,27 @@ Enforcement layers:
 ## 6. Secret Management
 
 - **Envelope encryption.** Every stored secret (connector tokens, webhook secrets, LLM API keys, SMTP credentials) is encrypted with AES-256-GCM using a per-secret data encryption key (DEK); DEKs are wrapped by the master key from the KMS SPI. Ciphertext records: key id, wrap algorithm, nonce, AAD (`tenantId + secretId`), created/rotated timestamps. Secrets are never stored or logged in plaintext.
+
+```mermaid
+flowchart LR
+    subgraph WRITE["Store secret (TENANT_ADMIN)"]
+        PT["plaintext secret<br/>(write-only API field)"] --> ENC["AES-256-GCM encrypt<br/>fresh DEK + nonce,<br/>AAD = tenantId + secretId"]
+        ENC --> CT["ciphertext + metadata<br/>→ Postgres (tenant row, RLS)"]
+        ENC --> WRAP["wrap DEK"]
+    end
+    subgraph KMS["KMS SPI"]
+        MK["master key<br/>env (demo) / file / Vault Transit"]
+    end
+    WRAP <--> MK
+    WRAP --> WDEK["wrapped DEK<br/>stored beside ciphertext"]
+    subgraph READ["Use secret (worker: connector sync / LLM call)"]
+        WDEK2["wrapped DEK"] --> UNWRAP["unwrap via KMS SPI"]
+        UNWRAP <--> MK
+        UNWRAP --> DEC["AES-256-GCM decrypt<br/>(AAD verified)"]
+        DEC --> MEM["plaintext in memory only,<br/>zeroed after use"]
+    end
+    MEM -. every decrypt .-> AUD["audit: secret.access<br/>(actor, purpose, traceId)"]
+```
 - **KMS SPI providers.** `env` (master key from environment — demo only), `file` (mounted key file, permissions-checked at startup), `vault` (HashiCorp Vault Transit for wrap/unwrap; key never leaves Vault). Provider is deployment-selected; the SPI allows enterprise HSM adapters later.
 - **Rotation procedure.** (1) Master key rotation: introduce new key version → background job re-wraps all DEKs (no data re-encryption needed) → retire old version after re-wrap completes; both versions valid during the window; progress observable via metric and audit events. (2) Secret value rotation: TENANT_ADMIN updates a connector secret; old value overwritten (previous ciphertext retained for one grace period only if the connector supports dual credentials); `connector.testConnection()` validates before commit.
 - **UI masking.** Secret values are write-only in the UI/API: displayed as `••••` with last-4 hint where safe; `connector.secret.reveal` is a distinct, default-disabled, always-audited permission. API responses never echo secret fields; OpenAPI marks them `writeOnly`.
@@ -171,6 +216,15 @@ EIP is both MCP client and MCP server; both directions are constrained.
 | Dependency scanning | CI gates: OWASP Dependency-Check / Grype on every build; Renovate-managed updates; critical CVEs block release; base images rebuilt on a fixed cadence |
 | Build integrity | Reproducible Gradle builds where feasible; provenance attestation (SLSA-style) attached to release artifacts; no build-time network access beyond the locked dependency mirror |
 | Third-party models | Offline model bundles carry checksums in the release manifest; model files verified before load |
+
+Runtime hardening baseline (all EIP containers, enforced by manifests in `/infra/kubernetes`):
+
+- Non-root, arbitrary-UID-compatible images (OpenShift `restricted-v2` SCC); read-only root filesystem with explicit writable `emptyDir` mounts for temp/report scratch.
+- `allowPrivilegeEscalation: false`, all capabilities dropped, seccomp `RuntimeDefault`.
+- No shell/package-manager in production images (distroless-style JRE base where feasible).
+- `NetworkPolicy` default-deny per namespace; egress generated from connector/LLM/MCP configuration (see `../architecture/DeploymentModel.md` §10).
+- Resource requests/limits set on every container (DoS containment); JVM flags derive heap from container limits.
+- Secrets mounted as files, never env vars; service account tokens not auto-mounted unless required.
 
 ## 11. Audit Logging
 
