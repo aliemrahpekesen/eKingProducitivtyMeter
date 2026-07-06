@@ -36,6 +36,14 @@ Related documents: `AgentArchitecture.md`, `MCPArchitecture.md`, `../architectur
 
 Indexing generated reports lets agents build on prior outputs (e.g., Executive Summary Agent citing last quarter's report) with provenance preserved.
 
+Per-source acquisition notes:
+
+- **Confluence:** page bodies exported in storage format, macros expanded where resolvable; attachments of supported types (PDF, Word) indexed as child documents with the page as parent; page tree position captured for `headingPath` roots.
+- **Jira issues:** the issue is one logical document; comments append as document updates (new `docVersion`) so retrieval always reflects the current discussion state; issue links captured as metadata for future graph-assisted retrieval (not in initial scope).
+- **Git repos:** indexing targets are configurable per repo — default markdown/docs globs (`**/*.md`, `docs/**`, `adr/**`); source code indexing is opt-in per repo due to volume and signal-to-noise trade-offs. Default branch only; content keyed by path + blob hash.
+- **Uploads:** stored in MinIO under tenant-scoped buckets before parsing; virus/size screening applies at upload; the original blob is retained for re-parse when chunking parameters change.
+- **Generated reports:** indexed automatically on report completion via an `eip.ai.results` consumer, so freshness is immediate.
+
 ## 3. Pipeline
 
 ```mermaid
@@ -58,6 +66,19 @@ Stage notes:
 - **Embed.** Batched embedding calls through the LLM provider SPI's `EMBEDDINGS` capability (Ollama/ONNX local by default; OpenAI-compatible endpoints optional). Batch size and concurrency are tunable per provider.
 - **Index.** Chunks + embeddings + metadata written to the configured vector store; keyword index maintained in Postgres FTS (`tsvector`) regardless of vector store choice.
 - **Retrieve / Cite.** Sections 8 and 12.
+
+### 3.1 Indexing job model
+
+Each document flows through a persisted indexing job (`rag_index_job`): `PENDING → PARSING → CHUNKING → EMBEDDING → INDEXED` with terminal `FAILED` (per stage, with error class) and `SKIPPED` (unchanged content hash). Jobs are checkpointed per stage, so a worker crash resumes at the last completed stage rather than re-parsing. Job records power the admin indexing dashboard: per-source backlog depth, throughput, failure counts by error class, and oldest-pending age. Batch semantics: embedding batches are assembled across jobs of the same tenant + model for throughput, but completion is tracked per document so partial batch failures only fail the affected documents.
+
+### 3.2 Storage layout
+
+| Store | Contents |
+|---|---|
+| PostgreSQL (`rag_document`, `rag_chunk`, `rag_index_job`, `rag_acl_grant`, `rag_retrieval_audit`) | Document registry and versions, chunk text + metadata, job state, normalized ACL grants, retrieval audit. All RLS-protected. |
+| pgvector (`rag_chunk_embedding_<modelKey>`) or Qdrant collection per model | Embeddings + filterable payload subset (tenantId, source, aclRefs, deletedAt). |
+| Postgres FTS (`tsvector` column on `rag_chunk`) | Keyword leg of hybrid search — always in Postgres, regardless of vector store. |
+| MinIO (S3 abstraction) | Original blobs (uploads, attachments) and parsed intermediate text for cheap re-chunking. |
 
 ## 4. Chunking Strategy
 

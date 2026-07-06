@@ -2,7 +2,7 @@
 
 Formal use cases for the Engineering Intelligence Platform (EIP). Actors are the personas defined in `./Personas.md` (with their RBAC roles); narrative context is in `./UserJourneys.md`. Component names, connectors, agents, Kafka topics, and vocabulary follow the shared design brief and `../architecture/DomainModel.md`.
 
-**Conventions.** Use case IDs `UC-NNN` are stable and never reused. Requirement references `FR-<AREA>-NNN` follow the PRD's capability-area organization: `TEN` (tenancy/RBAC), `SEC` (secrets/security), `AUD` (audit), `CON` (connectors), `ING` (ingestion/sync), `ANA` (analytics/metrics), `AI` (agents/LLM), `RAG` (retrieval), `MCP` (MCP client/server), `RPT` (reports), `SIM` (simulation). All flows are tenant-scoped; Postgres RLS enforcement is an implicit precondition everywhere and is not repeated per use case. All mutating batch endpoints accept idempotency keys; all errors are RFC 7807 problem+json.
+**Conventions.** Use case IDs `UC-NNN` are stable and never reused. Requirement references `FR-NNN` / `NFR-NNN` cite `./PRD.md` section 5/6, which organizes functional requirements by capability area: connectors FR-001–FR-019, ingestion FR-030–FR-041, analytics FR-050–FR-062, dashboards FR-065–FR-074, AI agents FR-080–FR-092, RAG FR-095–FR-101, MCP FR-104–FR-108, reports FR-110–FR-118, admin/security/tenancy FR-113 and FR-120–FR-141. All flows are tenant-scoped; Postgres RLS enforcement is an implicit precondition everywhere and is not repeated per use case. All mutating batch endpoints accept idempotency keys; all errors are RFC 7807 problem+json.
 
 ## 1. Tenancy, security, and administration
 
@@ -21,7 +21,7 @@ Formal use cases for the Engineering Intelligence Platform (EIP). Actors are the
   - 3a. Tenant name collides → validation error; no partial creation.
   - 4a. IdP group mapping unresolvable → tenant created in `PENDING_ACCESS` state; local-account fallback offered.
 - **Postconditions:** Tenant active (or pending access); zero data visible to other tenants; audit trail present.
-- **Related requirements:** FR-TEN-001, FR-TEN-002, FR-TEN-005, FR-AUD-001.
+- **Related requirements:** FR-120, FR-121, FR-122, FR-123, FR-128, FR-129.
 - **Related agents/connectors:** none (platform core).
 
 ### UC-002 — Manage roles and permissions
@@ -38,7 +38,7 @@ Formal use cases for the Engineering Intelligence Platform (EIP). Actors are the
   - 3a. SoD violation → change rejected with the violated constraint named.
   - 4a. Actor attempts to remove the tenant's last `TENANT_ADMIN` → rejected.
 - **Postconditions:** Member's effective permissions updated everywhere (API and UI) within one request cycle.
-- **Related requirements:** FR-TEN-010, FR-TEN-011, FR-TEN-012, FR-AUD-002.
+- **Related requirements:** FR-120, FR-122, FR-123 (see also FEAT-004/FEAT-023 in `./FeatureCatalog.md` for custom-role composition and permission preview).
 - **Related agents/connectors:** none.
 
 ### UC-003 — Rotate a connector secret
@@ -56,7 +56,7 @@ Formal use cases for the Engineering Intelligence Platform (EIP). Actors are the
   - 3a. Test fails → rotation aborted; old version stays active; failure audited.
   - 5a. Emergency ("compromised") rotation → grace period skipped; running jobs using the old version are cancelled and rescheduled.
 - **Postconditions:** New secret active; old secret destroyed or pending destruction; UI shows only masked values throughout; rotation visible to `SECURITY_AUDITOR`.
-- **Related requirements:** FR-SEC-004, FR-SEC-005, FR-SEC-006, FR-AUD-003.
+- **Related requirements:** FR-113, FR-009, FR-123, NFR-040, NFR-042.
 - **Related agents/connectors:** any connector; no agents.
 
 ### UC-004 — Review the audit log
@@ -73,7 +73,7 @@ Formal use cases for the Engineering Intelligence Platform (EIP). Actors are the
   - 2a. Redacted prompt needed for an investigation → break-glass reveal requires a second approver; the reveal is itself audited.
   - 4a. Very large window → export chunked; UI reports progress.
 - **Postconditions:** No state changed except the audited fact of the review/export itself.
-- **Related requirements:** FR-AUD-001, FR-AUD-004, FR-AUD-005, FR-AI-020, FR-RPT-008.
+- **Related requirements:** FR-123, FR-081, FR-099, FR-107, NFR-042.
 - **Related agents/connectors:** Security Review agent (optional evidence-pack compilation).
 
 ## 2. Connectors and ingestion
@@ -94,7 +94,7 @@ Formal use cases for the Engineering Intelligence Platform (EIP). Actors are the
   - 3a. Validation/test failure → precise problem+json cause (auth, TLS, permission, unreachable); connector stays inactive.
   - 5a. Actor defers full sync → connector active in webhook-only mode with a visible "no backfill" warning.
 - **Postconditions:** Connector active with health status; secrets stored encrypted; sync scheduled.
-- **Related requirements:** FR-CON-001, FR-CON-002, FR-CON-003, FR-CON-007, FR-SEC-004.
+- **Related requirements:** FR-001, FR-008, FR-009, FR-011, FR-012, FR-017.
 - **Related agents/connectors:** all connectors; Configuration Assistant agent may guide form completion.
 
 ### UC-006 — Run initial full sync
@@ -113,7 +113,7 @@ Formal use cases for the Engineering Intelligence Platform (EIP). Actors are the
   - 3a. Unmappable record → parked in staging with a data-quality flag; Data Quality agent aggregates such records for review; sync continues.
   - Any-step worker crash → job re-leased; at-least-once redelivery is safe due to idempotent upserts.
 - **Postconditions:** Canonical model backfilled; checkpoints established for incremental sync; dashboards populated.
-- **Related requirements:** FR-ING-001, FR-ING-002, FR-ING-003, FR-ING-004, FR-CON-005.
+- **Related requirements:** FR-010, FR-016, FR-030, FR-031, FR-032, FR-033, FR-034, FR-035, FR-037.
 - **Related agents/connectors:** Data Ingestion agent (orchestration assistance), Data Quality agent.
 
 ### UC-007 — Incremental sync
@@ -131,7 +131,7 @@ Formal use cases for the Engineering Intelligence Platform (EIP). Actors are the
   - 1a. Webhook missed (source outage) → next scheduled incremental sync heals the gap from the checkpoint; webhooks are an optimization, never the source of truth.
   - 2a. Checkpoint invalidated by the source (e.g., project migration) → connector enters `RESYNC_REQUIRED`; admin approves a scoped re-backfill.
 - **Postconditions:** Freshness watermark per stream updated; dashboards reflect changes within the cadence SLO.
-- **Related requirements:** FR-ING-005, FR-ING-006, FR-ING-007, FR-CON-004.
+- **Related requirements:** FR-010, FR-012, FR-014, FR-015, FR-040, NFR-012.
 - **Related agents/connectors:** all connectors; Data Ingestion agent.
 
 ### UC-008 — Recover from sync failure
@@ -150,7 +150,7 @@ Formal use cases for the Engineering Intelligence Platform (EIP). Actors are the
   - 4a. Systemic normalizer bug → actor pauses the stream; after the fix deploys, bulk redrive from DLQ; no re-fetch from source needed because raw staging retains payloads.
   - 5a. Checkpoint corrupted → admin resets to a prior checkpoint; overlap is absorbed by dedup on `eventId`.
 - **Postconditions:** Stream healthy; DLQ drained or consciously parked; no duplicate canonical entities; interventions audited.
-- **Related requirements:** FR-ING-008, FR-ING-009, FR-ING-010, FR-AUD-002.
+- **Related requirements:** FR-011, FR-013, FR-038, FR-039, FR-123.
 - **Related agents/connectors:** Data Quality agent (failure pattern summarization).
 
 ## 3. Analytics and risk
@@ -171,7 +171,7 @@ Formal use cases for the Engineering Intelligence Platform (EIP). Actors are the
   - 2a. Underlying stream degraded → charts render with staleness banner linking to Connector Health (read-only).
   - Invariant: no view ranks named individuals; team-health metrics (load balance, review bottlenecks, knowledge concentration) render at team grain only.
 - **Postconditions:** Read-only; pinned views/snapshots saved to the actor's workspace.
-- **Related requirements:** FR-ANA-001, FR-ANA-002, FR-ANA-003, FR-ANA-015 (metric metadata), FR-TEN-011.
+- **Related requirements:** FR-050, FR-051, FR-052, FR-054, FR-055, FR-056, FR-057, FR-060, FR-065, FR-067, FR-068, FR-069, FR-074.
 - **Related agents/connectors:** Engineering Metrics agent (ad-hoc metric Q&A), Team Health agent.
 
 ### UC-010 — Review detected delivery risks
@@ -189,7 +189,7 @@ Formal use cases for the Engineering Intelligence Platform (EIP). Actors are the
   - 1a. Confidence below floor → risk shown in a separate "low confidence" section, never mixed silently with confident findings.
   - 3a. Risk on an Epic spanning teams outside actor's scope → visible in aggregate; disposition requires an actor scoped to all affected teams or the `TENANT_ADMIN`.
 - **Postconditions:** Dispositions persisted, audited, and reflected in reports; agent evaluation data enriched.
-- **Related requirements:** FR-ANA-020, FR-ANA-021, FR-AI-010, FR-AUD-002.
+- **Related requirements:** FR-053, FR-066, FR-087, FR-123.
 - **Related agents/connectors:** Delivery Risk agent, Validation agent.
 
 ## 4. AI, RAG, and MCP
@@ -211,7 +211,7 @@ Formal use cases for the Engineering Intelligence Platform (EIP). Actors are the
   - 4a. Validation failure → one bounded regeneration; persistent failure → artifact delivered as draft with flagged sections.
   - 6a. Budget exhausted mid-run → graceful truncation to a shorter template, flagged in the artifact.
 - **Postconditions:** Versioned artifact in the library; provenance and audit complete; duplicate submissions coalesced by idempotency key.
-- **Related requirements:** FR-RPT-001, FR-RPT-002, FR-RPT-004, FR-AI-001, FR-AI-005, FR-AI-020.
+- **Related requirements:** FR-080, FR-081, FR-086, FR-087, FR-088, FR-090, FR-110, FR-114, FR-115.
 - **Related agents/connectors:** the named generator agents plus RAG Retrieval, Validation, Report Composition.
 
 ### UC-012 — Schedule recurring report generation
@@ -228,7 +228,7 @@ Formal use cases for the Engineering Intelligence Platform (EIP). Actors are the
   - 3a. Run fails → retry with backoff; terminal failure notifies the schedule owner with the problem+json error.
   - 2a. Scope grant later revoked → schedule suspends with a clear reason instead of running with elevated rights.
 - **Postconditions:** Recurring artifacts accumulate with version history; costs attributable per schedule.
-- **Related requirements:** FR-RPT-005, FR-RPT-006, FR-RPT-007, FR-TEN-012.
+- **Related requirements:** FR-090, FR-112, FR-115, FR-116, FR-118, FR-122.
 - **Related agents/connectors:** Report Composition, Executive Summary, and any scheduled generator agent.
 
 ### UC-013 — Ingest documents into the RAG knowledge base
@@ -247,7 +247,7 @@ Formal use cases for the Engineering Intelligence Platform (EIP). Actors are the
   - 3a. Embedding model changed → mixed-model index blocked; system requires and offers a background re-embed job.
   - 4a. Source permission model drifts → refreshed on next incremental sync; the bounded staleness window is documented per corpus.
 - **Postconditions:** Corpus retrievable, cited, permission-aware, tenant-isolated; re-index pipeline active.
-- **Related requirements:** FR-RAG-001, FR-RAG-002, FR-RAG-003, FR-RAG-004, FR-RAG-006, FR-AUD-005.
+- **Related requirements:** FR-095, FR-096, FR-097, FR-098, FR-099, FR-100, FR-101.
 - **Related agents/connectors:** Confluence, Generic File/Document connectors; RAG Retrieval agent; Data Quality agent.
 
 ### UC-014 — Agent invokes an MCP tool
@@ -264,9 +264,9 @@ Formal use cases for the Engineering Intelligence Platform (EIP). Actors are the
 - **Alternate/exception flows:**
   - 2a. Capability not allow-listed or RBAC denies → invocation refused; agent proceeds without the tool and states the limitation in its output.
   - 3a. MCP server timeout/error → bounded retries; then degrade as 2a.
-  - Mirror case: an external MCP client calls EIP as MCP **server** → only explicitly allow-listed internal capabilities are exposed; same per-capability RBAC + audit applies (FR-MCP-005).
+  - Mirror case: an external MCP client calls EIP as MCP **server** → only explicitly allow-listed internal capabilities are exposed, deny-by-default; same tenant isolation, RBAC, and audit apply (FR-105, FR-106, FR-108).
 - **Postconditions:** Tool result used with citation; complete audit trail; no un-allow-listed capability ever reachable.
-- **Related requirements:** FR-MCP-001, FR-MCP-002, FR-MCP-003, FR-MCP-005, FR-AI-020.
+- **Related requirements:** FR-104, FR-105, FR-106, FR-107, FR-108, FR-088.
 - **Related agents/connectors:** any agent with MCP tools; commonly Incident Analysis, Delivery Risk, Configuration Assistant.
 
 ### UC-015 — Configure an LLM provider and model routing
@@ -283,7 +283,7 @@ Formal use cases for the Engineering Intelligence Platform (EIP). Actors are the
   - 1a. Provider test fails → registration saved as `INACTIVE`; nothing routes to it.
   - 2a. Fallback chain empty for an enabled agent → warning; agent jobs park `AWAITING_PROVIDER` when the primary is down.
 - **Postconditions:** Agents run against routed models within budgets; every subsequent call audited with model + cost.
-- **Related requirements:** FR-AI-002, FR-AI-003, FR-AI-004, FR-SEC-004.
+- **Related requirements:** FR-084, FR-085, FR-101, FR-113, FR-130, NFR-051.
 - **Related agents/connectors:** all agents; Configuration Assistant.
 
 ## 5. Evaluation
@@ -303,7 +303,7 @@ Formal use cases for the Engineering Intelligence Platform (EIP). Actors are the
   - 2a. Pack schema version mismatch → loader refuses with version details.
   - 3a. No LLM configured → agents degrade to template-only outputs with notice; metric evaluation unaffected.
 - **Postconditions:** Faithful evaluation environment; zero production contact; clean teardown.
-- **Related requirements:** FR-SIM-001, FR-SIM-002, FR-SIM-003, FR-CON-008.
+- **Related requirements:** FR-004, FR-019, FR-129.
 - **Related agents/connectors:** simulation mode of Jira/GitHub/SonarQube/CI connectors; all agents.
 
 ### UC-017 — Investigate data quality findings
@@ -319,7 +319,7 @@ Formal use cases for the Engineering Intelligence Platform (EIP). Actors are the
 - **Alternate/exception flows:**
   - 3a. Fix requires source-side change → finding parked with owner and revisit date.
 - **Postconditions:** Metric integrity restored; distortion window documented on affected metric freshness metadata.
-- **Related requirements:** FR-ING-011, FR-ANA-004, FR-CON-006.
+- **Related requirements:** FR-039, FR-041, FR-060, FR-061.
 - **Related agents/connectors:** Data Quality agent; any connector.
 
 ### UC-018 — Audit AI usage for a period (security review)
@@ -336,7 +336,7 @@ Formal use cases for the Engineering Intelligence Platform (EIP). Actors are the
   - 2a. Unapproved provider found → finding raised; `PLATFORM_ADMIN` deactivates it (UC-015 1a state) and the deactivation is audited.
   - 4a. Agent unavailable → manual export path from UC-004 remains sufficient; agent is assistive, never the only path.
 - **Postconditions:** Evidence pack archived; anomalies tracked to closure.
-- **Related requirements:** FR-AUD-004, FR-AUD-005, FR-AI-020, FR-MCP-003, FR-RAG-006.
+- **Related requirements:** FR-081, FR-099, FR-107, NFR-042, NFR-051.
 - **Related agents/connectors:** Security Review agent.
 
 ## 6. Use-case-to-persona traceability

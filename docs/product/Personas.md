@@ -19,6 +19,8 @@ EIP is explicitly **not** an individual-surveillance or stack-ranking tool. All 
 
 Roles are additive; a person may hold several (e.g., a Team Lead who is also a Release Manager). All roles are tenant-scoped except `PLATFORM_ADMIN`.
 
+Alignment with the platform role model (see FEAT-004/FEAT-023 in `./FeatureCatalog.md` and FR-120–FR-122 in `./PRD.md`): `PLATFORM_ADMIN` and `TENANT_ADMIN` are built-in roles; the remaining six ship as **role templates** composed from fine-grained permissions on top of the built-in `analyst`/`viewer` bases. Tenant admins may clone and adjust templates (permission preview supported) but cannot grant permissions they do not themselves administer. Persona-to-role mapping below always names the template; deployments may rename templates without affecting this document's traceability, because use cases in `./UseCases.md` reference personas, not role names.
+
 ## 2. Persona catalog
 
 ### 2.1 Platform Administrator — "Deniz"
@@ -29,6 +31,9 @@ Roles are additive; a person may hold several (e.g., a Team Lead who is also a R
 - **How EIP helps:** Single on-premise deployment (Docker Compose for pilot, Kustomize overlays for production); Connector SPI with `validate()`, `testConnection()`, `healthCheck()`, checkpointed `incrementalSync`; AES-256-GCM envelope-encrypted secrets with rotation and audited access; OpenTelemetry-based self-observability shipped as Grafana dashboards in `/infra/grafana`.
 - **Key screens/reports:** Admin Console (tenants, connectors, secrets, LLM providers, MCP registry), Connector Health dashboard, Sync Checkpoint browser, DLQ inspector, System Observability (Grafana), Audit Log viewer.
 - **Permissions:** `PLATFORM_ADMIN`.
+- **Usage pattern:** Intensive during install/upgrade windows; otherwise a daily 10-minute health scan of Connector Health and DLQ depth plus alert-driven interventions. Works in the Admin Console and Grafana, rarely in analytics dashboards.
+- **Representative quote:** "If it can't run inside our network with our keys, it doesn't run here at all."
+- **Key journeys & use cases:** J-01, J-07, J-09 (`./UserJourneys.md`); UC-001, UC-003, UC-005, UC-006, UC-008, UC-015, UC-016, UC-017 (`./UseCases.md`).
 - **Success criteria:** First sync from Jira+GitHub completes within the first working session; connector health is green or explains itself; secret rotation takes minutes and breaks nothing; upgrades apply Flyway migrations cleanly; air-gapped LLM answers queries with zero egress.
 
 ### 2.2 Engineering Manager — "Mira"
@@ -39,6 +44,9 @@ Roles are additive; a person may hold several (e.g., a Team Lead who is also a R
 - **How EIP helps:** Correlated flow metrics (velocity, throughput, cycle time, lead time, WIP, flow efficiency, blocked time, sprint predictability, scope churn) plus DORA metrics on one dashboard, each with purpose, formula, caveats/limitations, and gaming risks stated inline; the Delivery Risk agent flags at-risk Epics and dependency risk with explanations and source citations.
 - **Key screens/reports:** Delivery Health dashboard (multi-team), Sprint dashboard with drill-down to blocked WorkItems, Epic Delivery Risk view, Dependency map, scheduled weekly Delivery Health report (Report Composition agent).
 - **Permissions:** `ENGINEERING_MANAGER`.
+- **Usage pattern:** 15–30 minutes daily on the Delivery Health dashboard; deep drill-downs twice per sprint (mid-sprint and pre-review); weekly scheduled report consumed asynchronously.
+- **Representative quote:** "I don't need more charts — I need to know which of my twelve epics will actually be late, and why."
+- **Key journeys & use cases:** J-02; UC-009, UC-010, UC-011, UC-012.
 - **Success criteria:** Monthly status prep drops from a day to under an hour; ≥70% of flagged risks judged actionable; teams trust the metrics because caveats are visible; zero incidents of metrics being used to rank individuals.
 
 ### 2.3 Team Lead / Scrum Master — "Sam"
@@ -49,6 +57,9 @@ Roles are additive; a person may hold several (e.g., a Team Lead who is also a R
 - **How EIP helps:** Sprint and Kanban dashboards (Board, WorkflowState/WIP states, blocked time) refreshed by incremental sync and webhooks; the Sprint Review agent generates a review presentation (goals vs. outcomes, demo list, scope churn, carry-over) grounded via RAG in the team's actual WorkItems, PullRequests, and Deployments, with citations.
 - **Key screens/reports:** Team Sprint dashboard, Kanban flow view (cycle time scatter, WIP aging), Blocked Items list, generated Sprint Review presentation in the artifact library.
 - **Permissions:** `TEAM_LEAD`.
+- **Usage pattern:** Kanban flow view open during standup every morning; Sprint Review agent invoked once per sprint; blocked-items list checked before every planning session.
+- **Representative quote:** "The retro should argue about what we do next, not about what the numbers were."
+- **Key journeys & use cases:** J-03; UC-009, UC-011.
 - **Success criteria:** Sprint review prep under 30 minutes; generated deck needs only light editing; blocked-time trend visible and discussed in every retro; sprint predictability improves quarter over quarter.
 
 ### 2.4 Developer — "Arda"
