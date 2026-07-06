@@ -331,3 +331,34 @@ Streams flex: in Phase 0 the connector and analytics streams contribute to core 
 - **Scope control rules:** a story enters a phase only via the phase table; additions require an equal-size removal or an explicit phase-length change agreed by stream leads (recorded in the phase's change log). Cut stories move to the next phase's candidate list, never silently vanish. Estimates (S/M/L) are re-baselined once, at phase start.
 - **Leading indicators:** PR cycle time, CI duration vs. the 20-min budget, flaky-test count, and flag-debt count are reviewed monthly — the platform should eventually measure its own build (dogfooding via the GitHub/Generic CI/CD connectors from Phase 2 onward).
 - **Phase reviews:** every phase ends with the demo script above run live from `main` on a clean environment, plus a retro that feeds the next phase's risk list.
+
+## 12. Story lifecycle and definition of done
+
+Stories flow: `candidate → committed (in phase table) → in progress → in review → done`. A story is **done** only when all of the following hold — this is the story-level contract that makes the phase exit criteria achievable rather than aspirational:
+
+- [ ] Merged to `main` behind a feature flag if the vertical is incomplete (§4)
+- [ ] All quality gates from `../testing/TestingStrategy.md` §16 passed (unit, integration, contract, coverage ratchet)
+- [ ] Layer-specific artifacts exist: connector stories pass kit K1–K7; metric stories ship a golden case + registry definition; agent stories ship output schema + eval coverage; API stories update the committed OpenAPI spec
+- [ ] `/docs` updated in the same PR where behavior changed (docs-as-code, §4)
+- [ ] Observability included: new components emit metrics/traces/logs and, where operationally relevant, ship a Grafana panel or alert rule (`../operations/OperationsGuide.md` §4 grows with the system, not after it)
+- [ ] Demoable: the story's outcome can be shown in the phase demo script or a test run — "done but not demonstrable" is not done
+
+Estimates are set at phase planning (S/M/L per §1's definitions) and re-baselined only once, at phase start. A story that grows beyond L mid-flight is split, and the remainder re-enters as a candidate through scope control (§11).
+
+## 13. Cross-phase risk register
+
+Top standing risks tracked across the whole plan (phase-local risks live in each phase section):
+
+| Risk | Phase(s) most exposed | Mitigation | Early-warning trigger |
+|---|---|---|---|
+| Tenant isolation defect discovered late | All | RLS + isolation tests from Phase 0; E7 in every E2E run; security deep stage nightly | Any isolation test flake — treated as S1, never quarantined |
+| Event contract churn breaks consumers | 1–3 | Versioned JSON Schemas + compatibility CI (`../testing/TestingStrategy.md` §5.1) | Rising count of schema-version branches in consumers |
+| Metric trust collapse (one wrong number in a demo) | 2+ | Golden datasets as the single source of truth; caveats rendered inline; Validation Agent checks numeric fidelity in narratives | Golden expectation edited without analytics-owner review |
+| Local LLM quality below usefulness bar | 3–4 | Structured outputs + repair/reject; per-agent model routing; eval scores per model published; graceful AI degradation keeps core product valuable | Eval scores trending down on a model upgrade |
+| Connector long tail starves other streams | 2–5 | Kit + SPI bound each connector's cost; Generic REST/SQL/File as coverage backstop; connector stream staffed for the tail | Two consecutive phases where connector stories displace committed platform stories |
+| Compose/K8s drift ("works in demo, fails in prod") | 0–5 | Same images, same probes, same config surface; E2E runs on both from Phase 5 RC onward; SCC-compatible images from Phase 0 | Any K8s-only defect class appearing twice |
+| Plan overload (this document becomes fiction) | All | Burnup + scope control rules (§11); phase demos run from `main` on clean environments — reality checks that cannot be faked | Burnup scope line growing faster than done line for 3 consecutive weeks |
+
+## 14. Traceability
+
+Story IDs (`P<phase>-E<epic>-S<story>`) are the traceability spine: branch names and PR titles reference them; ADRs cite the stories that motivated them; phase demo scripts exercise them; and once the platform dogfoods itself (§11), its own WorkItem records for this repo map back to these IDs via `ExternalRef` — EIP tracking the building of EIP is the standing acceptance test of the whole design.
