@@ -221,3 +221,55 @@ Backend Gradle modules (see [ComponentModel.md](./ComponentModel.md) for C4 leve
 | Vector store (Qdrant) down | RAG retrieval only | VectorStore SPI health | Agents degrade to non-RAG context with explicit "citations unavailable" notice; if pgvector (in-DB), covered by PostgreSQL row above | Re-index checkpoint resumes incremental indexing |
 
 Backpressure principles: consumers pull at their own rate (Kafka), producers are bounded by outbox + topic retention, sync jobs are paced by per-connector rate limiters, and agent/report jobs are budget-capped. Overload manifests as measured lag — never as cascading failure. See [DataFlow.md](./DataFlow.md) §10 for per-flow latency budgets.
+
+## 10. Runtime and Deployment View (Summary)
+
+Deployment detail lives in [DeploymentModel.md](./DeploymentModel.md); the architectural essentials:
+
+| Topology | Composition | Intended use |
+|----------|-------------|--------------|
+| Compose (dev/demo) | 1× `eip-app`, 1× `eip-workers`, single-node PostgreSQL/Redis/Kafka/MinIO/Keycloak, OTel Collector + Prometheus + Grafana | `/infra/docker-compose`; Phase 0 dev stack, POCs, simulation data packs |
+| K8s small | 2× `eip-app`, 2× `eip-workers` (all pipelines), HA infra services | Up to ~10 tenants / 500 engineers |
+| K8s scaled | 3+× `eip-app`, dedicated worker pools per pipeline (`workers.pipelines=ingestion`, `=analytics`, `=ai`, …), partitioned/replicated Kafka, optional Qdrant + GPU-backed Ollama/vLLM nodes | Full scale envelope (D3); OpenShift overlays in `/infra/kubernetes` |
+
+Runtime interaction summary: the SPA talks only to `eip-app`; `eip-app` talks to PostgreSQL/Redis synchronously and to everything else via Kafka; `eip-workers` owns all Kafka consumption; optional Python AI workers attach exclusively at the `eip.ai.jobs`/`eip.ai.results` seam. There are no synchronous calls from `eip-app` into `eip-workers` — the two deployables share a database and a broker, never a request path.
+
+## 11. Quality Attribute Scenarios (Acceptance Criteria)
+
+These scenarios make the drivers testable. Each is verified by automated tests or operational drills before GA (Phase 5).
+
+**Tenancy isolation (D4)**
+- Given two tenants A and B with overlapping data shapes, When any API request or agent/RAG query executes in tenant A's context, Then zero rows, chunks, artifacts, or cache entries belonging to B are readable — enforced even if application-level filters are removed (RLS test suite runs with filters deliberately disabled).
+- Given a Kafka consumer processing tenant B's event, When it writes canonical or read-model rows, Then RLS binding from the envelope `tenantId` restricts writes to B.
+
+**Partial failure (D5)**
+- Given Jira is unreachable for 2 hours, When users open dashboards, Then all pages load with last-synced data and a staleness indicator; no 5xx responses are attributable to the outage.
+- Given Kafka is down for 15 minutes, When mutations occur via the API, Then domain events accumulate in `outbox_events` and are fully published within 5 minutes of broker recovery, with zero event loss (verified by envelope `eventId` reconciliation).
+- Given a poison message in any consumer group, When retries are exhausted, Then the message is in `<topic>.<group>.dlq` within the bounded retry window and the consumer group's lag continues to drain past it.
+
+**Air gap (D2)**
+- Given an installation with no outbound internet route, When a Sprint Review report is generated using Ollama, Then the run completes and no component attempts an external network call (verified by egress-deny network policy in the air-gap test profile).
+
+**Scale (D3)**
+- Given sustained 1,000 domain events/s for 1 hour, When `eip-workers` runs at the scaled topology, Then p95 event-to-read-model freshness stays ≤ 30 s and dashboard API p95 stays ≤ 800 ms uncached (see [DataFlow.md](./DataFlow.md) §10).
+- Given consumer lag exceeding threshold, When operators double worker replicas, Then partition rebalancing completes and lag drains without manual intervention.
+
+**Auditability (D7)**
+- Given any mutating API call, RBAC change, secret access, or LLM invocation, When it completes (success or failure), Then a corresponding `audit_log` entry exists with actor, tenant, action, outcome, and `traceparent` — and for LLM calls: model, tokens, cost, latency, redacted prompt.
+
+**Evolvability (D8)**
+- Given the Spring Modulith verification test suite, When any module gains a dependency outside §5's allowed set, Then the build fails.
+
+## 12. Architecture Conformance Checklist
+
+Checklist applied in design and code review for every feature:
+
+- [ ] New cross-module interaction uses an exported `api` interface or a Kafka topic from [../engineering/EventModel.md](../engineering/EventModel.md) — never another module's tables.
+- [ ] Every new tenant-scoped table has `tenant_id`, an RLS policy, and a Flyway migration; time-series tables are partitioned.
+- [ ] Every new Kafka message uses the standard envelope, is keyed `tenantId+entityId`, and has a DLQ + replay story; its consumer is idempotent (dedup on `eventId`).
+- [ ] Every outbound call (connector, LLM, MCP) has a rate limiter, retry with exponential backoff + jitter, and a circuit breaker; timeouts are explicit.
+- [ ] Every new metric has a `MetricDefinitionCatalog` entry: purpose, formula, inputs, grain, caveats/limitations, gaming risks; team-level grain only for people-adjacent metrics.
+- [ ] Secrets flow through `SecretVault` only; no plaintext in config, logs, or Kafka payloads.
+- [ ] New API endpoints: `/api/v1`, OpenAPI-documented, cursor pagination, RFC 7807 errors, idempotency keys on mutating batch endpoints.
+- [ ] New long-running work is a worker-side consumer, not an API-thread task; it emits OTel spans propagating `traceparent`.
+- [ ] Degradation behavior for the feature's failure modes is documented in §9 or [DataFlow.md](./DataFlow.md) before merge.
