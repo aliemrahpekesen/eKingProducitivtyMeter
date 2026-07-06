@@ -170,6 +170,21 @@ Deny-by-default: a chunk is returned only if the caller's effective permissions 
 - **Scheduling:** per-source re-index schedules (cron expressions, admin-configured) for sources without reliable change feeds; a full-corpus verification pass (hash sweep) runs on a slower schedule to catch missed events. Manual re-index (per source, per space/project/repo, or full) is available in the admin UI with progress tracking; all re-index operations are audited.
 - **Backpressure:** indexing consumers honor Redis-based rate limits per tenant so bulk re-indexing cannot saturate embedding providers used by interactive agent runs.
 
+Example per-source re-index configuration (admin-managed, JSON Schema validated like all platform config):
+
+```json
+{
+  "sourceId": "confluence-main",
+  "changeFeed": "webhook+incremental",
+  "incrementalCron": "*/15 * * * *",
+  "verificationSweepCron": "0 3 * * 0",
+  "tombstoneRetentionDays": 30,
+  "chunking": { "profile": "confluence-default", "overrides": { "maxTokens": 600, "overlapTokens": 60 } },
+  "priority": "NORMAL",
+  "rateLimits": { "embedChunksPerMinute": 1500 }
+}
+```
+
 ## 11. Retrieval API
 
 Internal API consumed by the RAG Retrieval Agent, the ToolRegistry (`ragSearch`, `ragFetchChunk`), and the MCP server's citation capability.
@@ -189,6 +204,14 @@ ragSearch(request):
 - **Re-ranking option:** an optional local cross-encoder re-ranker (ONNX; or an LLM-scored re-rank through the provider SPI) reorders the fused top-50 before final cut. Off by default for latency; recommended for report-generation runs where quality dominates.
 - **Top-k + MMR:** Maximal Marginal Relevance diversification over the candidate pool avoids returning five near-identical chunks of one document; `lambda` balances relevance vs. diversity.
 - `ragFetchChunk(chunkId)` returns full chunk text + neighbors (previous/next chunk of the same document) for context expansion, subject to the same ACL checks.
+
+Error contract: authorization failures, unknown chunk IDs, and store outages return typed structured errors (RFC 7807 style internally), never empty results masquerading as "no matches" — agents must be able to distinguish "nothing relevant exists" from "retrieval failed", because the two lead to different output language (absence of evidence vs. sources unavailable).
+
+Query pre-processing performed by the API (deterministic, before any embedding call):
+
+1. Identifier extraction — issue keys (`ABC-123`), repo/service names, and metric keys are detected and boosted in the keyword leg.
+2. Language normalization and stop-word handling delegated to Postgres FTS configuration (per-tenant language setting).
+3. Optional query decomposition is *not* done here — that is the RAG Retrieval Agent's LLM step (see `AgentArchitecture.md` Section 5.14); the API executes exactly the query it is given, keeping it deterministic and testable.
 
 ## 12. Citation Contract
 

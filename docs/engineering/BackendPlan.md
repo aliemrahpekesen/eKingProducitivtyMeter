@@ -1,6 +1,8 @@
 # Backend Implementation Plan
 
-This document is the implementation plan for the Engineering Intelligence Platform (EIP) backend: a Java 21 / Spring Boot 3.x **modular monolith following Spring Modulith conventions**, built as a Gradle multi-module project under `/backend`, with a separately deployable async worker runtime (`eip-workers`). Modules are designed to be extractable to services later. See `../architecture/DomainModel.md` for entity definitions, `APIDesign.md` for the REST surface, `../testing/TestingStrategy.md` for the full test strategy, and `../infrastructure/LocalDevelopment.md` for the local run story.
+This document is the implementation plan for the Engineering Intelligence Platform (EIP) backend: a Java 21 / Spring Boot 3.x **modular monolith following Spring Modulith conventions**, built as a Gradle multi-module project under `/backend`, with a separately deployable async worker runtime (`eip-workers`). Modules are designed to be extractable to services later.
+
+Sibling documents of record: `../architecture/DomainModel.md` (entities), `APIDesign.md` (REST surface), `EventModel.md` (Kafka topics, envelope, consumer conventions), `DatabasePlan.md` (schema, RLS, Flyway, partitioning), `ConnectorFramework.md` (Connector SPI detail), `../testing/TestingStrategy.md` (test strategy), `../infrastructure/LocalDevelopment.md` (local run story). Where this plan summarizes one of those areas, the sibling document is authoritative.
 
 ## 1. Gradle multi-module layout
 

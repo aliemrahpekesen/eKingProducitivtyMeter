@@ -70,6 +70,9 @@ Alignment with the platform role model (see FEAT-004/FEAT-023 in `./FeatureCatal
 - **How EIP helps:** Team-level review bottleneck and knowledge concentration (bus factor) signals — explicitly anti-toxic-ranking, aggregate-only; Documentation and Release Notes agents remove writing toil; every metric page states its limitations and gaming risks, which builds trust.
 - **Key screens/reports:** Team Kanban flow view, PR/review flow dashboard (team aggregate), Quality dashboard (coverage, code smells, quality gate status), generated Release Notes and Documentation artifacts.
 - **Permissions:** `MEMBER`.
+- **Usage pattern:** Infrequent and pull-based — visits when the team discusses flow in a retro, when a generated artifact mentions their service, or to sanity-check a metric definition. Adoption is won or lost on trust, not features.
+- **Representative quote:** "Show me the formula and what it can't tell you — then I'll believe the chart."
+- **Key journeys & use cases:** consumer within J-02/J-03 outcomes; UC-009, UC-011 (as report consumer).
 - **Success criteria:** Can verify no individual-ranking view exists; review wait time drops after the team acts on bottleneck data; release notes for their service are generated, accurate, and cite the underlying PullRequests.
 
 ### 2.5 Product Manager — "Leyla"
@@ -79,7 +82,10 @@ Alignment with the platform role model (see FEAT-004/FEAT-023 in `./FeatureCatal
 - **Pain points today:** Roadmap dates are set by gut feel; slippage is discovered late; dependency risk across teams is invisible until it bites.
 - **How EIP helps:** Epic delivery risk and project delay prediction with stated uncertainty; scope churn tracking per Sprint and Epic; Dependency entities correlated across teams; the Executive Summary and Report Composition agents turn this into stakeholder-ready narrative with citations.
 - **Key screens/reports:** Roadmap/Initiative view with per-Epic risk badges, Scope Churn report, Dependency risk view, on-demand Epic status narrative.
-- **Permissions:** `ENGINEERING_MANAGER` (metric/risk read + report generation; no admin permissions).
+- **Permissions:** `ENGINEERING_MANAGER` template (metric/risk read + report generation; no admin permissions).
+- **Usage pattern:** Weekly roadmap review against the risk view; ad-hoc Epic status narratives before stakeholder meetings; scope churn checked at every sprint boundary.
+- **Representative quote:** "A date without a confidence level is a promise I can't keep."
+- **Key journeys & use cases:** J-02 (risk drill-down variant); UC-009, UC-010, UC-011.
 - **Success criteria:** Slippage flagged at least one sprint earlier than today; roadmap conversations reference shared data; stakeholder updates generated in minutes.
 
 ### 2.6 Release Manager — "Jonas"
@@ -90,6 +96,9 @@ Alignment with the platform role model (see FEAT-004/FEAT-023 in `./FeatureCatal
 - **How EIP helps:** Release readiness score composed from quality (QualityGate status, coverage, escaped defects, bug aging, security finding aging), flow, and CI/CD signals with drill-down to evidence; the Release Notes agent composes notes from PullRequests, WorkItems, and Deployments in the Release scope, stored as a GeneratedReport with full provenance.
 - **Key screens/reports:** Release Readiness dashboard, Release detail view (linked Builds, Pipelines, Deployments, Artifacts, Environments), generated Release Notes, go/no-go evidence export.
 - **Permissions:** `RELEASE_MANAGER`.
+- **Usage pattern:** Cyclical, peaking in the week before each Release: daily readiness checks, one release-notes generation per release, evidence export at go/no-go. Quiet between cycles.
+- **Representative quote:** "I sign the go decision — so every red and green on that screen has to trace to evidence."
+- **Key journeys & use cases:** J-04; UC-009, UC-010, UC-011, UC-012.
 - **Success criteria:** Go/no-go meeting runs off one screen; release notes generation under 5 minutes with >90% of entries needing no edit; audit trail satisfies compliance review.
 
 ### 2.7 SRE / Ops Engineer — "Priya"
@@ -99,7 +108,10 @@ Alignment with the platform role model (see FEAT-004/FEAT-023 in `./FeatureCatal
 - **Pain points today:** "What changed?" during an incident means grepping CI logs; post-incident reviews lack linked evidence; ops signals never reach sprint planning.
 - **How EIP helps:** Kubernetes/OpenShift, Prometheus, Grafana, and OpenTelemetry (OTLP intake) connectors correlate Deployment, Incident, Alert, LogReference, and TraceReference entities on a timeline; the Incident Analysis agent drafts impact analyses citing the correlated data; DORA and ops metrics appear beside flow metrics so operability influences planning.
 - **Key screens/reports:** Ops dashboard (incident frequency/impact, SLO health, alert noise), Incident timeline view with deployment correlation, Service detail view, generated Incident Analysis reports.
-- **Permissions:** `TEAM_LEAD` scope over owned Services plus `agent:invoke` for Incident Analysis (typically granted via an ops team role binding).
+- **Permissions:** `TEAM_LEAD` scope over owned Services plus `agent:invoke` for Incident Analysis (granted via an ops role template cloned from `TEAM_LEAD`).
+- **Usage pattern:** Alert-driven during incidents (timeline view under time pressure, often at night); weekly SLO/alert-noise review; monthly operability readout to Engineering Managers.
+- **Representative quote:** "At 2 a.m. I have one question: what changed? Answer that fast and you've earned your keep."
+- **Key journeys & use cases:** J-06; UC-005 (ops connectors, with the admin), UC-009, UC-011, UC-014.
 - **Success criteria:** "What changed before this incident" answered in under a minute; MTTR trend visible per Service; alert-noise data drives at least one alert-tuning action per quarter.
 
 ### 2.8 CISO / Security Officer — "Helena"

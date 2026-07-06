@@ -189,7 +189,7 @@ Event taxonomy (category → representative events):
 
 Properties:
 
-- **Schema.** Every event: `auditId (UUIDv7), occurredAt, tenantId, actor {type: USER|SERVICE_TOKEN|WORKER|AGENT, id}, category, event, target {type, id}, outcome, traceId, details (redacted)`. `traceId` links audit events to distributed traces (`../architecture/ObservabilityModel.md` §9).
+- **Schema.** Every event: `auditId (UUIDv7), occurredAt, tenantId, actor {type: USER|SERVICE_TOKEN|WORKER|AGENT, id}, category, event, target {type, id}, outcome, traceId, details (redacted)`. `traceId` links audit events to distributed traces (`../architecture/ObservabilityModel.md` §10).
 - **Tamper evidence via hash chaining.** Each audit record stores `prevHash` and `hash = SHA-256(prevHash || canonical(record))`, chained per tenant partition; a scheduled verifier job re-walks chains and emits `eip_job_failures_total{job="audit-verify"}` on mismatch; periodic chain-head anchors are written to object storage under WORM/object-lock where available. Audit tables accept only INSERT for application roles (no UPDATE/DELETE grants).
 - **Retention and access.** Default 25 months, tenant-extendable, exportable (NDJSON) for SIEM shipping via the Loki/OTLP pipeline or file export. Readable by AUDITOR and TENANT_ADMIN (tenant scope) and PLATFORM_ADMIN (platform events); audit reads are themselves audited.
 

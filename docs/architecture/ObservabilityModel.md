@@ -131,7 +131,7 @@ sequenceDiagram
 - **Sampling policy.** Head sampling defaults: API traffic 10% (parent-based), background sync spans 1–10% by volume tier. **Always-on (100%)**: agent runs and LLM calls (cost/latency accountability), report jobs, DLQ handling, migrations, secret/KMS operations, and any request that ends in 5xx (tail-sampling rule in the OTel Collector when Tempo is deployed). Sampling rates are env-configurable per `../architecture/DeploymentModel.md` §11.
 - **Trace backend optionality.** Tempo is optional; without it, traces export nowhere but `traceId` still flows through logs, metrics exemplars, and audit events, so correlation survives in reduced form.
 
-## 4. Structured Logging
+## 5. Structured Logging
 
 All logs are structured JSON on stdout (12-factor), shipped by the collector (Loki optional). Schema:
 
@@ -154,7 +154,7 @@ Redaction rules (enforced by a logging filter, tested in CI):
 - No raw payloads from `raw_*` staging; log payload digests + sizes instead.
 - Stack traces allowed at `ERROR`, with message-part redaction applied.
 
-## 5. Dashboards Shipped in `/infra/grafana`
+## 6. Dashboards Shipped in `/infra/grafana`
 
 Provisioned automatically in all topologies; JSON dashboards live in `/infra/grafana` and are versioned with the release.
 
@@ -168,7 +168,7 @@ Provisioned automatically in all topologies; JSON dashboards live in `/infra/gra
 | **Database & Cache** | Postgres connections vs pool max, query latency (pg_stat_statements top-N), replication lag, table/index bloat, WAL rate, vacuum activity, pgvector index size, Redis hit ratio per cache (`eip_cache_hit_ratio`), Redis memory/evictions, Redisson lock wait times |
 | **Report Jobs** | Report jobs by outcome and type, generation duration p95 per type, queue depth on `eip.reports.jobs`, success-rate SLO gauge, artifact storage growth, failed-job table with `traceId` links |
 
-## 6. Alerting Rules
+## 7. Alerting Rules
 
 Prometheus rules ship in `/infra/kubernetes` (PrometheusRule) and `/infra/docker-compose` (rules file). Every alert carries a `runbook` annotation pointing at `../operations/OperationsGuide.md` anchors.
 
@@ -197,7 +197,7 @@ Prometheus rules ship in `/infra/kubernetes` (PrometheusRule) and `/infra/docker
 
 Severity policy: `critical` pages on-call; `warning` goes to the operations channel; `info` is dashboard-only. Security-tagged alerts additionally route to the security channel per `../architecture/SecurityModel.md` §14.
 
-## 7. SLOs for the Platform Itself
+## 8. SLOs for the Platform Itself
 
 SLOs are measured from the metrics above, evaluated over a rolling 30 days, with multi-window burn-rate alerting (fast 1h/5m at 14×, slow 6h/30m at 6×). Targets shown are small-production defaults; enterprise deployments may raise them (see `../architecture/DeploymentModel.md` §9).
 
@@ -211,7 +211,7 @@ SLOs are measured from the metrics above, evaluated over a rolling 30 days, with
 
 Error-budget policy: when a budget is exhausted, feature rollout to that deployment pauses in favor of reliability work; budget burn is visible on the System Health dashboard and reported in the operations review. The freshness SLO deliberately excludes connector-target outages (tracked separately via `eip_connector_health`) — EIP cannot be fresher than the tool it reads.
 
-## 8. Health Check Endpoints
+## 9. Health Check Endpoints
 
 Spring Boot Actuator-based, wired to Kubernetes probes for every deployable (`eip-app` and each `eip-workers` profile):
 
@@ -224,7 +224,7 @@ Spring Boot Actuator-based, wired to Kubernetes probes for every deployable (`ei
 
 Deep health is the source for the `eip_connector_health` gauge and the System Health dashboard status row. LLM and connector probes are cached (default 60s) so health polling never becomes load on external systems.
 
-## 9. Correlation of Audit Events with Traces
+## 10. Correlation of Audit Events with Traces
 
 Every audit event (see `../architecture/SecurityModel.md` §11) records the active `traceId`. This yields a two-way join:
 
@@ -234,11 +234,11 @@ Every audit event (see `../architecture/SecurityModel.md` §11) records the acti
 Rules that make this reliable:
 
 1. Audit writes happen inside the active span context; if no context exists (rare batch paths), a root span is created first so `traceId` is never `-` for auditable actions.
-2. Auditable flows are always-sampled (§3): traces backing audit events are never dropped by head sampling.
+2. Auditable flows are always-sampled (§4): traces backing audit events are never dropped by head sampling.
 3. Metrics exemplars (where the backend supports them) attach `traceId` to latency histogram samples, letting Grafana panels deep-link from a spike to a representative trace, and from there to audit.
 4. Retention alignment: trace retention (default 14 days) is shorter than audit retention (25 months) by design; the audit record remains the durable anchor and stores enough context (`actor`, `target`, `details`) to stand alone after traces expire.
 
-## 10. Acceptance Criteria
+## 11. Acceptance Criteria
 
 - [ ] Given any request to `/api/v1`, when it completes, then `eip_api_request_duration_seconds` is observed with route-template labels and the response carries the trace context header.
 - [ ] Given a webhook-ingested Jira event, when its ingestion completes, then a single trace exists spanning webhook intake → raw staging → normalizer → `eip.domain.workitem` publish → analytics consume, connected via `traceparent` Kafka headers.
