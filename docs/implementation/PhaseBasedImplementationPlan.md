@@ -233,6 +233,8 @@ Streams flex: in Phase 0 the connector and analytics streams contribute to core 
 
 **Technical milestones:** M3.1 same prompt answered by Ollama and vLLM through the SPI with routing/fallback; M3.2 RAG answer with correct citations and proven tenant isolation; M3.3 first Sprint Review artifact passes Validation Agent; M3.4 eval harness in nightly CI.
 
+**Integration points:** first LLM providers (Ollama, vLLM) via LangChain4j behind the SPI; pgvector in anger (VectorStore SPI, with Qdrant compatibility verified once); `eip.ai.jobs`/`eip.ai.results` and `eip.reports.jobs` topics go live; report exports land in MinIO; the optional Python AI worker path (isolated behind Kafka/REST) is exercised by one reference worker to prove the seam.
+
 **Deliverables:** LLM SPI + providers; RAG pipeline + retrieval; agent runtime; three agents + Validation Agent; report engine + artifact library; eval harness + golden prompt sets; AI operations sections feeding `../operations/OperationsGuide.md` §9 T3.
 
 **Exit criteria:**
@@ -270,6 +272,8 @@ Streams flex: in Phase 0 the connector and analytics streams contribute to core 
 
 **Technical milestones:** M4.1 all 18 canonical agents invocable with schema-validated outputs; M4.2 agent uses an external MCP tool under RBAC + audit; M4.3 external MCP client consumes an EIP-exposed capability; M4.4 scheduled weekly report delivered via notification channel unattended.
 
+**Integration points:** MCP protocol in both directions (enterprise MCP servers as tools; EIP as MCP server); SMTP and chat-webhook endpoints for notifications; presentation/PDF rendering toolchain inside `eip-reports`; scheduler drives `eip.reports.jobs` from tenant-configured crons.
+
 **Deliverables:** full agent suite with evals; MCP client + server with capability registry; presentation/diagram/exec outputs; scheduler + notifications; remaining persona journeys automated in Playwright.
 
 **Exit criteria:**
@@ -304,6 +308,8 @@ Streams flex: in Phase 0 the connector and analytics streams contribute to core 
 ### 10.2 Milestones, deliverables, exit criteria, demo
 
 **Technical milestones:** M5.1 reference K8s deployment survives node kill with zero data loss; M5.2 timed restore drill inside RTO; M5.3 rolling upgrade under load with < 20% interactive degradation; M5.4 all canonical connectors kit-certified.
+
+**Integration points:** Kubernetes/OpenShift primitives (Kustomize overlays, probes, NetworkPolicies, SCC), pgBackRest and WAL archiving, the remaining tool APIs (Confluence, Bitbucket, Artifactory, Kubernetes/OpenShift APIs, Docker Registry, Grafana, OTLP intake), and enterprise IdPs beyond Keycloak (AD FS/Azure AD/Okta) verified against the OIDC abstraction.
 
 **Deliverables:** GA K8s/OpenShift manifests; HA reference architecture; offline bundle; performance + security certification reports; automated restore drill; complete connector catalog; final documentation pass across `/docs`.
 
