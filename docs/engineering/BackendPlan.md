@@ -187,6 +187,19 @@ resilience4j:
 - Kafka listener concurrency maps to partition count; processing inside a partition is single-threaded to preserve per-key ordering (`tenantId+entityId`). Full consumer conventions (offset management, poison-message headers, lag SLOs, backpressure) are in `EventModel.md` §8–§12.
 - Workers are horizontally scalable per role; the only stateful coordination is Quartz's JDBC store and Redisson locks. Graceful shutdown drains in-flight Kafka batches and pauses Quartz triggers before SIGTERM deadline (30s).
 
+### 9.1 Kafka topic ownership
+
+Producers and consumer groups per topic (catalog and retention in `EventModel.md` §3):
+
+| Topic | Produced by | Consumed by (groups) |
+|---|---|---|
+| `eip.raw.<connector>` | `eip-connectors` (via ingestion outbox path) | `eip.ingestion.normalize-*` |
+| `eip.domain.workitem` / `eip.domain.scm` / `eip.domain.cicd` / `eip.domain.quality` / `eip.domain.ops` | `eip-ingestion` normalizers | `eip.analytics.*`, `eip.ai.rag-index`, `eip.reports.triggers` |
+| `eip.analytics.metrics` | `eip-analytics` engines | dashboard cache warmers, `eip.reports.triggers` |
+| `eip.ai.jobs` / `eip.ai.results` | `eip-app` (run creation) / `eip-ai` executors | `eip.ai.executor` / `eip-app` SSE bridge, `eip.reports.compose` |
+| `eip.reports.jobs` | `eip-app`, Quartz schedules | `eip.reports.render` |
+| `<topic>.<group>.dlq` | consumer error handlers | DLQ inspection/replay API (`APIDesign.md` §4.3) |
+
 ## 10. Error handling taxonomy
 
 Sealed hierarchy in `com.eip.core.error`, mapped centrally to RFC 7807 problem+json by a single `@RestControllerAdvice` in `eip-app`:
@@ -259,7 +272,20 @@ Local development runs the API app (profile `local`) and one combined worker aga
 | 7. Package | Boot jars for `eip-app` + `eip-workers`, multi-arch container images, SBOM (CycloneDX) | Reproducible image labels (git SHA) |
 | 8. Deploy demo | Compose-based demo stack, seed simulation data, smoke tests + Playwright E2E (`FrontendPlan.md` §10) | Smoke green |
 
-## 17. Definition of done — backend stories
+## 17. Phase mapping
+
+Backend workstream per the canonical roadmap (`../vision/Vision.md`):
+
+| Phase | Backend deliverables from this plan |
+|---|---|
+| Phase 0 – Foundations | Gradle multi-module skeleton + convention plugins (§1), profiles (§2), Modulith verification harness (§3), Flyway baseline + RLS (`DatabasePlan.md`), tenancy/RBAC/audit in `eip-tenancy`, secrets SPI, error taxonomy + problem+json advice (§10), OpenAPI pipeline, observability wiring (§12), CI stages 1–7 (§16) |
+| Phase 1 – Ingestion core | Connector SPI + Jira/GitHub/simulation connectors, sync engine + checkpoints, outbox + poller (§6), Kafka consumers + DLQ (§9), normalized model v1 |
+| Phase 2 – Analytics | Metric engine + definitions registry, JdbcClient query side (§5), flow/DORA/quality metrics, metric query endpoint, GitLab/SonarQube/CI-CD/Prometheus connectors, Quartz rollup jobs (§8) |
+| Phase 3 – AI core | LLM provider SPI + routing, RAG pipeline (pgvector), Sprint Review / Release Notes / Delivery Risk agents, report engine + artifact library, LLM audit |
+| Phase 4 – Full agent suite | Remaining canonical agents, MCP client/server, pptx/diagram outputs, schedules + notification channels |
+| Phase 5 – Enterprise hardening | HA workers, performance passes on analytics SQL, backup/restore hooks, remaining connectors, upgrade paths |
+
+## 18. Definition of done — backend stories
 
 A backend story is done only when all of the following hold:
 

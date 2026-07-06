@@ -131,6 +131,19 @@ interface WidgetConfig {
 - **Global filters:** time range, team(s), sprint — held in typed router search params (shareable URLs), applied to every widget query; widgets may override locally. Changing a global filter invalidates only affected query keys.
 - **Data flow:** each widget issues one `POST /metrics/query` (batched per dashboard where metric grain and filters coincide) through a `useMetricQuery(request)` hook; responses cached by structural request key.
 - **Drill-down pattern (metric → work items):** every flow/quality point or heatmap cell carries its query context (time bucket, group, filters); clicking navigates to `/work/items` with equivalent filter search params so users always land on the evidence behind a number. Risk widgets drill to the explanation drawer first, then to items.
+
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant W as Widget (ECharts)
+  participant R as Router
+  participant API as /api/v1
+  U->>W: click cycle-time point (team Atlas, week of May 11)
+  W->>R: navigate /work/items?teamId=...&from=...&to=...&state=DONE
+  R->>API: GET /work-items?teamId&from&to&state
+  API-->>R: Page<WorkItem>
+  R-->>U: evidence table + detail drawer with ExternalRef deep links
+```
 - **Charts:** single ECharts theme generated from design tokens; shared time axis sync per dashboard; sample-size and uncertainty warnings from `MetricQueryResponse.warnings` render as chart annotations, never silently dropped.
 
 ## 5. Real-time updates
@@ -150,13 +163,34 @@ const { status } = useSse(run.eventsUrl, {
 
 ## 6. Forms strategy
 
-- **JSON-Schema-driven forms** for connector, LLM provider, and MCP server configuration: the backend serves each type's JSON Schema (`APIDesign.md` §4.2, §4.7, §4.9); a `SchemaForm` renderer maps schema types/formats to Mantine inputs (string→TextInput, enum→Select, `format: eip-secret`→masked SecretInput write-only, arrays→repeatable groups, `oneOf`→discriminated sections), applies schema validation client-side, and re-renders server-side violations (problem+json `errors[]`) onto fields. New connectors require zero frontend code.
+- **JSON-Schema-driven forms** for connector, LLM provider, and MCP server configuration: the backend serves each type's JSON Schema (`APIDesign.md` §4.2, §4.7, §4.9); a `SchemaForm` renderer applies schema validation client-side and re-renders server-side violations (problem+json `errors[]`) onto fields. New connectors require zero frontend code.
+
+| JSON Schema construct | Rendered as |
+|---|---|
+| `type: string` | `TextInput` (`format: uri` adds protocol validation; `format: duration` a duration input) |
+| `type: string, format: eip-secret` | Masked `SecretInput`, write-only; existing value shown as `•••• last4`, "replace" affordance |
+| `enum` / `const` | `Select` / read-only badge |
+| `type: integer|number` with bounds | `NumberInput` with min/max/step |
+| `type: boolean` | `Switch` with description |
+| `type: array` of objects | Repeatable group with add/remove/reorder |
+| `oneOf` + discriminator | Segmented control switching sub-sections |
+| `x-eip-advanced: true` | Collapsed "Advanced" section |
+| `description`, `examples` | Field help popover with example values |
 - Hand-built forms (Mantine `use-form` + zod schemas derived from generated types) only for non-schema resources: teams, roles, dashboards, report scheduling.
 - All config-resource forms carry the ETag through edit sessions and handle 412 with a "reload and merge" prompt.
 
 ## 7. State management rules
 
-1. **Server state lives in TanStack Query only.** Query keys are `[area, resource, params]`; mutations invalidate by key prefix; no copying API data into other stores.
+1. **Server state lives in TanStack Query only.** Query keys are `[area, resource, params]` built by a central `qk` factory; mutations invalidate by key prefix; no copying API data into other stores.
+
+| Query key | Example | Invalidated by |
+|---|---|---|
+| `qk.connectors.list(params)` | `["connectors","list",{type:"JIRA"}]` | connector create/update/delete, sync completion |
+| `qk.connectors.health(id)` | `["connectors","health",id]` | 30s `refetchInterval` on monitor screens |
+| `qk.metrics.query(request)` | `["metrics","query",structuralHash]` | global-filter change (prefix `["metrics"]`), tenant switch (full clear) |
+| `qk.ai.agentRun(id)` | `["ai","agentRun",id]` | SSE events (§5), cancel mutation |
+| `qk.reports.artifacts(params)` | `["reports","artifacts",params]` | report job completion event |
+
 2. **Client state is minimal:** auth/session context, theme, nav collapse, in-progress form state, global filter search params (owned by the router). No Redux/Zustand unless a future feature proves an actual need in an ADR.
 3. Optimistic updates only for low-risk toggles (flags, enable/disable); everything job-shaped renders server status truthfully.
 4. Derived data is computed in selectors/memos at render, never cached manually.
@@ -169,7 +203,18 @@ const { status } = useSse(run.eventsUrl, {
 
 ## 9. Error, loading, and empty-state conventions
 
-- **Errors:** one `ApiError` type from problem+json; route-level error boundaries render title/detail + `traceId` (copyable for support); field errors bind to inputs; 403 shows the missing permission; 429 shows retry countdown from `Retry-After`.
+- **Errors:** one `ApiError` type from problem+json (`APIDesign.md` §1.5); route-level error boundaries render title/detail + `traceId` (copyable for support). Mapping from problem `type` to UI behavior:
+
+| Problem type suffix | UI behavior |
+|---|---|
+| `/problems/validation` | Bind `errors[]` to form fields; toast only if no bound field |
+| `/problems/unauthenticated` | Silent token refresh once, then redirect to login preserving return URL |
+| `/problems/permission-denied` | 403 view naming the missing permission; no retry |
+| `/problems/not-found` | Route-level empty "not found or no access" view (never distinguishes) |
+| `/problems/conflict`, `/problems/precondition-failed` | "Reload and merge" dialog carrying fresh ETag (§6) |
+| `/problems/rate-limited` | Inline countdown from `Retry-After`; auto-retry once for reads |
+| `/problems/connector/*` | Connector health badge + failure detail drawer on connector screens |
+| `/problems/internal` | Boundary with traceId, "report to admin" copy action |
 - **Loading:** skeletons matching final layout for first load; subtle inline refresh indicators afterwards (queries keep previous data on refetch); no full-screen spinners after shell load.
 - **Empty states:** every list/dashboard distinguishes "no data yet" (with the next action, e.g., "Connect Jira" linking to the wizard) from "filters match nothing" (with a clear-filters action). New-tenant dashboards render an onboarding checklist instead of empty charts.
 
@@ -219,7 +264,20 @@ Aligned with `../testing/TestingStrategy.md`:
 
 Feature folders own their routes, components, query hooks, and messages; cross-feature imports only via `/design`, `/api`, `/app`, `/forms`.
 
-## 13. Definition of done — frontend stories
+## 13. Phase mapping
+
+Frontend workstream per the canonical roadmap:
+
+| Phase | Frontend deliverables from this plan |
+|---|---|
+| Phase 0 – Foundations | Shell + auth + tenant switcher (§2), design tokens + Mantine theme (§1), generated client pipeline, `EipDataTable`, role & permission management, error/loading/empty conventions (§9), CI with Vitest + component tests |
+| Phase 1 – Ingestion core | Integration management + configuration wizard (SchemaForm §6), connector monitor, job/queue monitors, team & org management |
+| Phase 2 – Analytics & dashboards | Widget grid + saved views + global filters (§4), productivity / sprint / kanban / quality dashboards, work item explorer drill-down, ECharts theme |
+| Phase 3 – AI core | LLM provider config, agent workflow management with SSE run view (§5), RAG KB management, report generation center + artifacts library |
+| Phase 4 – Full agent suite | MCP config, remaining dashboards (delivery risk, releases, ops), scheduling UIs, exports incl. pptx preview |
+| Phase 5 – Enterprise hardening | Performance budget enforcement at scale (§11), full a11y audit, i18n locale completion, browser-support matrix sign-off |
+
+## 14. Definition of done — frontend stories
 
 - [ ] Uses generated API client types only; no hand-written response types; new endpoints consumed only after OpenAPI regeneration.
 - [ ] Route declares `requiredPermission`; mutating controls behind `<Can>` gates matching `x-eip-permission`.

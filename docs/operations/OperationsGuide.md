@@ -20,6 +20,27 @@ EIP is a modular monolith (single API app) plus separately deployable workers, w
 
 Operator entry points: Admin Console (Connector Health, Sync Checkpoint browser, DLQ inspector, background job monitor, secret management, audit viewer) and the Grafana dashboards shipped in `/infra/grafana`.
 
+### 1.1 Health endpoints and default ports (Compose reference)
+
+| Component | Health check | Default port |
+|---|---|---|
+| `eip-app` | `GET /actuator/health` (liveness `/actuator/health/liveness`, readiness `/actuator/health/readiness`) | 8080 |
+| `eip-workers` | `GET /actuator/health` per worker instance | 8081 |
+| Frontend | `GET /healthz` on the static server/ingress | 5173 (dev) / 80 |
+| PostgreSQL | `pg_isready` | 5432 |
+| Kafka | broker API versions probe (`kafka-broker-api-versions`) | 9092 |
+| Redis | `redis-cli PING` | 6379 |
+| MinIO | `GET /minio/health/ready` | 9000 (API) / 9001 (console) |
+| Keycloak | `GET /health/ready` | 8443 |
+| OTel Collector | `GET :13133/` (health extension) | 4317 (OTLP) |
+| Prometheus / Grafana | `/-/ready` / `GET /api/health` | 9090 / 3000 |
+
+Kubernetes probes in `/infra/kubernetes` use exactly these endpoints; if you change a port in an overlay, change the probe with it.
+
+### 1.2 Kafka topic reference
+
+All topics carry the `eip.` prefix; DLQs are per consumer group (`.<group>.dlq`). The families an operator watches: `eip.raw.<connector>` (one per connector, staging intake), `eip.domain.workitem`, `eip.domain.scm`, `eip.domain.cicd`, `eip.domain.quality`, `eip.domain.ops` (canonical domain events), `eip.analytics.metrics` (computed metrics), `eip.ai.jobs` / `eip.ai.results` (agent work), `eip.reports.jobs` (report scheduling). Ordering is per key (`tenantId+entityId`); delivery is at-least-once with idempotent consumers, which is why replay (§3.1) and re-sync (§3.2) are always safe.
+
 ## 2. Startup, shutdown, and the "Start" activation sequence
 
 ### 2.1 Process start order
@@ -55,6 +76,19 @@ flowchart LR
 | Detect risks | Delivery Risk agent + risk scoring produce Risk entities | Risk views populated with explanations |
 | Generate dashboards/reports | Dashboard caches warmed; scheduled report jobs (`eip.reports.jobs`) run | Artifact library receives outputs |
 | Expose outputs + audit | Outputs visible per RBAC; every stage's actions in the audit log | Audit viewer shows the activation trail |
+
+### 2.3 Pre-flight checklist (new installation)
+
+Before first startup:
+
+- [ ] Volumes provisioned and writable: Postgres data, Kafka data, MinIO data, backup target reachable
+- [ ] Secrets master key present at the configured KMS SPI source (env/file/Vault) and escrowed (§6.1)
+- [ ] TLS certificates in place for ingress, Keycloak, and (if enabled) Kafka/MinIO TLS; expiry > 90 days
+- [ ] Keycloak realm imported (or enterprise IdP client registered) with the EIP role/claim mapping
+- [ ] Network policy verified: connectors can reach source tools; nothing else has egress; LLM endpoint reachable if configured
+- [ ] NTP: all hosts within 60 s skew (OIDC token validation and event ordering both depend on it)
+- [ ] Resource floor met: reference single-node sizing from `/infra/docker-compose/README` (or K8s overlay requests) satisfied
+- [ ] Grafana dashboards and alert rules provisioned from `/infra/grafana`; a test alert routes to the operator channel
 
 ## 3. Routine operations
 
@@ -242,3 +276,60 @@ For escalations, generate a support bundle: Admin Console → System → **Gener
 - AI job failure summaries with prompt-redaction policy applied (no prompt bodies unless the operator explicitly opts in per policy)
 
 The bundle is written to MinIO under an operator-only prefix and its generation is audited. Review the manifest before sharing outside the security boundary.
+
+## 12. Security operations routine
+
+Recurring security tasks for the operator (complementing the security testing gates in `../testing/TestingStrategy.md` §12):
+
+| Task | Cadence | Procedure |
+|---|---|---|
+| Audit log review | Weekly | Audit viewer saved queries: failed logins, permission denials, secret accesses, `system:operate` actions, MCP capability calls; anomalies filed to security |
+| Connector credential rotation | Per org policy (≤ 180 days recommended) | §3.3 per credential; track due dates in the Secrets screen's rotation-age column |
+| Master key rotation | Annually or on suspicion of compromise | §3.3 step 5 (online re-encrypt); update escrow |
+| Access review | Quarterly | Export role assignments per tenant; tenant admins confirm; stale accounts offboarded (§3.4) |
+| CVE watch (air-gapped) | Per release import | Review the release's bundled scan report (Trivy + dependency scan results ship inside the offline bundle) before applying §7 |
+| Break-glass account check | Quarterly | Verify the local fallback account is disabled, password sealed, last-use audit empty |
+| LLM audit sampling | Monthly | Sample LLM call audit records: redaction policy applied, no cross-tenant references in retrieval sets, budgets respected |
+| Webhook secret rotation | With connector credential rotation | Rotate on both sides; verify intake with a test delivery |
+
+Prompt-injection posture: operators do not tune this at runtime — mitigations are built in and regression-tested. If an artifact is quarantined by the Validation Agent with an injection-suspect finding, preserve the artifact and its audit chain and escalate; do not force-publish.
+
+## 13. On-call quick reference
+
+**First five minutes for any page:**
+
+1. Open Grafana "EIP Overview" — which layer is unhealthy (app, workers, Kafka, DB, IdP, LLM)?
+2. Check for co-firing alerts (§4) — a `DiskPressure` root cause often fires three downstream alerts.
+3. Check recent changes: upgrades (§7), config edits, secret rotations (audit viewer, last 24 h).
+4. Match the symptom to a decision tree (§9) or alert runbook (§4).
+5. If data-integrity or security-related (`AuditWriteFailure`, suspected cross-tenant access), escalate immediately per §13.1 — do not experiment.
+
+### 13.1 Severity classification
+
+| Severity | Definition | Examples | Response |
+|---|---|---|---|
+| S1 | Platform down or security/data-integrity incident | DB down, audit failing, suspected tenant leakage | Page immediately; incident channel; fix before anything else |
+| S2 | Major function degraded, no workaround | All connectors failing, logins down (IdP), report pipeline dead | Respond < 1 h; workaround or fix same day |
+| S3 | Partial degradation with workaround | One connector degraded, AI features down (analytics fine), slow dashboards | Next business day; runbook-driven |
+| S4 | Cosmetic / single-tenant nuisance | One dashboard panel stale, one scheduled report late | Backlog; batch with maintenance window (§10) |
+
+AI-feature outages are S3 by design: the platform degrades gracefully to non-AI operation (§4 `LlmProviderFailing`).
+
+## 14. Command-line quick reference
+
+For UI-down situations; all commands assume the Compose deployment (translate to `kubectl exec` for K8s):
+
+| Need | Command |
+|---|---|
+| Overall app health | `curl -s localhost:8080/actuator/health` |
+| Change a log level at runtime | `curl -X POST localhost:8080/actuator/loggers/com.eip.ingestion -H 'Content-Type: application/json' -d '{"configuredLevel":"DEBUG"}'` |
+| Consumer lag snapshot | `kafka-consumer-groups --bootstrap-server kafka:9092 --describe --all-groups` |
+| DLQ depth for a group | `kafka-run-class kafka.tools.GetOffsetShell --topic eip.domain.workitem.analytics.dlq ...` (or DLQ inspector API `GET /api/v1/admin/dlq`) |
+| Postgres activity | `psql -c "select pid, state, wait_event, query from pg_stat_activity where state <> 'idle'"` |
+| Redis health | `redis-cli PING && redis-cli INFO memory | head` |
+| MinIO bucket sizes | `mc du eip/artifacts eip/raw-blobs` |
+| Trigger support bundle headlessly | `scripts/support-bundle --output /backups/bundles` |
+| Backup Kafka config | `scripts/backup-kafka-config` |
+| Export Keycloak realm | `kc.sh export --realm eip --file /backups/realm-eip.json` |
+
+All mutating admin APIs require `system:operate` and are audited; the CLI paths above go through the same authorization as the UI.

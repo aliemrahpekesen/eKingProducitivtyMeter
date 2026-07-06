@@ -37,6 +37,24 @@ Conventions:
 |-------|-----------------|--------------------|----------------------------|-------------|------------------------|---------------|
 | Features | 20 | 19 | 28 | 25 | 34 | 16 |
 
+### 1.3 Area-level dependency flow
+
+Individual dependencies are listed per feature; at the area level the build order is:
+
+```mermaid
+flowchart LR
+    PT[Platform & Tenancy<br/>+ Security & Audit<br/>+ Observability] --> AC[Admin & Configuration]
+    PT --> CN[Connectors]
+    CN --> IN[Ingestion & Normalization]
+    IN --> AN[Analytics & Metrics]
+    AN --> DB[Dashboards]
+    IN --> RAG[RAG]
+    AN --> AI[AI Agents]
+    RAG --> AI
+    AI --> RP[Report Center &<br/>Artifacts Library]
+    AI --> MCP[MCP]
+```
+
 ## 2. Platform & Tenancy
 
 The load-bearing foundation: multi-tenancy, identity, authorization, the API contract, deployment topology, and the runtime shape (modular monolith + workers). Everything else in the catalog depends on this area, which is why it is almost entirely P0 and Phase 0, with the deployment-hardening tail (K8s GA, HA, backup/restore) landing in Phase 5.

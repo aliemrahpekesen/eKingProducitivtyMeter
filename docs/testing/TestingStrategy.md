@@ -260,3 +260,40 @@ A PR merges to `main` only when all of the following hold:
 - [ ] At least one review from the owning stream (see team topology in `../implementation/PhaseBasedImplementationPlan.md` §3); docs under `/docs` updated in the same PR when behavior changes (docs-as-code).
 
 Release gates additionally require: full nightly suite green on the release candidate, performance baselines met (§11), security checklist (§12) fully checked, and the E2E suite (§10) passing against both Docker Compose and the Kubernetes reference deployment (Phase 5 onward).
+
+## 17. Local developer workflow
+
+The suites a developer runs locally mirror the CI stages exactly (same Gradle/npm tasks, same containers), so "green locally, red in CI" is treated as a harness bug.
+
+| Command | Runs | When to run |
+|---|---|---|
+| `./gradlew test` | Backend unit tests + coverage | Before every push |
+| `./gradlew integrationTest` | Testcontainers suites for changed modules | Before pushing changes touching persistence, Kafka, cache, storage, or auth |
+| `./gradlew check` | Units + Modulith verify + ArchUnit + schema/OpenAPI contract checks | Before every push |
+| `./gradlew connectorKit --tests '*<Connector>*'` | Contract kit K1–K7 for one connector | Any connector change |
+| `./gradlew goldenTest` | Golden dataset replay (§7) | Any metric engine or normalizer change |
+| `npm run test` | Vitest + coverage | Before every frontend push |
+| `npm run e2e:smoke` | Playwright E1, E3, E7 against `make dev` stack | Before pushing cross-cutting changes |
+| `scripts/run-eval-harness --fake` | AI evals with FakeLlmProvider | Any agent, prompt, or RAG change |
+| `scripts/scrub-recordings` | Sanitize newly captured WireMock recordings | Before committing any recording |
+
+Pre-push expectation: `./gradlew check` (or `npm run test` for frontend-only changes) locally; everything heavier is CI's job. The Compose dev stack (`make dev`) is the only supported way to run E2E locally — no bespoke local setups, so failures reproduce identically everywhere.
+
+## 18. Mutation and property-based testing
+
+Line coverage proves execution, not verification. Two supplements target the highest-consequence logic:
+
+- **Mutation testing (PIT)** runs nightly on `eip-analytics` formula packages and `eip-core` invariants (envelope handling, ExternalRef identity, WorkItem state machine). Target mutation score ≥ 70% on those packages; the score is reported per PR touching them (informational on PR, gating nightly). A surviving mutant in a metric formula means a golden case is missing — fix the golden set (§7), not just the unit test.
+- **Property-based testing (jqwik)** covers algebraic properties that example-based tests under-sample:
+  - Checkpoint resume: for any split point of an event stream, sync(prefix) + resume(suffix) ≡ sync(whole) in canonical state.
+  - Idempotency: consuming any permutation-with-duplicates of an event set (respecting per-key order) yields the same final state.
+  - Cursor pagination: concatenated pages ≡ unpaginated result, no overlaps or gaps, for any page size.
+  - Percentile/statistics functions: invariance under input order, monotonicity, documented interpolation behavior at edges.
+  - Envelope serialization: serialize→deserialize round-trip identity for generated envelopes across all `schemaVersion`s.
+
+## 19. Test observability and reporting
+
+- CI publishes per-stage JUnit/Playwright/Gatling reports; trends (duration, failure rate, flakiness, coverage, mutation score) land in the self-observability Grafana stack (`/infra/grafana`) — the platform's own dashboards eat this dogfood from Phase 2 onward via the Generic CI/CD connector (see `../implementation/PhaseBasedImplementationPlan.md` §11).
+- Every E2E failure uploads the Playwright trace, the Compose logs bundle, and the seeded pack manifest, so failures are diagnosable without rerunning.
+- Test-suite wall-clock is budgeted per stage (§14); a stage exceeding its budget for 3 consecutive days is treated as a defect owned by DevX/infra.
+- Ownership: each stream (see `../implementation/PhaseBasedImplementationPlan.md` §3) owns the health of tests in its modules — including quarantine debt (§15) and coverage ratchets (§1). Cross-cutting harness code (kit, builders infrastructure, eval harness runner, E2E fixtures) is owned by DevX/infra with stream contributions.

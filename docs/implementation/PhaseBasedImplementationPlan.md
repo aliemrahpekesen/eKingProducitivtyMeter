@@ -110,6 +110,8 @@ Streams flex: in Phase 0 the connector and analytics streams contribute to core 
 
 **Technical milestones:** M0.1 CI green on empty modules; M0.2 login via Keycloak with tenant-scoped token; M0.3 first RLS-proven write/read; M0.4 secret stored/rotated with audit trail.
 
+**Integration points:** first contact with Keycloak (OIDC), PostgreSQL 16 + RLS, Redis, MinIO, Kafka (topic creation only), OTel Collector → Prometheus/Grafana/Tempo. Everything downstream assumes these are wired here.
+
 **Deliverables:** Compose dev stack; core platform modules with integration tests; committed OpenAPI baseline; Grafana starter dashboards; onboarding docs; ADR-0001 (modular monolith) through ADR-0005 (secrets design) recorded.
 
 **Exit criteria:**
@@ -147,6 +149,8 @@ Streams flex: in Phase 0 the connector and analytics streams contribute to core 
 ### 6.2 Milestones, deliverables, exit criteria, demo
 
 **Technical milestones:** M1.1 kit K1–K7 green on simulation connector; M1.2 first Jira full sync lands canonical WorkItems; M1.3 GitHub webhook→dashboard-visible < freshness SLO; M1.4 kill-worker-mid-sync resumes from checkpoint (E8 precursor).
+
+**Integration points:** first external tool APIs (Jira, GitHub — auth, pagination, rate limits, webhooks); Kafka becomes the live backbone (`eip.raw.*` → `eip.domain.*`, DLQs); MinIO used for raw blobs; Redis for rate-limit state and Redisson sync locks; `eip-workers` deployed as a separate process for the first time.
 
 **Deliverables:** three kit-certified connectors; sync engine + checkpointing; raw/canonical pipeline with DLQs; normalized model v1 + event JSON Schemas; connector admin UI; simulation pack v1 with manifest; connector developer guide in `/docs`.
 
@@ -188,6 +192,8 @@ Streams flex: in Phase 0 the connector and analytics streams contribute to core 
 ### 7.2 Milestones, deliverables, exit criteria, demo
 
 **Technical milestones:** M2.1 first golden case green end-to-end (events→metric value); M2.2 all four dashboards render from simulation data; M2.3 DORA computed from real CI/CD connector data; M2.4 nightly Gatling baseline established (ingestion 100k events/hour target first measured here).
+
+**Integration points:** `eip-analytics` consumes `eip.domain.*` and publishes `eip.analytics.metrics`; SonarQube, GitLab, Prometheus, and CI/CD tool APIs join the connector fleet; ECharts dashboards consume the metric API through TanStack Query; Redis becomes the dashboard cache layer.
 
 **Deliverables:** metric engine + registry; complete flow/DORA/quality metric set with definitions (each stating purpose, formula, inputs, grain, caveats/limitations, gaming risks); golden dataset packs; four persona dashboards; four new kit-certified connectors; metrics reference doc in `/docs`.
 
