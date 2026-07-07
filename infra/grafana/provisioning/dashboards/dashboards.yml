@@ -1,0 +1,13 @@
+# EIP dev Grafana dashboard provider (TASK-0003). Self-observability dashboards (ingest lag, queue
+# depth, DLQ size, API latency, ...) are added with app observability wiring (P0-E4-S3, SPRINT-01).
+apiVersion: 1
+providers:
+  - name: eip
+    orgId: 1
+    folder: EIP
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards/json
+      foldersFromFilesStructure: false
