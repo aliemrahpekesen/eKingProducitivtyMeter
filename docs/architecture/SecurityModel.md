@@ -88,7 +88,7 @@ sequenceDiagram
     A->>A: validate JWT (issuer, audience, signature via cached JWKS, expiry)
     A->>A: resolve TenantContext + effective permissions (roles → permission catalog)
     A->>A: endpoint permission check, then resource-level scope check
-    A->>PG: SET LOCAL eip.tenant_id = :tenant; query
+    A->>PG: SET LOCAL app.tenant_id = :tenant; query
     PG-->>A: rows filtered by RLS policy (backstop)
     A-->>U: 200 response
     A->>AU: audit event on sensitive action (actor, target, outcome, traceId)
@@ -101,52 +101,55 @@ Service tokens follow the same request path from the JWT-validation step onward:
 
 Deny-by-default RBAC: roles bundle fine-grained permissions; every `/api/v1` endpoint declares required permissions; service-layer checks repeat the enforcement (defense in depth against controller gaps).
 
-Canonical roles:
+Canonical roles follow the role model of [../product/Personas.md](../product/Personas.md) §1 (FEAT-004): four built-in base roles plus six seeded persona role templates composed on the `ANALYST`/`VIEWER` bases, provisioned at tenant creation (UC-001) and editable per tenant.
 
-| Role | Scope | Intended holder | Summary |
-|---|---|---|---|
-| `PLATFORM_ADMIN` | Platform (all tenants) | Platform operators | Deployment-wide config, tenant lifecycle, KMS operations, platform health. Cannot silently read tenant business data: cross-tenant data access requires explicit, audited support-access grant |
-| `TENANT_ADMIN` | Tenant | Customer IT owner | Tenant config, connectors + secrets, users/roles, AI/LLM policy, MCP allow-lists, retention settings |
-| `ORG_ADMIN` | Organization(s) within tenant | Engineering ops lead | Manage Organization/BusinessUnit/Team structure, member mappings, org-level dashboards and reports |
-| `MANAGER` | Team(s)/Project(s) | EM / delivery manager | Team-level metrics and reports, sprint/kanban analytics, delivery-risk views, report generation for owned scope |
-| `MEMBER` | Own teams | Engineer | Team dashboards, own work-item context, RAG queries within permitted scope |
-| `VIEWER` | Granted scope | Stakeholder/exec | Read-only dashboards and published reports |
-| `AUDITOR` | Tenant (read-only) | Security/compliance | Read audit log, security config, retention evidence; no business-data mutation, no secret values |
+| Role | Kind | Scope | Intended holder | Summary |
+|---|---|---|---|---|
+| `PLATFORM_ADMIN` | Base | Platform (all tenants) | Platform operators | Deployment-wide config, tenant lifecycle, KMS operations, platform health. Cannot silently read tenant business data: cross-tenant data access requires explicit, audited support-access grant |
+| `TENANT_ADMIN` | Base | Tenant | Customer IT owner | Tenant config, connectors + secrets, users/roles, Organization/BusinessUnit/Team structure and member mappings, AI/LLM policy, MCP allow-lists, retention settings |
+| `ANALYST` | Base | Granted scope | Analytics consumer | Dashboards, drill-downs, RAG queries, report generation within permitted scope |
+| `VIEWER` | Base | Granted scope | Stakeholder | Read-only dashboards and published reports |
+| `ENGINEERING_MANAGER` | Seeded template | Team(s)/Project(s) | EM / delivery manager | Team-level metrics and reports, sprint/kanban analytics, delivery-risk views, report generation for owned scope |
+| `TEAM_LEAD` | Seeded template | Own team(s) | Team lead | Team dashboards, flow analytics, generated sprint reviews for owned teams |
+| `MEMBER` | Seeded template | Own teams | Engineer | Team dashboards, own work-item context, RAG queries within permitted scope |
+| `RELEASE_MANAGER` | Seeded template | Release scope | Release/delivery manager | Release-readiness and release dashboards, release-notes generation for owned releases |
+| `EXECUTIVE_VIEWER` | Seeded template | Org-level rollups | Executive | Org-level rollups, executive summaries, scheduled report consumption |
+| `SECURITY_AUDITOR` | Seeded template | Tenant (read-only) | Security/compliance | Read audit log, security config, retention evidence; no business-data mutation, no secret values |
 
-Permission catalog (representative; the catalog is the authoritative enum in `eip-tenancy`):
+Permission catalog (representative; the catalog is the authoritative enum in `eip-tenancy`; manager-scope templates = `ENGINEERING_MANAGER`/`TEAM_LEAD`/`RELEASE_MANAGER`):
 
-| Permission | PLATFORM_ADMIN | TENANT_ADMIN | ORG_ADMIN | MANAGER | MEMBER | VIEWER | AUDITOR |
+| Permission | PLATFORM_ADMIN | TENANT_ADMIN | Manager-scope templates | ANALYST | MEMBER | VIEWER / EXECUTIVE_VIEWER | SECURITY_AUDITOR |
 |---|---|---|---|---|---|---|---|
 | `tenant.manage` | ✓ | ✓ | — | — | — | — | — |
-| `user.manage` / `role.assign` | ✓ | ✓ | org scope | — | — | — | — |
+| `user.manage` / `role.assign` | ✓ | ✓ | — | — | — | — | — |
 | `connector.configure` | — | ✓ | — | — | — | — | — |
 | `connector.secret.write` | — | ✓ | — | — | — | — | — |
 | `connector.secret.reveal` | — | opt-in, audited | — | — | — | — | — |
 | `dashboard.view` | — | ✓ | ✓ | ✓ | ✓ | ✓ | — |
-| `metric.individual.view` (individual-level signals) | — | policy-gated | policy-gated | — | — | — | — |
+| `metric.individual.view` (individual-level signals) | — | policy-gated | — | — | — | — | — |
 | `report.generate` | — | ✓ | ✓ | ✓ | — | — | — |
 | `report.export` | — | ✓ | ✓ | ✓ | — | scope-gated | — |
 | `ai.agent.invoke` | — | ✓ | ✓ | ✓ | ✓ (subset) | — | — |
 | `ai.policy.manage` (models, budgets, egress) | — | ✓ | — | — | — | — | — |
-| `mcp.capability.invoke:<capability>` | — | per allow-list | per allow-list | per allow-list | — | — | — |
+| `mcp.capability.invoke:<capability>` | — | per allow-list | per allow-list | — | — | — | — |
 | `audit.read` | ✓ (platform events) | ✓ | — | — | — | — | ✓ |
 | `retention.manage` / `erasure.execute` | — | ✓ | — | — | — | — | — |
 | `platform.operate` (health, upgrades, KMS rotate) | ✓ | — | — | — | — | — | — |
 
 Enforcement layers:
 
-1. **Tenant scoping.** Every request resolves a `TenantContext` from the token; every table carries `tenant_id` and Postgres Row-Level Security policies filter on the session tenant (set via `SET LOCAL`). Application code never queries without tenant context; RLS is the backstop if it does. Kafka consumers propagate `tenantId` from the event envelope into the same context.
-2. **Resource-level checks.** Beyond role checks, ownership/scope checks apply per resource: MANAGER on Team A cannot read Team B's delivery-risk detail; report artifacts and GeneratedReport records carry an access scope evaluated on download; connectors and secrets are tenant-bound objects.
+1. **Tenant scoping.** Every request resolves a `TenantContext` from the token; every table carries `tenant_id` and Postgres Row-Level Security policies filter on the tenant bound via transaction-scoped `SET LOCAL app.tenant_id` (policies read `current_setting('app.tenant_id')`; never session-scoped, so connection pooling stays safe). Application code never queries without tenant context; RLS is the backstop if it does. Kafka consumers propagate `tenantId` from the event envelope into the same context.
+2. **Resource-level checks.** Beyond role checks, ownership/scope checks apply per resource: an ENGINEERING_MANAGER on Team A cannot read Team B's delivery-risk detail; report artifacts and GeneratedReport records carry an access scope evaluated on download; connectors and secrets are tenant-bound objects.
 3. **Permission-aware RAG retrieval.** Vector search (pgvector/Qdrant via VectorStore SPI) always applies: (a) tenant isolation (hard filter, enforced in the SPI, not the caller), (b) metadata filters derived from the caller's permissions and scope (source system, project/team visibility, document ACL where the source tool exposes one), (c) result-side re-check before chunks enter the prompt. An agent acting for a user retrieves with that user's effective permissions — never with a service-level superuser context. Retrievals are audit-logged (§11).
 
 ## 5. Multi-Tenancy Isolation Summary
 
 | Layer | Mechanism |
 |---|---|
-| Database | `tenant_id` column + Postgres RLS on every tenant table; per-request `SET LOCAL` tenant binding; Flyway-managed policies |
-| Vector store | Tenant filter enforced inside VectorStore SPI; separate Qdrant collections per tenant when Qdrant is used |
-| Kafka | `tenantId` in every event envelope; consumers validate envelope tenant against target rows; ordering key `tenantId+entityId` |
-| Object storage | Bucket-per-tenant or tenant prefix + per-tenant credentials/policies |
+| Database | `tenant_id` column + Postgres RLS on every tenant table; per-transaction `SET LOCAL app.tenant_id` binding; Flyway-managed policies |
+| Vector store | Three defense-in-depth layers (ADR-016, stated identically in `../ai/RAGArchitecture.md` §9): (1) store-level isolation — pgvector (default): Postgres RLS on `rag_chunk` and the per-model embedding tables; Qdrant (pluggable): **one collection per tenant per embedding space**, named `eip_<tenantId>_<embeddingSpace>`; (2) tenant filter enforced inside the VectorStore SPI on every operation (unfiltered queries refused); (3) result-side tenant/ACL recheck before hits leave the retrieval API (`../ai/RAGArchitecture.md` §8) |
+| Kafka | `tenantId` in every event envelope; consumers validate envelope tenant against target rows; ordering key `tenantId:entityId` on domain topics (key composition varies by topic family, see `../engineering/EventModel.md` §7) |
+| Object storage | One mechanism (ADR-018): shared buckets (`eip-ingest`, `eip-artifacts`) + mandatory tenant-id key prefix (`<tenantId>/...`), scoping enforced by the single application storage service (every read/write path resolves the prefix from the tenant context, never from caller input), with object-access audit. Per-tenant MinIO credentials/policies are **not** used — an accepted risk, mitigated by the periodic storage-prefix isolation test in the NFR-041 isolation suite (§13) |
 | Cache | Redis key namespace `eip:{tenantId}:...`; no cross-tenant key access in code review checklist |
 | AI | Per-tenant model routing, token budgets, RAG isolation, per-tenant MCP allow-lists |
 | Rate limits | Per-tenant and per-token quotas |
@@ -177,6 +180,7 @@ flowchart LR
 ```
 - **KMS SPI providers.** `env` (master key from environment — demo only), `file` (mounted key file, permissions-checked at startup), `vault` (HashiCorp Vault Transit for wrap/unwrap; key never leaves Vault). Provider is deployment-selected; the SPI allows enterprise HSM adapters later.
 - **Rotation procedure.** (1) Master key rotation: introduce new key version → background job re-wraps all DEKs (no data re-encryption needed) → retire old version after re-wrap completes; both versions valid during the window; progress observable via metric and audit events. (2) Secret value rotation: TENANT_ADMIN updates a connector secret; old value overwritten (previous ciphertext retained for one grace period only if the connector supports dual credentials); `connector.testConnection()` validates before commit.
+- **Compromise recovery (distinct from routine rotation).** Re-wrapping DEKs is cryptographically insufficient after a master-key compromise: an attacker holding the old master key plus the ciphertext has already unwrapped the DEKs, so the DEKs themselves — and everything they protect — must be treated as exposed. On suspected or confirmed compromise: (1) generate a new master key version; (2) generate **fresh DEKs and re-encrypt every stored secret** under them (never re-wrap-only); (3) rotate all downstream credentials the old DEKs protected — connector tokens, webhook secrets, LLM provider keys, MCP server credentials, SMTP credentials — at their sources; (4) verify by count: the number of re-encrypted secrets and rotated downstream credentials is reconciled against the secret inventory, and the reconciliation result is recorded; (5) every phase emits audit events (`kms.compromise.recovery.started/completed`, per-secret re-encryption and rotation events). The operational runbook lives in `../operations/OperationsGuide.md` §3.3; the OperationsGuide §12 "on suspicion of compromise" row routes to **this** procedure, not to the routine re-wrap path.
 - **UI masking.** Secret values are write-only in the UI/API: displayed as `••••` with last-4 hint where safe; `connector.secret.reveal` is a distinct, default-disabled, always-audited permission. API responses never echo secret fields; OpenAPI marks them `writeOnly`.
 - **Access audit.** Every decrypt is an audit event (`secret.access`) with actor (user or worker identity + purpose, e.g. `connector-sync:jira-prod`), secret id, and `traceId`. Anomalous decrypt patterns (volume, unfamiliar purpose) are alertable via the observability stack.
 
@@ -184,15 +188,35 @@ flowchart LR
 
 - **Encryption at rest.** Options by layer: Postgres — volume/filesystem encryption (LUKS/storage-class) as baseline, plus column-level AES-256-GCM for secrets (always) and optionally for identity-mapping tables; Kafka — encrypted volumes (broker-side); MinIO — SSE-S3/SSE-KMS; backups encrypted with a distinct key. At-rest encryption of infrastructure volumes is the deployer's storage-class choice and is documented in the hardening checklist.
 - **TLS everywhere.** All internal and external links, minimum TLS 1.2 (prefer 1.3); no plaintext listener anywhere; see `../architecture/DeploymentModel.md` §12.
-- **PII: developer identity data.** EIP stores Member records and `ExternalRef` identity mappings (sourceSystem, externalId, url) — this is PII. Controls: identity mapping tables are access-restricted (ORG_ADMIN+), individual-level signals are aggregated to team grain by default per the anti-surveillance stance, and every metric that could resolve to an individual is gated behind `metric.individual.view`, which is disabled by default and requires explicit tenant policy opt-in.
+- **PII: developer identity data.** EIP stores Member records and `ExternalRef` identity mappings (sourceSystem, externalId, url) — this is PII. Controls: identity mapping tables are access-restricted (TENANT_ADMIN), individual-level signals are aggregated to team grain by default per the anti-surveillance stance, and every metric that could resolve to an individual is gated behind `metric.individual.view`, which is disabled by default and requires explicit tenant policy opt-in.
 - **Pseudonymization option.** Per-tenant setting: individual-level signals are keyed by a salted pseudonym (`member_pseudo_id`) instead of the Member identity; the mapping table is separately encrypted and readable only by TENANT_ADMIN under audit. Dashboards, reports, and RAG chunks then carry pseudonyms for individual-grain data; team-level analytics (the default product surface: load balance, review bottlenecks, knowledge concentration) are unaffected.
-- **Retention and erasure.** Per-tenant retention policies per data class: raw staging (`raw_*` + blobs, default 90 days), canonical model (default 25 months), metrics aggregates (default 37 months), AI call logs (default 13 months), audit (default 25 months, tenant-extendable). Erasure: member off-boarding erases/pseudonymizes identity data across canonical model, vector store (chunk metadata re-index), report artifacts index, and caches; erasure runs produce a signed completion record in the audit log. Kafka topics rely on retention expiry (topics are transport, not the store of record).
+- **Retention.** The table below is the platform's canonical retention policy (NFR-070). It is the single source of record for retention defaults: other documents (`../architecture/DataFlow.md` §9, `../architecture/DeploymentModel.md` §5) reference this section rather than restating values. All defaults are per-tenant configurable.
+
+| Data class | Default retention | Notes |
+|---|---|---|
+| Raw staging (`raw_*` tables + object-storage blobs) | 90 days | NFR-070 default; per-tenant configurable |
+| Canonical model | Indefinite | Tenant policy may shorten; 25 months is an example tenant policy (used as the representative sizing assumption in `../architecture/DeploymentModel.md` §5) |
+| Metric series / aggregates | Indefinite | Tenant policy may shorten; 37 months of hot history is an example tenant policy (same sizing assumption) |
+| AI/LLM call logs | 13 months | Stored under the §8 redaction policy |
+| Audit log | 25 months minimum | Append-only, tenant-extendable (§11) |
+| `processed_events` dedup ledger | 35 days | Must exceed the longest domain-topic retention (30 days) plus the replay window |
+
+Kafka topics rely on broker retention expiry (topics are transport, not the store of record).
+
+- **Erasure (FR-142).** Member erasure operates on the identity-mapping layer plus every store where direct PII can appear. Propagation list (per-store actions are specified alongside the schemas in `../engineering/DatabasePlan.md` and `DomainModel.md`; the erasure runbook is `../operations/OperationsGuide.md` §3.4):
+  1. **Identity mapping** — the dedicated mapping store (`member_identity` / Member PII columns) is hard-deleted or crypto-shredded. Because every other pseudonymized store references members only by `memberId`/`member_pseudo_id` (audit log, metric facts), this single action pseudonymizes them irreversibly.
+  2. **Canonical PII columns** carrying verbatim person text (e.g. `commit.message` author references, `work_item.description`) — targeted redaction/rewrite of the member's PII in place.
+  3. **RAG chunks and embeddings** for member-authored content, where applicable — affected `rag_chunk` rows are re-chunked or deleted together with their vector entries.
+  4. **Rendered report artifacts** containing the member's PII — deleted from object storage and the artifact index; reports remain regenerable from the retained, redacted inputs.
+  5. **Caches** (retrieval, LLM response, dashboard) — invalidated by tenant-scoped key sweep.
+
+  Audit rows and audit archives are never touched: they are pseudonymous by construction (§11), so erasure preserves the hash chain intact and verifiable. Every erasure run produces a **signed completion record** in the audit log containing: the erasure request id, tenant, pseudonymous `memberId`, the per-store action list with affected row/object counts, start and completion timestamps, the executing actor, and the hash of the detailed erasure manifest.
 
 ## 8. AI-Specific Security
 
 The AI pipeline (agent runtime in `eip-ai`, RAG, MCP) treats all retrieved and tool-returned content as untrusted.
 
-- **Prompt injection defenses (RAG/MCP content).** Retrieved chunks and MCP tool results are: (a) wrapped in delimited data blocks with explicit "data, not instructions" framing in system prompts; (b) sanitized (strip markup that mimics prompt structure, control characters, known injection markers); (c) never allowed to change the agent's tool allow-list, budgets, or system prompt — those are set by platform config only; (d) source-attributed, so an output influenced by a poisoned document is traceable to it. Ingested documents flagged by injection heuristics are quarantined from the RAG index pending review.
+- **Prompt injection defenses (RAG/MCP content).** Retrieved chunks and MCP tool results are: (a) wrapped in delimited data blocks with explicit "data, not instructions" framing in system prompts; (b) sanitized (strip markup that mimics prompt structure, control characters, known injection markers); (c) never allowed to change the agent's tool allow-list, budgets, or system prompt — those are set by platform config only; (d) source-attributed, so an output influenced by a poisoned document is traceable to it. Injection handling at indexing time is **two-tier by detection confidence** (the same rule as `../ai/RAGArchitecture.md` §3.3): **high-confidence detections are quarantined** — not indexed, routed to an admin review queue, and audited; **low/medium-confidence detections are indexed with flags** and are only ever rendered to models with neutralized rendering, inside provenance-delimited untrusted data blocks.
 - **LLM output validation.** Agent outputs pass through the Validation agent / structured validators before side effects: JSON-schema validation for structured outputs, citation checks (claims in narrative outputs must map to retrieved sources), numeric cross-checks against the metric engine for any quoted metric, and policy filters (no secrets patterns, no individual-ranking language per anti-goals). Invalid outputs are retried within budget, then failed with an auditable reason — never silently accepted.
 - **Tool allow-lists and per-agent capability sandboxing.** Each canonical agent (Data Ingestion, Data Quality, Engineering Metrics, Delivery Risk, Sprint Review, Release Notes, Documentation, Use Case Diagram, Architecture Diagram, Executive Summary, Incident Analysis, Code Quality, Team Health, RAG Retrieval, Report Composition, Validation, Security Review, Configuration Assistant) declares a static capability manifest: callable tools, readable data domains, writable outputs, token/cost/time budgets. The runtime enforces the manifest; an agent cannot invoke a tool outside it regardless of model output. Agents execute with the invoking user's effective permissions intersected with the manifest.
 - **Model/data egress controls.** Per-tenant LLM policy governs the provider SPI (Ollama, vLLM, OpenAI-compatible generic, Anthropic-compatible, custom enterprise endpoint): which providers are enabled, per-agent model routing, and an egress classification — tenants can restrict specific data classes (e.g. identity data, source snippets) to local providers only. When an external provider is enabled, prompts pass a redaction filter (identity pseudonymization, secret-pattern stripping) before egress, and the audit record marks the call as external.
@@ -204,7 +228,9 @@ The AI pipeline (agent runtime in `eip-ai`, RAG, MCP) treats all retrieved and t
 EIP is both MCP client and MCP server; both directions are constrained.
 
 - **As MCP client:** only TENANT_ADMIN-registered, allow-listed enterprise MCP servers are reachable (egress policy is generated from this list); each server's tools are imported into agent capability manifests explicitly (no wildcard tool adoption); tool results are untrusted input (§8 defenses apply); server credentials live in the secret store (§6).
-- **As MCP server:** EIP exposes only explicitly allow-listed internal capabilities (e.g. `metrics.query`, `report.fetch`, `workitem.search`); each capability has per-capability RBAC (`mcp.capability.invoke:<capability>`) evaluated against the authenticated caller's tenant-scoped identity (service token or OIDC); capabilities are read-only unless individually justified; every invocation is audited with capability, caller, arguments digest, and `traceId`.
+- **As MCP server:** EIP exposes only explicitly allow-listed internal capabilities, under the canonical `eip.*` capability names of `../ai/MCPArchitecture.md` §3.2 (e.g. `eip.query_metrics`, `eip.query_work_items`, `eip.retrieve_citations`, `eip.list_generated_reports`, `eip.trigger_report_generation`); each capability has per-capability RBAC (`mcp.capability.invoke:<capability>`) evaluated against the authenticated caller's tenant-scoped identity; a capability absent from tenant configuration is disabled; capabilities are read-only unless individually justified; every invocation is audited with capability, caller, arguments digest, and `traceId`. Reads of the exposed MCP resources (`eip://runs/{runId}`, `eip://reports/{reportId}`) and `tools/list` enumerations are audited too (`mcp.server.resource_read`, `mcp.server.tools_listed` — §11).
+- **MCP authentication:** `/api/v1/mcp` authenticates **platform service tokens only** — the same §3 service tokens (SHA-256-hashed high-entropy secrets, prefix-identifiable, default 90-day expiry, max 365). OIDC principals do not call the MCP endpoint in v1; they use the REST API.
+- **Delegation model (v1: none).** The service token's principal is the **effective principal** for every capability call — there is no on-behalf-of. Named risk: **confused deputy** — a token shared by a multi-user assistant grants every downstream user the union of the token's read scope, including the ACL grants `eip.retrieve_citations` resolves for the token principal. Deployments must issue per-audience tokens (one per assistant/integration, minimally scoped); the admin UI warns when a token's grant scope exceeds a configured breadth threshold. On-behalf-of via token exchange is roadmap, not rejected — the token schema does not foreclose it (`../ai/MCPArchitecture.md` §3.1).
 - **No transitive escalation:** an inbound MCP call cannot cause an outbound LLM call or MCP call beyond the caller's own permissions.
 
 ## 10. Supply Chain Security
@@ -237,15 +263,17 @@ Event taxonomy (category → representative events):
 | `admin` | `tenant.created/updated`, `user.role.assigned`, `connector.configured`, `retention.changed`, `ai.policy.changed`, `mcp.allowlist.changed` | Config diffs recorded (secrets masked) |
 | `secrets` | `secret.created/rotated/revealed`, `kms.key.rotated` | Reveal is distinct from access |
 | `ai` | `llm.call`, `agent.run.started/completed/failed`, `rag.retrieval`, `agent.budget.exhausted`, `output.validation.failed` | See §8 |
-| `mcp` | `mcp.capability.invoked`, `mcp.server.registered`, `mcp.client.connected` | Both directions |
+| `mcp` | `mcp.capability.invoked`, `mcp.server.resource_read`, `mcp.server.tools_listed`, `mcp.server.registered`, `mcp.client.connected` | Both directions; resource reads (`eip://runs/{runId}`, `eip://reports/{reportId}`) and `tools/list` enumerations audited like tool calls (NFR-042) |
 | `data` | `erasure.executed`, `retention.purge.completed`, `ingestion.replay.triggered` | Signed completion records |
 | `platform` | `upgrade.applied`, `migration.executed`, `backup.completed/failed`, `support.access.granted` | PLATFORM_ADMIN actions |
 
 Properties:
 
-- **Schema.** Every event: `auditId (UUIDv7), occurredAt, tenantId, actor {type: USER|SERVICE_TOKEN|WORKER|AGENT, id}, category, event, target {type, id}, outcome, traceId, details (redacted)`. `traceId` links audit events to distributed traces (`../architecture/ObservabilityModel.md` §10).
+- **Schema.** Every event: `auditId (UUIDv7), occurredAt, tenantId, actor {type: USER|SERVICE_TOKEN|WORKER|AGENT, id}, category, event, target {type, id}, outcome, traceId, details (redacted)`. `traceId` links audit events to distributed traces (`../architecture/ObservabilityModel.md` §10). The `audit.audit_event` DDL (`../engineering/DatabasePlan.md` §3) carries these field names verbatim — `category`, `event`, `actor_type`, `actor_id`, `trace_id` — plus the chain columns `prev_hash`/`hash` (`bytea`).
+- **PII minimization (normative — FR-142).** `details` and every other audit field MUST contain only pseudonymous references: entity UUIDs, enum values, `memberId`/`member_pseudo_id` — never names, email addresses, or free-text person PII. Member PII lives exclusively in the dedicated identity-mapping store (§7); FR-142 erasure hard-deletes or crypto-shreds that mapping, which pseudonymizes audit history without mutating a single hash-chained INSERT-only row — the chain remains intact and verifiable after erasure. Audit exports and object-storage archives inherit the rule, so they need no rewrite or crypto-shred on erasure either.
 - **Tamper evidence via hash chaining.** Each audit record stores `prevHash` and `hash = SHA-256(prevHash || canonical(record))`, chained per tenant partition; a scheduled verifier job re-walks chains and emits `eip_job_failures_total{job="audit-verify"}` on mismatch; periodic chain-head anchors are written to object storage under WORM/object-lock where available. Audit tables accept only INSERT for application roles (no UPDATE/DELETE grants).
-- **Retention and access.** Default 25 months, tenant-extendable, exportable (NDJSON) for SIEM shipping via the Loki/OTLP pipeline or file export. Readable by AUDITOR and TENANT_ADMIN (tenant scope) and PLATFORM_ADMIN (platform events); audit reads are themselves audited.
+- **Chain write path.** Chaining is applied by an **asynchronous batch chainer**, not synchronously at insert — per-tenant hash-at-insert would serialize every tenant's audit writes through a single row lock, untenable at NFR-042 volumes. Rows INSERT with `prev_hash`/`hash` unset; a single-writer-per-tenant chainer job assigns both in strict `auditId` (UUIDv7) order per tenant, which is the per-tenant sequencing mechanism. Chain lag carries an SLO (default: 95% of rows chained within 60 s, all within 5 min), is exposed as a metric, and the verifier treats unchained rows older than the SLO bound as failures. Across monthly RANGE partitions the chain **continues unbroken**: the first row of a new partition links to the hash of the last row of the previous partition, and partition-boundary chain heads are included in the periodic object-storage anchors.
+- **Retention and access.** Default 25 months, tenant-extendable, exportable (NDJSON) for SIEM shipping via the Loki/OTLP pipeline or file export. Readable by SECURITY_AUDITOR and TENANT_ADMIN (tenant scope) and PLATFORM_ADMIN (platform events); audit reads are themselves audited.
 
 ## 12. Compliance Mapping
 
@@ -268,7 +296,7 @@ Compliance mapping is evidence support, not certification: the deploying organiz
 
 - [ ] AuthN: JWT validation negative tests (expired, wrong audience/issuer, alg confusion, tampered signature); local-account lockout; break-glass audit.
 - [ ] AuthZ: per-endpoint permission matrix tests generated from the permission catalog; resource-level ownership tests (cross-team, cross-org denial); RLS verified by attempting cross-tenant reads with a mis-scoped application session.
-- [ ] Tenant isolation: automated cross-tenant probe suite across API, RAG retrieval, report artifacts, cache keys, Kafka consumer handling of mismatched envelope `tenantId`.
+- [ ] Tenant isolation: automated cross-tenant probe suite across API, RAG retrieval, report artifacts, cache keys, Kafka consumer handling of mismatched envelope `tenantId`, and object-storage prefix isolation (attempted cross-prefix reads/writes through the storage service on `eip-ingest`/`eip-artifacts`, per ADR-018 — this periodic test is the stated mitigation for not using per-tenant MinIO credentials, §5).
 - [ ] Secrets: no plaintext secrets in DB dumps, logs, traces, API responses, or heap dumps (sampled); rotation drill for master key and a connector secret; reveal-permission audit verified.
 - [ ] AI: prompt-injection regression corpus (poisoned RAG documents, hostile MCP tool results) must not trigger out-of-manifest tool calls or policy-violating outputs; budget exhaustion behaves as specified; external-egress redaction verified.
 - [ ] Web: OWASP ASVS L2 baseline — CSRF, XSS (report/dashboard rendering of ingested content), SSRF on connector URL config (deny link-local/metadata ranges, DNS-rebinding protection), injection (SQL/JSONB), file upload handling for Generic File/Document connector.
@@ -287,7 +315,7 @@ Compliance mapping is evidence support, not certification: the deploying organiz
 
 ## 15. Acceptance Criteria
 
-- [ ] Given a user with MANAGER on Team A only, when they request Team B delivery-risk detail via API or RAG query, then the response is 403/empty and an `access.denied` audit event is recorded.
+- [ ] Given a user with ENGINEERING_MANAGER on Team A only, when they request Team B delivery-risk detail via API or RAG query, then the response is 403/empty and an `access.denied` audit event is recorded.
 - [ ] Given a tenant with pseudonymization enabled, when any dashboard, report, or RAG retrieval includes individual-grain data, then only `member_pseudo_id` values appear and de-mapping requires TENANT_ADMIN with audit.
 - [ ] Given a poisoned document containing instruction-like text, when an agent retrieves it, then no out-of-manifest tool call occurs and the source is traceable in the agent run audit.
 - [ ] Given an external LLM provider enabled with identity-egress restricted, when an agent prompt contains Member identity data, then the prompt is redacted before egress and the LLM call audit marks it external.

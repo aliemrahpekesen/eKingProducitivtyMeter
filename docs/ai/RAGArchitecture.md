@@ -4,6 +4,8 @@ Retrieval-Augmented Generation subsystem of the Engineering Intelligence Platfor
 
 Related documents: `AgentArchitecture.md`, `MCPArchitecture.md`, `../architecture/SecurityModel.md`.
 
+Requirements traceability: this document implements PRD FR-095–FR-101 — the ingestion → chunking → embedding → vector store → retrieval pipeline (FR-095), the VectorStore SPI with pgvector default and Qdrant option (FR-096), permission-aware, tenant-isolated retrieval with citations (FR-097), incremental and scheduled re-indexing (FR-098), retrieval audit logging (FR-099), the indexed corpus of canonical entities and ingested files (FR-100), and per-tenant embedding model configurability with air-gapped local providers (FR-101) — and honors NFR-041 (no cross-tenant data access in vector queries) and NFR-051 (air-gapped operation).
+
 ## 1. Goals and Non-Goals
 
 ### 1.1 Goals
@@ -76,9 +78,23 @@ Each document flows through a persisted indexing job (`rag_index_job`): `PENDING
 | Store | Contents |
 |---|---|
 | PostgreSQL (`rag_document`, `rag_chunk`, `rag_index_job`, `rag_acl_grant`, `rag_retrieval_audit`) | Document registry and versions, chunk text + metadata, job state, normalized ACL grants, retrieval audit. All RLS-protected. |
-| pgvector (`rag_chunk_embedding_<modelKey>`) or Qdrant collection per model | Embeddings + filterable payload subset (tenantId, source, aclRefs, deletedAt). |
+| pgvector (`rag_chunk_embedding_<modelKey>`, RLS-protected like all EIP tables) or Qdrant — **one collection per tenant per embedding space**, named `eip_<tenantId>_<embeddingSpace>` (ADR-016) | Embeddings + filterable payload subset (tenantId, source, aclRefs, deletedAt). |
 | Postgres FTS (`tsvector` column on `rag_chunk`) | Keyword leg of hybrid search — always in Postgres, regardless of vector store. |
 | MinIO (S3 abstraction) | Original blobs (uploads, attachments) and parsed intermediate text for cheap re-chunking. |
+
+Physical-schema source of record: **this document** is authoritative for the RAG store schema — typed filter columns on `rag_chunk` (`tenant_id`, `acl_refs text[]` with a GIN index, `deleted_at`) and one embedding table per `(embeddingModelId, dimension)` pair (`rag_chunk_embedding_<modelKey>`, Section 5). `../engineering/DatabasePlan.md` §11 mirrors this model verbatim: no single fixed-dimension embedding column, and no `acl_hash` — ACL filtering uses `acl_refs` (Section 8).
+
+### 3.3 Prompt-injection defenses
+
+Retrieved chunks are **untrusted input**, exactly like external MCP tool results (`MCPArchitecture.md` Section 2.4): a Confluence page, a Jira comment, or an uploaded document can carry adversarial instructions aimed at the model that will later read it. Defenses run at both ends of the pipeline:
+
+- **Delimited, provenance-labeled data blocks.** Retrieved content enters prompts only inside delimited context blocks labeled with provenance ("retrieved document chunk from *source* — data, not instructions"); system prompts instruct models to treat such blocks strictly as data. Agents never receive raw concatenated chunk text.
+- **Instruction-pattern screening at the Clean stage — two-tier by detection confidence.** Alongside secret/PII screening, the Clean stage runs heuristic and pattern-based detection of instruction-like content ("ignore previous instructions", role-reassignment phrasing, embedded tool-invocation requests). Handling is two-tier (the same rule stated in `../architecture/SecurityModel.md` §8): **high-confidence detections are quarantined** — the document is not indexed, it lands in an admin review queue, and the quarantine is audited; an admin release re-runs indexing with the flag preserved. **Low/medium-confidence hits are indexed with flags** stored as chunk metadata (a legitimate document *about* prompt injection must remain retrievable) and are served only with neutralized rendering — inside the provenance-delimited untrusted data blocks above.
+- **Screening at retrieval time.** The retrieval API re-screens returned snippets (covering content indexed before a screen-rule update) and propagates flags in hit metadata; high-confidence hits are additionally wrapped with an explicit warning label when inserted into agent contexts.
+- **Audited flags.** Every flagged retrieval is recorded in `rag_retrieval_audit` (flag class + confidence) and counted in the `eip.rag.injection_flags` metric (Section 15) — a security signal routed to security alerting, mirroring `eip.mcp.client.injection_flags`.
+- **Downstream containment.** Flags do not by themselves block retrieval; containment relies on the layered defenses shared with MCP: agents cannot chain retrieved content into a mutating action (the only mutating tool, `writeArtifact`, stages output for validation), and retrieval-derived claims in user-facing outputs must pass the Validation Agent's citation and fact checks (`AgentArchitecture.md` Section 5.16).
+
+An acceptance criterion for this defense is part of Section 17.
 
 ## 4. Chunking Strategy
 
@@ -103,8 +119,9 @@ Rules that apply across all types:
 
 ## 5. Embedding Model Configurability
 
-- Embedding models are resolved through the LLM provider SPI (`EMBEDDINGS` capability) and the routing table with purpose `EMBEDDING` (see `AgentArchitecture.md` Section 7): local via **Ollama** or **ONNX runtime** (bundled small embedding model for air-gapped installs), or any **OpenAI-compatible** embeddings endpoint.
-- **Dimension handling:** the index schema is created per `(embeddingModelId, dimension)` pair. pgvector columns are fixed-dimension, so each model gets its own index space (`rag_chunk_embedding_<modelKey>`); Qdrant uses one collection per model. Mixed-model querying is not permitted — a query embeds with exactly the model that indexed the target space.
+- Embedding models are resolved through the LLM provider SPI (`EMBEDDINGS` capability) and the routing table with purpose `EMBEDDING` (see `AgentArchitecture.md` Section 7): local via **Ollama** or **ONNX runtime**, or any **OpenAI-compatible** embeddings endpoint. The **bundled air-gapped default is `bge-small-en-v1.5` (384 dimensions, ONNX, Apache-2.0)**, shipped in the platform images so RAG works with zero external downloads; admins may override the embedding model per tenant (FR-101). Per its model card, the bundled default applies a query-side instruction prefix ("Represent this sentence for searching relevant passages: ") through the prefix-template mechanism below; passages are embedded without a prefix.
+- **Isolation on shared embedding endpoints (NFR-041):** embedding batches are assembled per tenant + model only (Section 3.1), and shared inference endpoints run with cross-request caching disabled or tenant-partitioned, consistent with `AgentArchitecture.md` Section 7.
+- **Dimension handling:** the index schema is created per `(embeddingModelId, dimension)` pair — an **embedding space**. pgvector columns are fixed-dimension, so each model gets its own index space (`rag_chunk_embedding_<modelKey>`); Qdrant uses **one collection per tenant per embedding space**, named `eip_<tenantId>_<embeddingSpace>` (ADR-016). Mixed-model querying is not permitted — a query embeds with exactly the model that indexed the target space.
 - **Model change = re-index.** Switching the embedding model for a tenant triggers a full re-embed of that tenant's corpus into a new index space. The old space keeps serving retrieval until the new space reaches completeness threshold (default 99% of live chunks), then traffic cuts over atomically and the old space is garbage-collected. Progress and cutover are visible in the admin UI and audited.
 - Embedding text is prefixed with lightweight instruction/context strings only where the model card requires it; the prefix template is part of the model configuration, not hardcoded.
 
@@ -116,13 +133,15 @@ The `VectorStore` SPI abstracts index and query operations: `upsertChunks`, `del
 |---|---|---|
 | Deployment | Inside the existing PostgreSQL 16 — zero extra components | Separate service (container/StatefulSet) |
 | Index type | HNSW (`vector_cosine_ops`), per-model index | HNSW with quantization options |
-| Filtering | SQL WHERE on metadata columns + RLS enforced in-database | Payload filters; tenant filter applied by the SPI layer (mandatory) |
+| Filtering | SQL WHERE on metadata columns + RLS enforced in-database | Collection-per-tenant routing (`eip_<tenantId>_<embeddingSpace>`) + mandatory SPI tenant payload filter + result-side recheck (Section 8) |
 | Hybrid search | Native: vector + Postgres FTS in one SQL plan | Vector in Qdrant + FTS in Postgres, fused in the SPI (RRF) |
 | Consistency with domain data | Transactional with chunk metadata (same DB) | Eventually consistent; outbox pattern keeps stores aligned |
 | Scale sweet spot | Up to low tens of millions of chunks per cluster | Very large corpora, high QPS, memory-tiered setups |
 | Operational cost | Lowest (reuses Postgres HA/backup) | Additional service to operate, back up, monitor |
 
-**When to choose which:** stay on pgvector unless (a) corpus exceeds ~20M chunks per cluster or retrieval p95 misses targets after HNSW tuning, (b) retrieval QPS materially competes with OLTP load on the primary Postgres, or (c) quantization/memory-tiering is required. Qdrant migration is an offline re-index into a Qdrant collection followed by SPI target switch — the retrieval API and all callers are unchanged.
+**When to choose which:** stay on pgvector unless (a) corpus exceeds ~20M chunks per cluster or retrieval p95 misses targets after HNSW tuning, (b) retrieval QPS materially competes with OLTP load on the primary Postgres, or (c) quantization/memory-tiering is required. Qdrant migration is an offline re-index into per-tenant Qdrant collections (`eip_<tenantId>_<embeddingSpace>`) followed by SPI target switch — the retrieval API and all callers are unchanged.
+
+Tenancy invariant (ADR-016, stated identically in `../architecture/SecurityModel.md` §5): pgvector isolates tenants store-side via Postgres RLS; Qdrant isolates store-side via one collection per tenant per embedding space (`eip_<tenantId>_<embeddingSpace>`). In both cases the SPI-enforced tenant filter (Section 9) and the result-side recheck (Section 8) remain as the second and third defense-in-depth layers — three layers total, regardless of store choice.
 
 ## 7. Chunk Metadata Model
 
@@ -151,8 +170,9 @@ Deny-by-default: a chunk is returned only if the caller's effective permissions 
 1. **ACL sync.** Connectors sync source-tool ACLs alongside content (Confluence space/page restrictions, Jira project/issue security, Git repo visibility) into a normalized ACL model, refreshed on the connector's incremental sync cadence. Uploaded documents and generated reports carry EIP-native RBAC ACLs.
 2. **Effective-permission resolution.** At query time, the caller's principal (always the initiating principal of the agent run — never a service superuser) is resolved to a set of ACL grant keys via identity mapping (OIDC subject → source-tool identities, maintained by the tenancy module).
 3. **Filter push-down.** The grant-key set becomes a mandatory filter (`aclRefs && callerGrantKeys`) combined with `tenantId` and `deletedAt IS NULL` — applied inside the vector store query, not post-filtered, so scores and `k` are computed over the permitted universe only.
-4. **Staleness bound.** ACL sync lag is bounded by connector sync frequency; the admin UI shows per-source ACL freshness. For revocation-sensitive sources, webhook-driven ACL updates apply immediately where the source supports them.
+4. **Staleness bound.** ACL sync lag is bounded by connector sync frequency; the admin UI shows per-source ACL freshness. For revocation-sensitive sources, webhook-driven ACL updates apply immediately where the source supports them. **Residual risk:** between a revocation at the source and the next ACL sync, a caller whose access was just revoked can still retrieve affected chunks — retrieval enforces the last-synced ACLs, not the source's live state. For sources without ACL webhooks, configure the ACL sync interval to **≤ 15 minutes** where revocation sensitivity matters, and treat `eip.rag.acl.freshness_seconds` alerting (Section 15) as a security control, not merely an ops signal. Deletion is not affected by this window: content deleted at the source is tombstoned on the deletion event itself (Section 10).
 5. **No cross-principal caching.** Retrieval caches key on `(tenantId, principalGrantHash, queryHash)` — results are never shared across differing permission sets.
+6. **Result-side recheck (fail closed).** Before hits leave the retrieval API, every hit is re-verified against the RLS-protected `rag_chunk` table: the hit's `tenantId` must match the run context and `aclRefs && callerGrantKeys` must hold. Violating hits are **dropped — fail closed** — and counted in the security metric `eip.rag.acl.recheck_violations` (Section 15); any nonzero value means an upstream layer (SPI filter push-down or index payload) mis-filtered and is treated as a security incident signal, not an ops signal. This is the third defense layer asserted by `../architecture/SecurityModel.md` §4 (enforcement layer 3c) and §5 (ADR-016), after store-level isolation (RLS / collection-per-tenant) and the SPI filter push-down of rule 3.
 
 Identity mapping details: the tenancy module maintains `identity_mapping (tenantId, eipPrincipalId, sourceSystem, sourceIdentity)` rows populated by connector user-sync where available (Jira/Confluence account IDs, Git usernames/emails) and by admin-managed mapping for the rest. Unmapped principals resolve to public-only grants for that source — never to broad access. Group-based ACLs (Confluence groups, Jira roles) are expanded to grant keys at ACL-sync time, so query-time resolution is a set lookup, not a recursive expansion.
 
@@ -161,7 +181,8 @@ Service principals: MCP service tokens and scheduled report runs execute retriev
 ## 9. Tenant Isolation Guarantees
 
 - Every RAG table carries `tenant_id` with Postgres RLS enabled — the same platform-wide row-level tenant isolation as all EIP data.
-- The `VectorStore` SPI injects `tenantId` from the authenticated run context; it is not a caller-suppliable parameter. For Qdrant, the SPI adds the tenant payload filter to every operation and refuses unfiltered queries at the code level.
+- The `VectorStore` SPI injects `tenantId` from the authenticated run context; it is not a caller-suppliable parameter. For Qdrant, the SPI routes every operation to the tenant's own collection — **one collection per tenant per embedding space**, named `eip_<tenantId>_<embeddingSpace>` (ADR-016) — *and* adds the tenant payload filter to every operation, refusing unfiltered queries at the code level.
+- Three defense-in-depth layers apply regardless of store choice, stated identically in `../architecture/SecurityModel.md` §5: (1) store-level isolation — Postgres RLS for pgvector, collection-per-tenant for Qdrant; (2) the SPI-enforced tenant filter; (3) the result-side recheck of Section 8 (rule 6), which fails closed and emits `eip.rag.acl.recheck_violations`.
 - Embedding and indexing jobs are tenant-partitioned on Kafka (key includes `tenantId`), so a tenant's re-index cannot starve or interleave with another's checkpoints.
 - Audit rows (Section 13), quota ledgers, and index statistics are all tenant-scoped.
 - Acceptance: Given any retrieval request, when executed with tenant A's context, then zero chunks with `tenantId != A` can appear in results, regardless of filter parameters supplied by the caller or the model.
@@ -201,13 +222,14 @@ ragSearch(request):
   mode: HYBRID | VECTOR | KEYWORD          # default HYBRID
   diversity: { mmr: bool, lambda: 0..1 }   # default mmr=true, lambda=0.7
   rerank: bool                              # optional cross-encoder re-ranking
-→ { hits[]: { chunkId, score, snippet, metadata }, timing, appliedFilters }
+→ { hits[]: { chunkId, score, snippet, metadata }, retrievalAuditId, timing, appliedFilters }
 ```
 
 - **Hybrid search:** vector similarity (cosine over HNSW) fused with keyword search (Postgres FTS, `websearch_to_tsquery`) via Reciprocal Rank Fusion. Hybrid is the default because SDLC corpora are dense with exact identifiers (issue keys, service names) that pure vector search under-ranks.
-- **Re-ranking option:** an optional local cross-encoder re-ranker (ONNX; or an LLM-scored re-rank through the provider SPI) reorders the fused top-50 before final cut. Off by default for latency; recommended for report-generation runs where quality dominates.
+- **Re-ranking option:** an optional local cross-encoder re-ranker reorders the fused top-50 before final cut. The re-ranker model is **admin-supplied by default**; for air-gapped installs the platform ships an **optional bundled cross-encoder, `bge-reranker-base` (ONNX)**, and an LLM-scored re-rank through the provider SPI is also supported. Off by default for latency; recommended for report-generation runs where quality dominates.
 - **Top-k + MMR:** Maximal Marginal Relevance diversification over the candidate pool avoids returning five near-identical chunks of one document; `lambda` balances relevance vs. diversity.
-- `ragFetchChunk(chunkId)` returns full chunk text + neighbors (previous/next chunk of the same document) for context expansion, subject to the same ACL checks.
+- **`retrievalAuditId`** identifies the `rag_retrieval_audit` row written for this search (Section 13). Callers propagate it into context bundles and citation entries — the RAG Retrieval Agent carries it per chunk in `contextBundle` (`AgentArchitecture.md` Section 5.14), and the machine-readable citation entry (Section 12) embeds it — so every citation is independently verifiable against the audit trail.
+- `ragFetchChunk(chunkId)` returns full chunk text + neighbors (previous/next chunk of the same document) for context expansion, subject to the same ACL checks; each fetch is audited with its own `retrievalAuditId`.
 
 Error contract: authorization failures, unknown chunk IDs, and store outages return typed structured errors (RFC 7807 style internally), never empty results masquerading as "no matches" — agents must be able to distinguish "nothing relevant exists" from "retrieval failed", because the two lead to different output language (absence of evidence vs. sources unavailable).
 
@@ -223,7 +245,7 @@ Every generated statement that relies on retrieved content must be attributable:
 
 - Retrieval results carry `chunkId` and `sourceUrl`. Agents emit citations inline as `[n]` markers bound to a citation list: `{n, chunkId, sourceUrl, title, headingPath|pageNo, sourceModifiedAt}`.
 - The Validation Agent's citation check (see `AgentArchitecture.md` Section 5.16) verifies that (a) every cited `chunkId` existed in the run's retrieval results, (b) every `sourceUrl` resolves to a registered source, and (c) factual claims derived from retrieval carry at least one citation. Statements failing (c) are flagged and either cited on revision or removed.
-- Rendered outputs (markdown/HTML/PDF via `eip-reports`) preserve citations as hyperlinks to the source tool (`ExternalRef` URLs), and `GeneratedReport` entities store the machine-readable citation list for downstream indexing and audit.
+- Rendered outputs (markdown/HTML/PDF via `eip-reports`) preserve citations as hyperlinks to the source tool (`ExternalRef` URLs), and `GeneratedReport` entities store the machine-readable citation list for downstream indexing and audit. Generated HTML is sanitized against a strict allow-list before rendering (`AgentArchitecture.md` Section 4, rule 6), so citation links and report markup cannot carry stored-XSS payloads into the SPA.
 
 Machine-readable citation entry:
 
@@ -256,7 +278,7 @@ Every retrieval is audited: `rag_retrieval_audit (id, tenantId, principal, runId
 
 ## 15. Sizing and Performance Guidance
 
-- **Rules of thumb:** 1M chunks at 768 dimensions ≈ 3 GB vector data + HNSW index ≈ 2–4 GB additional; plan Postgres memory so the HNSW index for the hot tenant set fits in RAM. Typical enterprise corpus (50k Confluence pages, 200k Jira issues, 500 repos' docs) lands at 1.5–4M chunks.
+- **Rules of thumb:** 1M chunks at 768 dimensions ≈ 3 GB vector data + HNSW index ≈ 2–4 GB additional (768 is a representative sizing point for mid-size models; the bundled 384-dimension default `bge-small-en-v1.5` roughly halves vector data and index size); plan Postgres memory so the HNSW index for the hot tenant set fits in RAM. Typical enterprise corpus (50k Confluence pages, 200k Jira issues, 500 repos' docs) lands at 1.5–4M chunks.
 - **Latency targets:** hybrid top-8 retrieval p95 ≤ 300 ms (pgvector, warm index) without re-rank; ≤ 900 ms with cross-encoder re-rank of 50 candidates on CPU.
 - **HNSW tuning:** start `m=16, ef_construction=200`, query-time `ef_search=80`; raise `ef_search` for recall-sensitive report runs (per-request override), lower for interactive assist.
 - **Indexing throughput:** dominated by embedding; a single mid-size GPU via vLLM/Ollama sustains ~1–3k chunks/min. Size initial full indexing windows accordingly and prefer incremental sync thereafter.
@@ -270,8 +292,10 @@ Observability (Micrometer → OTel → Prometheus/Grafana, per the platform obse
 | `eip.rag.index.failures` (by error class) | counter | Alert on parse-failure rate > 2% of documents. |
 | `eip.rag.retrieval.latency` (p50/p95, by mode) | histogram | Alert p95 > 300 ms sustained (no-rerank hybrid). |
 | `eip.rag.retrieval.empty_rate` | gauge | Trend signal — a spike often indicates ACL sync or index-space misconfiguration. |
-| `eip.rag.acl.freshness_seconds` (per source) | gauge | Alert beyond configured staleness threshold. |
+| `eip.rag.acl.freshness_seconds` (per source) | gauge | Alert beyond configured staleness threshold (a security control for revocation-sensitive sources — Section 8). |
 | `eip.rag.embed.throughput` | gauge | Capacity planning for re-index windows. |
+| `eip.rag.injection_flags` (by flag class) | counter | Security signal — route to security alerting, not just ops (Section 3.3; mirrors `eip.mcp.client.injection_flags`). |
+| `eip.rag.acl.recheck_violations` | counter | Security signal — any nonzero value pages security review: an upstream tenant/ACL filter layer failed and the result-side recheck dropped the hits (Section 8, rule 6). |
 
 All retrieval spans carry `traceparent`, so a slow agent run can be traced from LLM call to retrieval to SQL/HNSW timing in Tempo.
 
@@ -290,8 +314,14 @@ All retrieval spans carry `traceparent`, so a slow agent run can be traced from 
 
 ## 17. Acceptance Criteria
 
-- [ ] Given a caller without permission to a Confluence space, when they trigger any retrieval, then no chunk from that space appears in results and the attempt is audited.
-- [ ] Given a document deleted at the source, when the next sync or webhook processes it, then its chunks are tombstoned and absent from all subsequent retrievals.
-- [ ] Given an embedding model change, when re-indexing completes and cuts over, then retrieval quality on the golden set meets or exceeds the prior configuration and the old index space is removed.
-- [ ] Given any agent output containing retrieval-derived claims, when validated, then every claim carries a citation whose chunkId appeared in that run's retrieval results.
-- [ ] Given the vector store is down, when an agent run needs retrieval, then the run degrades with an explicit sources-unavailable statement and no fabricated citations.
+These criteria trace to FR-095–FR-101, NFR-041, and NFR-051.
+
+- [ ] Given a caller without permission to a Confluence space, when they trigger any retrieval, then no chunk from that space appears in results and the attempt is audited (FR-097, FR-099).
+- [ ] Given a document deleted at the source, when the next sync or webhook processes it, then its chunks are tombstoned and absent from all subsequent retrievals (FR-098).
+- [ ] Given an embedding model change, when re-indexing completes and cuts over, then retrieval quality on the golden set meets or exceeds the prior configuration and the old index space is removed (FR-101).
+- [ ] Given any agent output containing retrieval-derived claims, when validated, then every claim carries a citation whose chunkId appeared in that run's retrieval results (FR-097).
+- [ ] Given the vector store is down, when an agent run needs retrieval, then the run degrades with an explicit sources-unavailable statement and no fabricated citations (FR-095).
+- [ ] Given a retrieved chunk containing instruction-like content, when it enters an agent context, then it is delivered only inside a provenance-labeled data block with its injection flag set, the flag is audited and counted in `eip.rag.injection_flags`, and no unscreened chunk text reaches a prompt (Section 3.3).
+- [ ] Given any `ragSearch` call, when it returns, then the response carries the `retrievalAuditId` of its audit row and every downstream citation built from those hits embeds the same id (FR-099).
+- [ ] Given an injected SPI-filter fault (test seam disabling the tenant/ACL filter push-down), when retrievals execute, then zero violating hits leave the retrieval API — the result-side recheck drops them all — and the `eip.rag.acl.recheck_violations` counter is nonzero (NFR-041, Section 8 rule 6).
+- [ ] Given a document with a high-confidence injection detection at the Clean stage, when indexing runs, then the document is quarantined — not indexed — appears in the admin review queue, and the quarantine is audited (Section 3.3).

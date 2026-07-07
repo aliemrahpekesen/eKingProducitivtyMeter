@@ -2,7 +2,7 @@
 
 This document defines the supported deployment topologies for the Engineering Intelligence Platform (EIP), the deployable units that compose every topology, sizing guidance, scaling behavior, air-gapped installation, upgrade strategy, HA/DR targets, network zoning, environment configuration, and on-prem TLS management. EIP is on-premise first: no SaaS dependency exists except optional, configurable LLM providers, and every topology below runs fully air-gapped with local LLMs (Ollama/vLLM).
 
-Related documents: `../architecture/SecurityModel.md`, `../architecture/ObservabilityModel.md`, `../operations/OperationsGuide.md`.
+Related documents: `./SecurityModel.md`, `./ObservabilityModel.md`, `../operations/OperationsGuide.md`.
 
 ## 1. Deployable Units
 
@@ -46,7 +46,7 @@ flowchart TB
             KAFKA[("Kafka (KRaft)<br/>single broker")]
             MINIO[("MinIO")]
             KC["Keycloak"]
-            OLLAMA["Ollama<br/>(local LLM + embeddings)"]
+            OLLAMA["Ollama (optional add-on profile)<br/>(local LLM + embeddings)"]
         end
         subgraph OBS["Observability"]
             OTEL["OTel Collector"]
@@ -61,7 +61,8 @@ flowchart TB
     WAI --> OLLAMA
     WREP --> MINIO
     MIG --> PG
-    APPS -. OTLP .-> OTEL --> PROM --> GRAF
+    APP & WING & WANA & WAI & WREP -. OTLP .-> OTEL
+    OTEL --> PROM --> GRAF
 ```
 
 Characteristics:
@@ -69,7 +70,7 @@ Characteristics:
 - All four worker profiles may be collapsed into a single `eip-workers` container (`WORKER_PROFILE=ingestion,analytics,ai,reports`) for minimal footprint.
 - Kafka runs as a single KRaft broker; replication factor 1.
 - Simulation connectors (`/simulation` data packs, later phase) make the demo self-contained without real tool endpoints.
-- Ollama serves both chat and embedding models locally; no egress required.
+- The baseline Compose profile (core + observability, no local LLM) runs on a 16 GB host and becomes healthy within 15 minutes (NFR-050). Ollama is an **optional add-on profile** (+8 GB memory, i.e. 24–32 GB with local AI): when enabled, it serves both chat and embedding models locally with no egress required; without it, AI features route to a remote/external LLM endpoint or stay disabled.
 
 ## 3. Topology B — Small-Production Kubernetes (Single Cluster)
 
@@ -84,7 +85,7 @@ flowchart TB
             APP["eip-app<br/>Deployment, 2–3 replicas<br/>HPA on RPS"]
             WING["eip-workers ingestion<br/>1–3 replicas, HPA on Kafka lag"]
             WANA["eip-workers analytics<br/>1–2 replicas, HPA on Kafka lag"]
-            WAI["eip-workers ai<br/>1–2 replicas, HPA on Kafka lag"]
+            WAI["eip-workers ai<br/>1–2 replicas, HPA on run backlog"]
             WREP["eip-workers reports<br/>1 replica, HPA on Kafka lag"]
             MIG["migrations Job<br/>(pre-upgrade hook)"]
         end
@@ -110,7 +111,7 @@ flowchart TB
     WING & WANA & WAI & WREP --> KAFKA & CNPG
     WAI --> VLLM
     WREP --> MINIO
-    NSAPP -. OTLP .-> OTEL
+    APP & WING & WANA & WAI & WREP -. OTLP .-> OTEL
 ```
 
 Characteristics:
@@ -118,7 +119,7 @@ Characteristics:
 - PostgreSQL is managed by an operator (CloudNativePG recommended): synchronous replica, automated failover, scheduled base backups + WAL archiving to MinIO.
 - Kafka via Strimzi (or equivalent): 3 KRaft brokers, replication factor 3, `min.insync.replicas=2` for all `eip.` topics.
 - Pod anti-affinity spreads replicas of each Deployment across nodes; PodDisruptionBudgets keep at least 1 replica of `eip-app` and each worker profile during node drains.
-- KEDA (or Prometheus-adapter HPA) drives worker autoscaling on `eip_kafka_consumer_lag` (see Section 6).
+- KEDA (or Prometheus-adapter HPA) drives worker autoscaling on `eip_kafka_consumer_lag` — except the `ai` profile, which scales on run-backlog depth/age (see Section 6).
 
 ## 4. Topology C — Large-Enterprise OpenShift (Multi-AZ)
 
@@ -173,11 +174,11 @@ Characteristics:
 
 ## 5. Sizing Guidance
 
-Baseline assumption: 1 tenant ≈ 500 developers, ~20 connectors, ~2M domain events/day unless stated. Storage is for 13 months of hot retention (see `../architecture/SecurityModel.md` §7 for retention policy).
+Baseline assumption: a representative tenant mix totaling ≤ 5,000 active engineers (the ArchitectureOverview D3 envelope), e.g. 10 tenants × 500 developers, with ~20 connectors. The ingest envelope every row below is sized and load-tested against is **NFR-003: 100k events/hour sustained per deployment (≈ 2.4M events/day, i.e. ~2–2.5M domain events/day deployment-wide at the envelope) with 3× burst for 15 minutes** — the single binding capacity number for all topologies. The ArchitectureOverview D3 "~10×" figure is a fan-out/replay headroom design point, not a sizing baseline. Storage sizing assumes 25 months of canonical-model and 37 months of metric-series hot history as a representative tenant policy — the NFR-070 default is indefinite retention, so scale storage linearly beyond that (the canonical retention table lives in `./SecurityModel.md` §7).
 
 | Component | A: Compose (demo) | B: Small-prod K8s | C: Enterprise OpenShift |
 |---|---|---|---|
-| Host/node count | 1 host: 8 vCPU / 32 GB / 250 GB SSD | 3–5 nodes: 8 vCPU / 32 GB each | 9+ nodes across 3 AZs, pool-specific sizes |
+| Host/node count | 1 host: 4–8 vCPU / 16 GB / 250 GB SSD (baseline profile, no local LLM; NFR-050) — 24–32 GB with the optional Ollama profile | 3–5 nodes: 8 vCPU / 32 GB each | 9+ nodes across 3 AZs, pool-specific sizes |
 | `eip-app` | 1× (1 vCPU / 2 GB) | 2–3× (2 vCPU / 4 GB) | 4–6× (4 vCPU / 8 GB) |
 | `eip-workers` ingestion | shared 1× (1 vCPU / 2 GB) | 1–3× (2 vCPU / 4 GB) | 3–8× (4 vCPU / 8 GB) |
 | `eip-workers` analytics | (shared) | 1–2× (2 vCPU / 4 GB) | 2–4× (8 vCPU / 16 GB) |
@@ -188,7 +189,7 @@ Baseline assumption: 1 tenant ≈ 500 developers, ~20 connectors, ~2M domain eve
 | Redis 7 | 0.5 vCPU / 1 GB | 2× (1 vCPU / 4 GB) | 3+× (2 vCPU / 8 GB) |
 | MinIO / S3 | 0.5 vCPU / 1 GB / 50 GB | 4× (1 vCPU / 4 GB / 250 GB) | multi-AZ, 2+ TB usable, or enterprise S3 |
 | Keycloak / IdP | 1× (1 vCPU / 1 GB) | 2× (1 vCPU / 2 GB) | 2–3× or external enterprise IdP |
-| LLM serving (Ollama/vLLM) | 4 vCPU / 8 GB (7B quantized, CPU) | 1 GPU node (24 GB VRAM) or 8 vCPU / 32 GB CPU | 2+ GPU nodes (48–80 GB VRAM) for vLLM |
+| LLM serving (Ollama/vLLM) | optional add-on profile: +4 vCPU / +8 GB (7B quantized, CPU); not part of the 16 GB baseline | 1 GPU node (24 GB VRAM) or 8 vCPU / 32 GB CPU | 2+ GPU nodes (48–80 GB VRAM) for vLLM |
 | Observability stack | 1 vCPU / 2 GB / 20 GB | 2 vCPU / 8 GB / 100 GB | 4+ vCPU / 16 GB / 500 GB (federated) |
 
 ## 6. Scaling Model
@@ -198,9 +199,9 @@ Baseline assumption: 1 tenant ≈ 500 developers, ~20 connectors, ~2M domain eve
 | `eip-app` | Request rate + p95 latency (`eip_api_request_duration_seconds`) | HPA on RPS via custom metric (Prometheus adapter), fallback CPU 70% | min 2, max 6 |
 | `eip-workers` ingestion | Kafka consumer lag on `eip.raw.*`, `eip.domain.*` (`eip_kafka_consumer_lag`) | KEDA ScaledObject / HPA on lag threshold (e.g. lag > 10k per replica) | min 1, max 8 |
 | `eip-workers` analytics | Lag on `eip.domain.*` → `eip.analytics.metrics` | KEDA/HPA on lag | min 1, max 4 |
-| `eip-workers` ai | Lag on `eip.ai.jobs` | KEDA/HPA on lag; ceiling additionally bounded by LLM serving capacity and per-tenant token budgets | min 1, max 4 |
+| `eip-workers` ai | **Run-backlog depth/age** (queued + claimed `agent_run` rows awaiting/executing work) — **not** raw Kafka consumer lag: the `eip.ai.jobs` offset is committed on claim (`../ai/AgentArchitecture.md` §3.5 commit-on-claim), so consumer lag stays near zero regardless of load, and crash recovery is RunStore-lease-driven, not Kafka-redelivery-driven | KEDA (Prometheus trigger on the run-backlog gauge) / HPA; ceiling additionally bounded by LLM serving capacity and per-tenant token budgets | min 1, max 4 |
 | `eip-workers` reports | Lag on `eip.reports.jobs` | KEDA/HPA on lag | min 1, max 3 |
-| Kafka partitions | Peak per-key throughput | Partitions per topic sized so max worker replicas ≤ partition count (default 12 partitions on high-volume topics); ordering preserved per key `tenantId+entityId` | resize requires planned change |
+| Kafka partitions | Peak per-key throughput | Partitions per topic sized so max worker replicas ≤ partition count (default 12 partitions on high-volume topics); ordering preserved per key `tenantId:entityId` on domain topics (key composition varies by topic family, see `../engineering/EventModel.md` §7) | resize requires planned change |
 | PostgreSQL | Connection count, replication lag | Vertical scaling + read replicas for dashboard queries; PgBouncer/connection pool in front | operator-managed |
 | Frontend | RPS | Replica count on the static server; content is cacheable | min 2 |
 
@@ -214,7 +215,7 @@ EIP must run with zero internet egress. The air-gapped procedure:
 2. **Offline model bundles.** LLM chat models and embedding models are shipped as offline bundles: Ollama model blobs (exported via `ollama pull` on a connected staging host, packaged as an OCI artifact or tarball, imported into the air-gapped Ollama model dir) and Hugging Face-format weights for vLLM and the embedding model, mounted as PVC/volume content. The release manifest lists tested model/version pairs; the RAG embedding model version is recorded per index so re-indexing is triggered on model change.
 3. **Charts/manifests.** Kustomize bases and overlays are shipped in the release archive; no remote bases.
 4. **Dependency-free runtime.** No container downloads anything at start: JDBC drivers, fonts for report/PDF rendering, and dashboard assets are baked into images.
-5. **Verification.** Post-mirror checklist: verify image signatures (cosign, see `../architecture/SecurityModel.md` §10), run the migrations job against a staging DB, start with simulation connectors, confirm `NetworkPolicy` default-deny egress shows no drops other than expected.
+5. **Verification.** Post-mirror checklist: verify image signatures (cosign, see `./SecurityModel.md` §10), run the migrations job against a staging DB, start with simulation connectors, confirm `NetworkPolicy` default-deny egress shows no drops other than expected.
 
 Air-gapped constraint on features: external LLM providers (OpenAI-compatible, Anthropic-compatible) are simply not configured; the LLM provider SPI routes all tenants/agents to local Ollama/vLLM endpoints.
 
@@ -235,11 +236,14 @@ Targets (small-prod defaults; enterprise deployments may tighten via the same me
 
 | Objective | Small-prod K8s | Enterprise OpenShift |
 |---|---|---|
-| RPO (Postgres) | ≤ 5 min (WAL archiving) | ≤ 1 min (sync replica + WAL) or per enterprise DBA SLA |
+| RPO (Postgres) | ≤ 5 min (WAL archiving/streaming; NFR-021 requires ≤ 15 min for production) | ≤ 1 min (sync replica + WAL) or per enterprise DBA SLA |
 | RPO (Kafka) | 0 within cluster (RF=3, acks=all) | 0 within cluster; cross-site per MirrorMaker2 policy |
-| RPO (object storage) | ≤ 24 h (scheduled bucket replication/backup) | ≤ 15 min (multi-AZ MinIO or enterprise S3 replication) |
-| RTO (full platform) | ≤ 4 h | ≤ 1 h |
-| Availability SLO (API) | 99.5%/30d | 99.9%/30d (see `../architecture/ObservabilityModel.md` §8) |
+| RPO (object storage) | ≤ 15 min (continuous bucket replication; NFR-021) | ≤ 15 min (multi-AZ MinIO or enterprise S3 replication) |
+| RTO (component/AZ failover, HA) | ≤ 30 min (NFR-022) | ≤ 30 min (NFR-022) |
+| RTO (full-platform rebuild from backup — a distinct scenario from HA failover) | ≤ 4 h | ≤ 4 h |
+| Availability SLO (API) | 99.5%/30d | 99.9%/30d (see `./ObservabilityModel.md` §8) |
+
+Single-node deployments (Compose topology or single-replica K8s) have no failover path: their RTO target is ≤ 4 h via restore from backup. Meeting the production RPO of ≤ 15 min (NFR-021) on a single node requires PostgreSQL WAL archiving plus continuous object-storage replication (`mc mirror --watch`); nightly backups alone are **not** sufficient for production. Demo/eval installs may explicitly relax RPO to 24 h (nightly backups only) with the stated warning that this does not meet NFR-021.
 
 Component failover behavior:
 
@@ -252,8 +256,10 @@ Component failover behavior:
 | Redis primary | Instance loss | Sentinel failover; Redisson locks re-acquired; cache is warm-up-only data | Cache misses; rate-limit counters may reset (fail-open documented) |
 | MinIO node | Node loss | Erasure coding tolerates configured parity loss | None within parity |
 | Keycloak/IdP | Outage | New logins fail; existing tokens valid until expiry; local break-glass admin available | None |
-| LLM endpoint | Outage | LLM provider SPI fallback chain (per-tenant/per-agent routing); AI jobs retry with backoff, then park in `eip.ai.jobs.<group>.dlq` | Delayed AI outputs; no data loss |
+| LLM endpoint | Outage | LLM provider SPI fallback chain (per-tenant/per-agent routing); AI jobs retry with backoff, then park in the consumer group's DLQ (`eip.ai.orchestrator.dlq`) | Delayed AI outputs; no data loss |
 | Connector target (Jira, GitHub, …) | Outage | Sync pauses at last checkpoint; `eip_connector_health` degrades; resumes incrementally | None; freshness SLO at risk |
+
+**Backup failure-domain requirement:** backup targets — PostgreSQL base backups + WAL archive, the object-storage mirror, and the config/master-key escrow — MUST reside in a **separate failure domain** from the primary deployment (second data center or off-site object store). Colocated backups void NFR-021/NFR-022 in a site-loss scenario: an RPO/RTO computed against a backup that dies with the site is fiction. The quarterly restore drill (`../operations/OperationsGuide.md` §6.3) restores from that off-site copy.
 
 DR: restore order is Postgres (PITR from base backup + WAL) → object storage bucket restore → Kafka topics recreated (event stream is rebuildable: connectors re-sync from checkpoints, or full re-sync as last resort) → redeploy manifests from the versioned release archive. Runbooks live in `../operations/OperationsGuide.md`.
 
@@ -312,7 +318,7 @@ There is **no other outbound traffic**: no telemetry phone-home, no license chec
 
 - **Env vars** for non-secret config: profile selection (`WORKER_PROFILE`), endpoints (`EIP_DB_HOST`, `EIP_KAFKA_BOOTSTRAP`, `EIP_REDIS_URL`, `EIP_S3_ENDPOINT`, `EIP_OIDC_ISSUER_URI`, `EIP_OTEL_EXPORTER_OTLP_ENDPOINT`), feature flags, tuning. Naming convention `EIP_*`, mapped to Spring properties.
 - **Mounted secrets** for credentials: Kubernetes `Secret` volumes (files, not env vars, to avoid exposure via `/proc` and crash dumps) — DB password, Kafka credentials, S3 keys, OIDC client secret, and the KMS master key when the `env/file` KMS SPI provider is used. With the Vault KMS SPI provider, only the Vault auth material is mounted (or Kubernetes auth is used) and data keys are unwrapped at runtime.
-- **Connector/tenant secrets** (tool tokens, webhook secrets) are never in env/manifests: they are stored in Postgres under AES-256-GCM envelope encryption (see `../architecture/SecurityModel.md` §6) and managed via the admin UI/API.
+- **Connector/tenant secrets** (tool tokens, webhook secrets) are never in env/manifests: they are stored in Postgres under AES-256-GCM envelope encryption (see `./SecurityModel.md` §6) and managed via the admin UI/API.
 - **Per-environment overlays**: `/infra/kubernetes` Kustomize overlays (`demo`, `small-prod`, `openshift-enterprise`) change only replicas, resources, storage classes, ingress hosts, and the registry prefix — never application logic.
 - **Config precedence**: baked defaults < profile YAML < env vars < mounted config files. Startup fails fast on missing required config (no silent defaults for endpoints or keys).
 
@@ -326,7 +332,7 @@ There is **no other outbound traffic**: no telemetry phone-home, no license chec
 
 ## 13. Acceptance Criteria
 
-- [ ] Given the Compose topology on a single 8 vCPU/32 GB host, when `docker compose up` completes, then migrations run first, all services become healthy, and simulation connectors ingest without any internet egress.
+- [ ] Given the Compose baseline profile (core + observability, no local LLM) on a single 16 GB host, when `docker compose up` completes, then migrations run first, all services become healthy within 15 minutes (NFR-050), and simulation connectors ingest without any internet egress.
 - [ ] Given the small-prod K8s topology, when a node hosting the Postgres primary is drained, then failover completes within 60 s and no acknowledged domain event is lost (RPO 0 with sync replica).
 - [ ] Given ingestion lag above the KEDA threshold, when lag persists for the configured window, then ingestion workers scale out up to max replicas and lag returns below threshold.
 - [ ] Given an air-gapped cluster with mirrored images and offline model bundles, when the release manifest digests are verified, then installation completes with default-deny egress and all AI features function on local models.

@@ -63,10 +63,10 @@ Streams flex: in Phase 0 the connector and analytics streams contribute to core 
 
 ## 4. Cross-phase engineering practices
 
-- **Trunk-based development:** short-lived branches into `main`, PR + green gates only; no release branches before Phase 5 GA cadence requires them.
+- **Trunk-based development:** short-lived branches into `main`, PR + green gates only; pre-GA phases (v0.1–v0.4) tag phase exits on `main` and cut a `release/v0.N` branch lazily from that tag only when a patch to a shipped release is needed — standing release branches become normal practice from the Phase 5 GA cadence.
 - **Feature flags for incomplete verticals:** every phase merges work-in-progress behind flags (`eip.features.*`), so `main` is always releasable and demos toggle honestly. Flags are removed within one phase of GA of the feature (flag debt is tracked).
 - **Docs-as-code kept in sync:** `/docs` changes ship in the same PR as behavior changes (a merge gate); Modulith documenter output regenerated in CI keeps architecture docs honest.
-- **ADR process:** decisions altering the brief-level architecture (stack, module boundaries, event contracts, SPIs) require an ADR under `/docs/architecture/adr/`, referenced from the PR; ADR summaries roll up into `../architecture/ArchitectureOverview.md` §7.
+- **ADR process:** decisions altering the brief-level architecture (stack, module boundaries, event contracts, SPIs) require an ADR under `/docs/adr/`, referenced from the PR; ADR summaries roll up into `../architecture/ArchitectureOverview.md` §7.
 - **Vertical-slice principle:** each phase ends with a runnable demo **through the UI** on the Docker Compose stack — never a backend-only milestone. If the UI slice is thin, it is still real (real auth, real data path, real audit).
 
 ## 5. Phase 0 — Foundations
@@ -80,7 +80,7 @@ Streams flex: in Phase 0 the connector and analytics streams contribute to core 
 | P0-E1-S1 | Monorepo scaffolding: Gradle multi-module `/backend`, Vite `/frontend`, `/infra`, `/scripts` per canonical layout | all | — | S |
 | P0-E1-S2 | CI pipeline: static, unit, integration, Modulith/ArchUnit stages; coverage gates | infra | P0-E1-S1 | M |
 | P0-E1-S3 | Docker Compose dev stack: Postgres 16+pgvector, Kafka (KRaft), Redis 7, MinIO, Keycloak, OTel Collector, Prometheus, Grafana | infra/docker-compose | P0-E1-S1 | M |
-| P0-E1-S4 | Developer docs: README, onboarding guide, `make dev` one-command bootstrap | docs, scripts | P0-E1-S3 | S |
+| P0-E1-S4 | Developer docs: README, onboarding guide, `make dev-up` one-command bootstrap | docs, scripts | P0-E1-S3 | S |
 | P0-E2-S1 | `eip-core` domain skeleton: shared kernel, canonical entity base types (WorkItem supertype, ExternalRef), Instant/UUIDv7 conventions | eip-core | P0-E1-S1 | M |
 | P0-E2-S2 | DB baseline: Flyway setup, tenant-scoped schema conventions, RLS policy template, partitioning conventions | eip-core, eip-app | P0-E2-S1 | M |
 | P0-E3-S1 | Tenancy: Organization/tenant model, tenant context propagation (web, Kafka, jobs), RLS enforcement | eip-tenancy | P0-E2-S2 | L |
@@ -97,7 +97,7 @@ Streams flex: in Phase 0 the connector and analytics streams contribute to core 
 
 1. **PR-1 Repo scaffolding** — monorepo layout, Gradle multi-module + Vite skeletons, editorconfig, licenses, CODEOWNERS per stream (P0-E1-S1).
 2. **PR-2 CI** — GitHub Actions/Jenkins pipeline: build, unit test stage, lint; branch protection wired (P0-E1-S2 first cut).
-3. **PR-3 Compose dev stack** — all infra services + healthchecks + `make dev` (P0-E1-S3).
+3. **PR-3 Compose dev stack** — all infra services + healthchecks + `make dev-up` (P0-E1-S3).
 4. **PR-4 Core domain module** — `eip-core` with WorkItem supertype, ExternalRef, event envelope types, Modulith verification test (P0-E2-S1).
 5. **PR-5 Tenancy + RBAC skeleton** — tenant entity, tenant context filter, role/permission model, first RLS policy + Testcontainers proof (P0-E3-S1/S2 skeleton).
 6. **PR-6 Audit** — audit store, `@Audited` aspect, first audited action (P0-E3-S4 skeleton).
@@ -112,17 +112,17 @@ Streams flex: in Phase 0 the connector and analytics streams contribute to core 
 
 **Integration points:** first contact with Keycloak (OIDC), PostgreSQL 16 + RLS, Redis, MinIO, Kafka (topic creation only), OTel Collector → Prometheus/Grafana/Tempo. Everything downstream assumes these are wired here.
 
-**Deliverables:** Compose dev stack; core platform modules with integration tests; committed OpenAPI baseline; Grafana starter dashboards; onboarding docs; ADR-0001 (modular monolith) through ADR-0005 (secrets design) recorded.
+**Deliverables:** Compose dev stack; core platform modules with integration tests; committed OpenAPI baseline; Grafana starter dashboards; onboarding docs; the initial ADR set (ADR-001 modular monolith … ADR-014 secrets envelope encryption) recorded per `../architecture/ArchitectureOverview.md` §7.
 
 **Exit criteria:**
-- [ ] `make dev` boots the full stack from a clean machine in ≤ 15 min
+- [ ] Docker Compose core + observability profile boots healthy in ≤ 15 min from a clean 16 GB host (NFR-050, per `../infrastructure/DockerCompose.md` §10); `make dev-up` boots the infra dev stack for local development
 - [ ] CI enforces unit+integration+Modulith gates; coverage ratchet active
 - [ ] Two seeded tenants; cross-tenant read provably blocked (RLS test + API probe)
 - [ ] RBAC matrix test generator running over all existing endpoints
 - [ ] Secret create/rotate flows audited and masked end-to-end
 - [ ] OTel traces from HTTP → DB visible in the dev stack
 
-**Demo script:** clean clone → `make dev` → log in as Deniz via Keycloak → create tenant, invite a `TENANT_ADMIN` → store a secret, rotate it → show masked value, audit entries, and the trace of the request in Grafana/Tempo → show CI on a PR failing a Modulith boundary violation, then passing.
+**Demo script:** clean clone → `make dev-up` → log in as Deniz via Keycloak → create tenant, invite a `TENANT_ADMIN` → store a secret, rotate it → show masked value, audit entries, and the trace of the request in Grafana/Tempo → show CI on a PR failing a Modulith boundary violation, then passing.
 
 **Risks & mitigations:** RLS + connection pooling pitfalls (mitigate: spike in week 1, dedicated integration test pattern); Keycloak learning curve (mitigate: pre-built realm export in `/infra`); over-engineering the platform (mitigate: everything must be consumed by a Phase 1 story or it's cut).
 
@@ -142,7 +142,7 @@ Streams flex: in Phase 0 the connector and analytics streams contribute to core 
 | P1-E2-S2 | Normalized model v1: WorkItem hierarchy, Sprint/Board/WorkflowState, Repository/Branch/Commit/PullRequest/CodeReview persistence | eip-core | P1-E2-S1 | L |
 | P1-E3-S1 | Jira connector: projects, WorkItems, sprints, boards, transitions; webhooks + polling; kit-passing | eip-connectors | P1-E1-S4 | L |
 | P1-E3-S2 | GitHub connector: repos, commits, PRs, reviews, Actions runs (raw only); webhooks; kit-passing | eip-connectors | P1-E1-S4 | L |
-| P1-E3-S3 | Simulation connector + first data pack (`packs/demo-small`): seeded, deterministic org/team/sprint/SCM history | eip-connectors, /simulation | P1-E1-S4 | L |
+| P1-E3-S3 | Simulation connector + first data pack (`/simulation/packs/demo-small`): seeded, deterministic org/team/sprint/SCM history | eip-connectors, /simulation | P1-E1-S4 | L |
 | P1-E4-S1 | Connector admin UI: onboarding wizard (configure→validate→test→enable), Connector Health, Sync Checkpoint browser, DLQ inspector | frontend, eip-app | P1-E1-S2, P0-E5-S2 | L |
 | P1-E4-S2 | Data browser (canonical entities, read-only, RBAC-scoped) | frontend, eip-app | P1-E2-S2 | M |
 
@@ -160,7 +160,7 @@ Streams flex: in Phase 0 the connector and analytics streams contribute to core 
 - [ ] Re-sync produces zero duplicates (K6 at integration and E2E level)
 - [ ] DLQ replay procedure works as documented in `../operations/OperationsGuide.md` §3.1
 - [ ] Event schemas versioned + compatibility-tested per `../testing/TestingStrategy.md` §5.1
-- [ ] E2E smoke E1–E3 running on PR
+- [ ] E2E smoke subset (E1, E3, E7, per `../testing/TestingStrategy.md` §10) running on PR
 
 **Demo script:** as Deniz, onboard the Jira connector through the wizard (validate → test connection → enable) → watch checkpoint browser during first sync → open data browser: Epics/Stories/Sprints present → push a change in GitHub sandbox, webhook lands, entity updates → kill the worker mid-sync, restart, show resume → switch to the simulation connector and load `demo-small` in under a minute.
 
@@ -187,7 +187,7 @@ Streams flex: in Phase 0 the connector and analytics streams contribute to core 
 | P2-E3-S2 | Generic CI/CD connector (Jenkins/Azure DevOps/GitHub Actions/GitLab CI): Build/Pipeline/Deployment/Release entities | eip-connectors | P1-E1-S4 | L |
 | P2-E3-S3 | GitLab connector (kit-passing) | eip-connectors | P1-E1-S4 | M |
 | P2-E3-S4 | Prometheus connector: Metric/Alert intake for ops signals | eip-connectors | P1-E1-S4 | M |
-| P2-E4-S1 | Simulation pack v2 (`packs/enterprise-large`): multi-team, incidents, deployments — feeds golden + perf suites | /simulation | P2-E1-S5 | M |
+| P2-E4-S1 | Simulation pack v2 (`/simulation/packs/enterprise-large`): multi-team, incidents, deployments — feeds golden + perf suites | /simulation | P2-E1-S5 | M |
 
 ### 7.2 Milestones, deliverables, exit criteria, demo
 
@@ -298,7 +298,7 @@ Streams flex: in Phase 0 the connector and analytics streams contribute to core 
 | P5-E1-S1 | Kubernetes GA: Kustomize base + overlays, probes, resource tuning, NetworkPolicies; OpenShift notes (SCC, routes) | infra/kubernetes | P0-E1-S3 | L |
 | P5-E1-S2 | HA: multi-replica app/workers, Postgres HA guidance + read replica support, Kafka/Redis resilience settings, zero-downtime rolling upgrade | infra, eip-app | P5-E1-S1 | L |
 | P5-E1-S3 | Offline release bundle: image packaging, air-gapped install path (`scripts/package-offline-release`) | scripts, infra | P5-E1-S1 | M |
-| P5-E2-S1 | Performance certification: Gatling targets met on reference K8s deployment (100k events/hour, p95 < 500 ms, 200 concurrent dashboards) | all | P5-E1-S2 | L |
+| P5-E2-S1 | Performance certification: Gatling targets met on reference K8s deployment (100k events/hour sustained plus the 300k events/hour 15-min burst scenario per `../testing/TestingStrategy.md` §11, p95 < 500 ms, 200 concurrent dashboards) | all | P5-E1-S2 | L |
 | P5-E2-S2 | Security certification checklist execution: full authz matrix, isolation, scanning, prompt injection, pen-test findings closed | all | P5-E1-S1 | L |
 | P5-E3-S1 | Backup/restore productization: pgBackRest integration, restore drill automation, RPO/RTO verification (per `../operations/OperationsGuide.md` §6) | infra, scripts | P5-E1-S1 | L |
 | P5-E3-S2 | Upgrade path: rolling upgrade with one-version schema compatibility, rollback rehearsal, release-notes tooling | eip-app, infra | P5-E1-S2 | L |
@@ -307,7 +307,7 @@ Streams flex: in Phase 0 the connector and analytics streams contribute to core 
 
 ### 10.2 Milestones, deliverables, exit criteria, demo
 
-**Technical milestones:** M5.1 reference K8s deployment survives node kill with zero data loss; M5.2 timed restore drill inside RTO; M5.3 rolling upgrade under load with < 20% interactive degradation; M5.4 all canonical connectors kit-certified.
+**Technical milestones:** M5.1 reference K8s deployment survives node kill with zero data loss; M5.2 timed HA-failover drill inside the ≤ 30 min RTO (NFR-022) and timed single-node restore drill inside the ≤ 4 h RTO; M5.3 rolling upgrade under load with < 20% interactive degradation; M5.4 all canonical connectors kit-certified.
 
 **Integration points:** Kubernetes/OpenShift primitives (Kustomize overlays, probes, NetworkPolicies, SCC), pgBackRest and WAL archiving, the remaining tool APIs (Confluence, Bitbucket, Artifactory, Kubernetes/OpenShift APIs, Docker Registry, Grafana, OTLP intake), and enterprise IdPs beyond Keycloak (AD FS/Azure AD/Okta) verified against the OIDC abstraction.
 
@@ -315,7 +315,8 @@ Streams flex: in Phase 0 the connector and analytics streams contribute to core 
 
 **Exit criteria:**
 - [ ] Full nightly suite (E2E, evals, perf, security) green on the K8s reference deployment
-- [ ] RPO ≤ 15 min / RTO ≤ 4 h demonstrated in a timed drill
+- [ ] RPO ≤ 15 min demonstrated (NFR-021); RTO ≤ 30 min (HA failover, NFR-022) and ≤ 4 h (single-node restore) each demonstrated in timed drills (`../operations/OperationsGuide.md` §6.3)
+- [ ] 99.9% availability validated on the HA reference deployment (NFR-020)
 - [ ] Rolling upgrade + rollback rehearsed under load
 - [ ] Security checklist 100% with waivers documented; images scan-clean of criticals
 - [ ] Every canonical connector passes kit K1–K7

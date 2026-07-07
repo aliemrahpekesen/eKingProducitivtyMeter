@@ -1,6 +1,6 @@
 # Local Development Guide
 
-This document is the authoritative specification for the local development environment of the **Engineering Intelligence Platform (EIP)**. It defines the tooling, the Docker Compose dev infrastructure stack, the backend/frontend run workflows, and the day-1 developer journey. The compose files, Makefile, and Gradle/Vite projects described here are Phase 0 deliverables (see `../vision/Vision.md`); this document specifies their intended content and behavior precisely so they can be built to match.
+This document is the authoritative specification for the local development environment of the **Engineering Intelligence Platform (EIP)**. It defines the tooling, the Docker Compose dev infrastructure stack, the backend/frontend run workflows, and the day-1 developer journey. The compose files, Makefile, and Gradle/Vite projects described here are Phase 0 deliverables (see `../implementation/PhaseBasedImplementationPlan.md`); this document specifies their intended content and behavior precisely so they can be built to match.
 
 For the overall system design see `../architecture/ArchitectureOverview.md`; for entity vocabulary see `../architecture/DomainModel.md`. The demo/eval deployment (full application containers, not just infrastructure) is specified in `./DockerCompose.md`.
 
@@ -98,7 +98,7 @@ All credentials below are **development-only** values from `.env.example`. They 
 | keycloak | `quay.io/keycloak/keycloak:24.0` | 8180 | admin console: `admin` / `admin` | Started with `--import-realm`; realm `eip` pre-seeded (Section 3.2). Port 8180 avoids clashing with the backend on 8080. |
 | otel-collector (`observability` profile) | `otel/opentelemetry-collector-contrib:0.102.0` | 4317 (gRPC), 4318 (HTTP) | none | Receives OTLP from backend, exports to Prometheus. |
 | prometheus (`observability` profile) | `prom/prometheus:v2.53.0` | 9090 | none | Scrapes otel-collector and (optionally) host-run app on `host.docker.internal:8081`. |
-| grafana (`observability` profile) | `grafana/grafana:11.1.0` | 3000 | `admin` / `admin` | Provisioned with dashboards from `/infra/grafana`. |
+| grafana (`observability` profile) | `grafana/grafana:11.1.0` | 3000 | `admin` / `admin` | Provisioned with dashboards from `/infra/grafana`. Dev profile only — the compose demo/eval deployment maps Grafana to host port 3001 (`./DockerCompose.md`). |
 | ollama (`ai-local` profile) | `ollama/ollama:0.3.9` | 11434 | none | Local LLM + embedding models for air-gapped-style AI development. |
 
 ### 3.2 Keycloak pre-seeded realm `eip`
@@ -112,9 +112,9 @@ The realm export at `/infra/docker-compose/keycloak/eip-realm.json` is imported 
 | Demo user | Realm role | Persona (see `../product/Personas.md`) |
 |---|---|---|
 | `admin@eip.local` | `PLATFORM_ADMIN` | Platform administrator: tenants, connectors, secrets, AI config |
-| `orgadmin@eip.local` | `ORG_ADMIN` | Organization admin within tenant `demo` |
+| `orgadmin@eip.local` | `TENANT_ADMIN` | Tenant administrator within tenant `demo` |
 | `lead@eip.local` | `TEAM_LEAD` | Team lead: team dashboards, sprint/flow views |
-| `engineer@eip.local` | `ENGINEER` | Engineer: read access to team-level metrics and reports |
+| `engineer@eip.local` | `MEMBER` | Engineer persona (MEMBER role template): read access to team-level metrics and reports |
 | `exec@eip.local` | `EXECUTIVE_VIEWER` | Executive: portfolio dashboards, generated reports, read-only |
 
 All demo users belong to tenant `demo` (claim `tenant_id=demo` via a protocol mapper). Fine-grained permissions on top of these roles are enforced by the backend (`eip-tenancy` module), not by Keycloak.
@@ -183,8 +183,8 @@ pnpm dev            # Vite dev server on http://localhost:5173
 
 The simulation connector (part of the canonical connector list, see `../architecture/ArchitectureOverview.md`) is the primary development data source — no enterprise Jira/GitHub credentials are ever needed for local work.
 
-- Data packs live under `/simulation` and describe a synthetic enterprise: orgs, teams, sprints, `WorkItem`s of every type, repositories, commits, pull requests, pipelines, deployments, incidents, SonarQube-style quality snapshots.
-- Packs (initial set): `demo-small` (1 team, 3 sprints — fast tests), `demo-midsize` (4 teams, 12 sprints, 2 products — default for dashboards), `demo-troubled` (injected delays, blocked items, incident spikes — for Delivery Risk and Incident Analysis agent development).
+- Data packs live under `/simulation/packs/` and describe a synthetic enterprise: orgs, teams, sprints, `WorkItem`s of every type, repositories, commits, pull requests, pipelines, deployments, incidents, SonarQube-style quality snapshots.
+- Pack catalog: `/simulation/packs/demo-small` (1 team, 3 sprints — fast tests; the CI smoke pack), `/simulation/packs/demo-midsize` (4 teams, 12 sprints, 2 products — the Day-1 default for dashboards, Section 6 step 8), `/simulation/packs/demo-troubled` (injected delays, blocked items, incident spikes — for Delivery Risk and Incident Analysis agent development), `/simulation/packs/enterprise-large` (large synthetic enterprise — performance/load testing, see `../testing/TestingStrategy.md`).
 - The connector supports `fullSync()` and `incrementalSync(checkpoint)` like any real connector — incremental mode replays the pack's event timeline so you can develop checkpointing, dedup, and streaming analytics realistically.
 - Every other connector's SPI mandates a `simulation/mock mode`; integration tests for connector logic run against recorded fixtures, never live SaaS endpoints.
 
@@ -211,7 +211,7 @@ Rules:
 
 - **Remote debug:** `./gradlew :eip-app:bootRun --debug-jvm` listens on 5005; the committed IntelliJ configs include an attach configuration.
 - **Actuator (port 8081):** `/actuator/health` (component detail), `/actuator/prometheus` (Micrometer metrics), `/actuator/modulith` (module structure and event externalization), `/actuator/flyway` (applied migrations), `/actuator/loggers` (runtime log-level changes, e.g. `io.eip.connectors=DEBUG` while debugging a sync).
-- **Database:** `docker compose -f infra/docker-compose/compose.yaml exec postgres psql -U eip eip`. Remember RLS: as a superuser you bypass tenant policies; to reproduce app-visible data use `SET eip.tenant_id = 'demo';` after `SET ROLE eip_app;`.
+- **Database:** `docker compose -f infra/docker-compose/compose.yaml exec postgres psql -U eip eip`. Remember RLS: as a superuser you bypass tenant policies; to reproduce app-visible data use `SET app.tenant_id = 'demo';` after `SET ROLE eip_app;` (the application itself always sets this GUC transaction-scoped via `SET LOCAL`).
 - **Kafka:** console consumer per the Common Tasks table (Section 10); `kafka-consumer-groups.sh --describe --all-groups` shows lag per worker consumer group — the first thing to check when dashboards lag behind ingestion.
 - **Redis:** `docker compose ... exec redis redis-cli` — `KEYS eip:lock:*` lists live Redisson locks during sync debugging.
 - **Traces:** with `OBS=1`, spans flow app → otel-collector; the `traceparent` field on every Kafka event envelope lets you follow one entity end-to-end from connector fetch to dashboard query.

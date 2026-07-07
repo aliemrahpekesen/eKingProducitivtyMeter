@@ -14,7 +14,7 @@ Formal use cases for the Engineering Intelligence Platform (EIP). Actors are the
 - **Main flow:**
   1. Actor opens Admin Console → Tenants → New tenant.
   2. Actor enters tenant name, Organization mapping, IdP realm/group mapping, and default locale.
-  3. System creates the tenant: tenant_id issued, RLS-scoped rows initialized, default Role set provisioned (`TENANT_ADMIN`, `ENGINEERING_MANAGER`, `TEAM_LEAD`, `MEMBER`, `RELEASE_MANAGER`, `EXECUTIVE_VIEWER`, `SECURITY_AUDITOR`).
+  3. System creates the tenant: tenant_id issued, RLS-scoped rows initialized, built-in base roles available (`TENANT_ADMIN`, `ANALYST`, `VIEWER`; `PLATFORM_ADMIN` is installation-scoped), and the six seeded persona role templates provisioned by default on the `ANALYST`/`VIEWER` bases (`ENGINEERING_MANAGER`, `TEAM_LEAD`, `MEMBER`, `RELEASE_MANAGER`, `EXECUTIVE_VIEWER`, `SECURITY_AUDITOR`), editable per tenant.
   4. Actor assigns at least one Member as `TENANT_ADMIN`.
   5. System writes audit entries for tenant creation and role assignment and emits a notification to the new admin.
 - **Alternate/exception flows:**
@@ -138,7 +138,7 @@ Formal use cases for the Engineering Intelligence Platform (EIP). Actors are the
 
 - **Actor:** Platform Administrator; system performs automatic recovery first.
 - **Goal:** Restore a failing sync stream to health without data loss or duplication.
-- **Preconditions:** Connector in `DEGRADED` or `FAILED` state, or messages accumulating in a consumer group DLQ (`.<group>.dlq`).
+- **Preconditions:** Connector in `DEGRADED` or `FAILED` state, or messages accumulating in a consumer group DLQ (`<group>.dlq`).
 - **Main flow:**
   1. `healthCheck()` or consumer lag alerting (Micrometer → Prometheus) flags the stream; Connector Health dashboard shows state, last error (problem+json), retry history, and checkpoint position.
   2. System has already retried with exponential backoff + jitter; actor inspects the terminal cause.

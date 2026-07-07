@@ -89,7 +89,7 @@ public record ConnectorProperties(
 
 - Each module directory maps to a Modulith `@ApplicationModule` with an explicit `package-info.java` declaring allowed dependencies and named interfaces (e.g., `eip-analytics` exposes only `com.eip.analytics.query` to `eip-ai`).
 - **Verification tests:** every module ships `ModularityTests` asserting `ApplicationModules.of(EipApplication.class).verify()` plus documentation snapshot generation (`Documenter`) committed under `docs/architecture/generated/`. A dependency-rule violation is a compile-red event, not a review comment.
-- **Event externalization to Kafka:** domain events are published in-process via `ApplicationEventPublisher` and externalized with `@Externalized("eip.domain.workitem::#{#this.tenantId()}")` style mappings so the Kafka topic (`eip.domain.workitem`, `eip.domain.scm`, `eip.domain.cicd`, `eip.domain.quality`, `eip.domain.ops`, `eip.analytics.metrics`, `eip.ai.jobs`, `eip.ai.results`, `eip.reports.jobs`) and the partition key (`tenantId+entityId`, preserving the per-key ordering guarantee) are declared next to the event type. Externalization is backed by the transactional outbox (section 6), not fire-and-forget.
+- **Event externalization to Kafka:** domain events are published in-process via `ApplicationEventPublisher` and externalized with `@Externalized("eip.domain.workitem::#{#this.tenantId() + ':' + #this.entityId()}")` style mappings so the Kafka topic (`eip.domain.workitem`, `eip.domain.scm`, `eip.domain.cicd`, `eip.domain.quality`, `eip.domain.ops`, `eip.analytics.metrics`, `eip.ai.jobs`, `eip.ai.results`, `eip.reports.jobs`) and the partition key (`tenantId:entityId` per `EventModel.md` §7, preserving the per-key ordering guarantee) are declared next to the event type. Externalization is backed by the transactional outbox (section 6), not fire-and-forget.
 - Cross-module synchronous calls go through the exposing module's named interface (a Java interface in its API package); everything else communicates via events.
 
 ## 4. Coding standards (Java 21 features policy)
@@ -111,9 +111,10 @@ Formatting: Spotless + Google Java Format; static analysis: Error Prone + NullAw
 **Decision: Spring Data JPA for CRUD + `JdbcClient` for analytics queries** (over jOOQ).
 
 - JPA (Hibernate) owns the transactional CRUD side: tenancy, RBAC, connector configs, checkpoints, jobs, agent runs, report metadata. Aggregates are small; optimistic locking (`@Version`) backs the ETag/If-Match contract in `APIDesign.md`.
-- `JdbcClient` owns the analytics read side in `com.eip.analytics.query`: metric rollups, DORA aggregations, risk-score scans over `raw_*` JSONB and canonical tables. Queries are hand-written SQL in text blocks, mapped to records.
+- `JdbcClient` owns the analytics read side in `com.eip.analytics.query`: metric rollups, DORA aggregations, risk-score scans over canonical tables. Queries are hand-written SQL in text blocks, mapped to records.
+- **Analytics data-access rule (ADR-019; stated identically in `../architecture/ArchitectureOverview.md` §5, `EventModel.md` §11, and `../architecture/ComponentModel.md`):** `eip-analytics` has READ-ONLY SQL access to the canonical schemas (`work`/`scm`/`cicd`/`quality`/`ops`) via a dedicated read-only DB grant, used for full recomputation and rollups only. Reads of `staging.raw_*` and any canonical writes are forbidden. At module extraction, this access becomes a canonical read replica or an API.
 - **Why JdbcClient over jOOQ:** the analytics SQL is Postgres-16-specific (JSONB operators, window functions, `date_bin`, RLS session settings) and benefits from being literal SQL reviewable by DBAs; jOOQ's code generation adds a build-time schema dependency and a large API surface for little gain when we do not need type-safe dynamic query construction — the metric query endpoint composes from a small, closed grammar (grain, time range, group-by) that a query-builder class over JdbcClient covers safely with named parameters (no string concatenation of user input). One fewer license/codegen moving part on-premise.
-- Flyway owns all schema migration (`db/migration/V*__*.sql`), including RLS policies (`CREATE POLICY tenant_isolation ... USING (tenant_id = current_setting('eip.tenant_id')::uuid)`). Every table carries `tenant_id`; the tenant context filter sets `eip.tenant_id` per transaction via a `ConnectionCustomizer` in `eip-tenancy`.
+- Flyway owns all schema migration (`db/migration/V*__*.sql`), including RLS policies (`CREATE POLICY tenant_isolation ... USING (tenant_id = current_setting('app.tenant_id')::uuid)`). Every table carries `tenant_id`; the tenant context filter sets `app.tenant_id` per transaction (transaction-scoped `SET LOCAL app.tenant_id`) via a `ConnectionCustomizer` in `eip-tenancy`.
 - Hibernate `ddl-auto=validate` in all profiles; schema truth lives in Flyway only.
 - Schema conventions, representative DDL, indexing, partitioning of high-volume event/raw tables, retention, and pgvector setup are specified in `DatabasePlan.md`; this plan defers to it entirely for the physical model.
 
@@ -121,11 +122,11 @@ Formatting: Spotless + Google Java Format; static analysis: Error Prone + NullAw
 
 **Decision: transactional outbox table + in-process poller (Debezium-free).**
 
-- Every domain event emitted inside a transaction is written to `event_outbox` (`event_id UUIDv7 PK, tenant_id, topic, partition_key, envelope JSONB, occurred_at, published_at NULL, attempts`) in the same transaction as the state change. Spring Modulith's event publication registry is configured to use this table as its externalization journal.
-- A poller (Quartz job, section 8) selects unpublished rows `FOR UPDATE SKIP LOCKED` in `occurred_at` order per partition key, publishes to Kafka with acks=all, marks `published_at`, and retries with capped backoff on failure. Rows older than the retention window with exhausted attempts land in an operator-visible dead-letter state surfaced via the Jobs API.
+- Every domain event emitted inside a transaction is written to `event_outbox` (`event_id UUIDv7 PK, tenant_id, topic, partition_key, envelope JSONB, occurred_at, published_at NULL, attempts`) in the same transaction as the state change. Spring Modulith's event publication registry is configured to use this table as its externalization journal. **Outbox scope (ADR-017):** the outbox is mandatory for domain, analytics, and job events (`eip.domain.*`, `eip.analytics.metrics`, `eip.ai.*`, `eip.reports.*`); raw intake (`eip.raw.<connector>`) publishes directly to Kafka with the staged `raw_*` row (written before the produce) as durability and `staging.webhook_intake_buffer` as outage buffer — see `EventModel.md` §9.
+- The `OutboxRelay` — an embedded fixed-delay poller running in **both** runtimes (`eip-app` and `eip-workers`), each instance relaying the outbox rows written by its own runtime, so app-originated events never stall when workers are down — selects unpublished rows `FOR UPDATE SKIP LOCKED` in `occurred_at` order per partition key, publishes to Kafka with acks=all, marks `published_at`, and retries with capped backoff on failure. Rows older than the retention window with exhausted attempts land in an operator-visible dead-letter state surfaced via the Jobs API.
 - **Why not Debezium:** Debezium requires Kafka Connect plus Postgres logical replication slots — two more stateful services to operate in on-premise and air-gapped installs, with WAL-slot disk-growth failure modes that enterprise DBAs must learn. The poller is plain Java in the codebase we already ship, delivers the same at-least-once guarantee (consumers are idempotent, deduping on `eventId` per the ingestion model), and its ~1s polling latency is irrelevant for analytics/RAG/report consumers. If a future tenant needs sub-100ms fan-out, CDC can replace the poller behind the same outbox table without touching producers.
 - Event envelope fields are exactly the canonical set: `eventId (UUIDv7), tenantId, source, entityType, entityId, eventType, occurredAt, ingestedAt, schemaVersion, payload, traceparent`.
-- Poller mechanics, batch sizes, ordering guarantees per partition key, and outbox monitoring metrics are specified in `EventModel.md` §9; the DLQ policy for exhausted publications in `EventModel.md` §10.
+- Relay mechanics, batch sizes, ordering guarantees per partition key, and outbox monitoring metrics are specified in `EventModel.md` §9; the DLQ policy for exhausted publications in `EventModel.md` §10.
 
 ## 7. Resilience stack (Resilience4j)
 
@@ -137,9 +138,11 @@ Every connector gets a named Resilience4j instance set, configured per connector
 | CircuitBreaker | 50% failure rate over sliding window 20, open 60s, half-open 5 probes | Open circuit flips connector `healthCheck()` to DEGRADED and is visible on the connector health endpoint. |
 | RateLimiter | Per connector instance, from config (e.g., Jira Cloud 90 req/10s) | Distributed budget state in Redis (Redisson) so app + workers share the limit. |
 | Bulkhead | Semaphore bulkhead, default 10 concurrent calls per connector instance | Caps virtual-thread fan-out per external system; prevents one tenant's full sync from starving others. |
-| TimeLimiter | 30s per call, 2h per full sync run | Sync-level timeout enforced by the sync engine, call-level by Resilience4j. |
+| TimeLimiter | 30s per call; 2h per backfill/stream slice — never per logical full sync | Per-slice sync timeout enforced by the sync engine (semantics below), call-level by Resilience4j. |
 
-Order: Bulkhead → RateLimiter → CircuitBreaker → Retry → TimeLimiter around the client call. All decorators emit Micrometer metrics (`eip.connector.calls`, tags: connector, tenant, outcome) exported via OpenTelemetry. Connector-level semantics (which SPI operations are retryable, checkpoint interaction on failure) are defined in `ConnectorFramework.md` §5.
+Order: Bulkhead → RateLimiter → CircuitBreaker → Retry → TimeLimiter around the client call. All decorators emit Micrometer metrics (`eip.connector.calls`, tags: `connector_type`, `tenant`, `outcome` — tag names per the metric catalog in `ConnectorFramework.md` §9) exported via OpenTelemetry. Connector-level semantics (which SPI operations are retryable, checkpoint interaction on failure) are defined in `ConnectorFramework.md` §5.
+
+**Sync-timeout semantics.** The 2 h sync TimeLimiter applies **per backfill slice / per stream-run segment** (`ConnectorFramework.md` §7 chunks backfills into slices, default 30 days of source history per slice), never per logical full sync. Each slice commits a checkpoint before the next begins, so a timed-out or failed slice resumes from the last checkpoint instead of restarting the sync. Expected wall clock for a logical full sync: `records ÷ min(50 rec/s per-instance normalization target (DataFlow §10), source rate-limit ceiling)` — a committed-envelope 1 M-item Jira instance is therefore ≈ 5.6 h of sliced, resumable syncing and is never killed by the per-slice timeout.
 
 Configuration is layered: platform defaults in YAML, per-connector-type overrides shipped with the connector, per-instance overrides from the connector's validated config:
 
@@ -167,8 +170,23 @@ resilience4j:
 **Decision: Quartz in clustered JDBC-store mode** (over ShedLock + `@Scheduled`, and over a bespoke DB-lease).
 
 - Justification: EIP's schedules are user-managed data, not code — tenants configure connector sync cadences, scheduled re-index of RAG sources, and scheduled report generation at runtime. Quartz gives durable, tenant-editable triggers (cron + interval), misfire policies per job class, and cluster-wide exactly-one-node execution via its JDBC job store on the existing Postgres — no extra infrastructure. ShedLock only deduplicates statically-coded `@Scheduled` methods and cannot represent runtime-created per-tenant schedules; a DB-lease reimplements Quartz's hard parts (misfires, recovery) badly.
-- Job classes (all idempotent, all tenant-scoped): `ConnectorSyncJob`, `OutboxPollJob` (short interval, non-concurrent), `CheckpointCompactionJob`, `MetricRollupJob`, `RagReindexJob`, `ReportScheduleJob`, `RetentionSweepJob`, `SecretRotationReminderJob`.
+- Job classes (all idempotent, all tenant-scoped): `ConnectorSyncJob`, `CheckpointCompactionJob`, `MetricRollupJob`, `RagReindexJob`, `ReportScheduleJob`, `RetentionSweepJob`, `SecretRotationReminderJob`. The outbox relay is deliberately **not** a Quartz job: `OutboxRelay` runs as an embedded fixed-delay poller in both `eip-app` and `eip-workers`, each relaying its own runtime's writes (section 6, `EventModel.md` §9) — no "workers down ⇒ app events stall" mode exists.
 - Quartz runs only in worker processes (profile `worker-scheduler`), never in the API app, so API pods stay stateless and horizontally scalable.
+
+### 8.1 Sync dispatch model
+
+Connector sync dispatch layers exactly two coordination mechanisms — the full connector-side contract lives in `ConnectorFramework.md` §4; this section is the scheduler-side half of the same design:
+
+1. **Trigger source = Quartz clustered JDBC store.** `ConnectorSyncJob` triggers fire per connector instance on the tenant-configured cadence; the JDBC job store guarantees each trigger fires on exactly one worker node.
+2. **Mutex = Redisson lock per (connector instance, stream).** The dispatched job acquires the per-(instance, stream) Redisson lock before executing; a held lock means that stream is already running (e.g. a long backfill slice) and the dispatch is skipped. Quartz decides *when*, the Redisson lock decides *whether*.
+
+Dispatch conventions:
+
+- **Concurrency caps.** Per worker node, `eip.sync.max-concurrent-stream-runs` (default 16) bounds the concurrent-sync executor; deployment-global, `eip.sync.max-concurrent-stream-runs-global` (default 64) is enforced via a Redisson semaphore — so 100 instances × `maxConcurrentStreams` can never fan out unboundedly onto one node or across the deployment.
+- **Misfire policy.** Sync jobs use reschedule-with-remaining-count plus randomized re-dispatch jitter — never fire-all — so a backlog accumulated during scheduler downtime resumes as a jittered trickle, not a stampede.
+- **Phase offset.** Every instance's schedule is phase-shifted by `hash(instanceId) mod interval`, de-aligning 100+ instances that would otherwise all fire on the default 15-minute boundary.
+- **Redis-down behavior.** If the Redisson lock/semaphore is unreachable, the dispatch is skipped (no run), logged, and counted (`eip.sync.dispatch.skipped{reason="redis-down"}`) — consistent with the Redis failure posture in `../architecture/ArchitectureOverview.md` §9; the next trigger retries normally.
+- **Fairness.** Each dispatch tick performs a weighted fair pick from the due-set across tenants and instances (weight = time past due, capped per tenant) rather than an unspecified round-robin, so no tenant with many due instances can monopolize the executor.
 
 ## 9. Async worker runtime (`eip-workers`)
 
@@ -177,28 +195,34 @@ resilience4j:
 | Profile | Activates |
 |---|---|
 | `worker-ingestion` | Kafka consumers for `eip.raw.<connector>`, normalizers, checkpointing |
-| `worker-analytics` | Consumers for `eip.domain.*` → metric engines → `eip.analytics.metrics` |
+| `worker-analytics` | Consumers for `eip.domain.*` → metric engines → `eip.analytics.metrics`; `eip.analytics.read-models` projector (consumes `eip.analytics.metrics` into read-model/dashboard-cache tables) |
 | `worker-ai` | Consumers for `eip.ai.jobs`, agent executors, RAG indexers → `eip.ai.results` |
 | `worker-reports` | Consumers for `eip.reports.jobs`, export renderers |
-| `worker-scheduler` | Quartz cluster node + outbox poller |
+| `worker-scheduler` | Quartz cluster node (sync dispatch §8.1, rollups, schedules) — the `OutboxRelay` is not scheduler-bound: it runs embedded in every runtime (§6) |
 
   A single process may combine profiles (local/demo run everything in one worker); prod scales each role independently.
-- **Consumer group conventions:** group id = `eip.<module>.<purpose>` (e.g., `eip.ingestion.normalize-workitems`, `eip.analytics.dora`); one group per logical consumer, DLQ topic per group named `<topic>.<group>.dlq` per the ingestion model. Consumers are idempotent (dedup on `eventId` against a processed-events table with TTL), commit offsets after successful processing, and forward poison messages to the DLQ with the failure cause in headers after 3 delivery attempts.
-- Kafka listener concurrency maps to partition count; processing inside a partition is single-threaded to preserve per-key ordering (`tenantId+entityId`). Full consumer conventions (offset management, poison-message headers, lag SLOs, backpressure) are in `EventModel.md` §8–§12.
+- **Consumer group conventions:** group id = `eip.<module>.<purpose>` (e.g., `eip.ingestion.workitem-normalizer`, `eip.analytics.dora-metrics`); the canonical group-name list is `EventModel.md` §8, and §9.1 below uses exactly those names. One group per logical consumer, exactly one DLQ topic per group named `<group>.dlq` — the group name plus a `.dlq` suffix (e.g., `eip.analytics.flow-metrics.dlq`) per `EventModel.md` §8/§10. Consumers are idempotent (dedup on `eventId` against a processed-events table with TTL), commit offsets after successful processing, and route failures per the failure-class taxonomy in `EventModel.md` §10: `TRANSIENT_INFRA` pauses the partition and retries with backoff (never DLQs), `DATA_POISON` and `UNKNOWN_SCHEMA` route to the DLQ immediately, `LOGIC_BUG` routes to the DLQ after 3 bounded retry attempts — always with the failure cause in headers.
+- Kafka listener concurrency maps to partition count; processing inside a partition is single-threaded to preserve per-key ordering (`tenantId:entityId`). Full consumer conventions (offset management, poison-message headers, lag SLOs, backpressure) are in `EventModel.md` §8–§12.
 - Workers are horizontally scalable per role; the only stateful coordination is Quartz's JDBC store and Redisson locks. Graceful shutdown drains in-flight Kafka batches and pauses Quartz triggers before SIGTERM deadline (30s).
 
 ### 9.1 Kafka topic ownership
 
-Producers and consumer groups per topic (catalog and retention in `EventModel.md` §3):
+Topic owners, producers, and consumer groups (catalog, envelope, and retention in `EventModel.md` §3; consumer-group names below are the canonical list from `EventModel.md` §8). Exactly one owning module per topic; the owner owns the topic's payload schemas, partition/retention settings, and DLQ policy.
 
-| Topic | Produced by | Consumed by (groups) |
-|---|---|---|
-| `eip.raw.<connector>` | `eip-connectors` (via ingestion outbox path) | `eip.ingestion.normalize-*` |
-| `eip.domain.workitem` / `eip.domain.scm` / `eip.domain.cicd` / `eip.domain.quality` / `eip.domain.ops` | `eip-ingestion` normalizers | `eip.analytics.*`, `eip.ai.rag-index`, `eip.reports.triggers` |
-| `eip.analytics.metrics` | `eip-analytics` engines | dashboard cache warmers, `eip.reports.triggers` |
-| `eip.ai.jobs` / `eip.ai.results` | `eip-app` (run creation) / `eip-ai` executors | `eip.ai.executor` / `eip-app` SSE bridge, `eip.reports.compose` |
-| `eip.reports.jobs` | `eip-app`, Quartz schedules | `eip.reports.render` |
-| `<topic>.<group>.dlq` | consumer error handlers | DLQ inspection/replay API (`APIDesign.md` §4.3) |
+| Topic | Owning module | Produced by | Consumed by (groups) |
+|---|---|---|---|
+| `eip.raw.<connector>` | `eip-ingestion` | Raw intake (connector sync `RawEmitter` + webhook intake) — **direct produce**, no outbox: durability = the staged `raw_*` row written before the produce; outage buffer = `staging.webhook_intake_buffer` (`EventModel.md` §9, ADR-017) | `eip.ingestion.*-normalizer` |
+| `eip.domain.workitem` / `eip.domain.scm` / `eip.domain.cicd` / `eip.domain.quality` / `eip.domain.ops` | `eip-ingestion` | `eip-ingestion` normalizers (outbox) | `eip.analytics.*` metric groups, `eip.ai.rag-indexer` |
+| `eip.analytics.metrics` | `eip-analytics` | `eip-analytics` engines (outbox) | `eip.analytics.read-models` (read-model / dashboard-cache projector, owned by `eip-analytics`) |
+| `eip.ai.jobs` | `eip-ai` | `eip-app` (run creation), Quartz schedules, agents (sub-jobs) — all via outbox | `eip.ai.orchestrator` |
+| `eip.ai.results` | `eip-ai` | `eip-ai` executors (outbox) | No in-platform Kafka consumer — workers update the `agent_runs` row and `eip-app` serves run status from the DB (polling / LISTEN-NOTIFY); the topic remains an audit/integration stream within its 7 d retention |
+| `eip.reports.jobs` | `eip-reports` | `eip-app` (API), Quartz schedules, `eip-ai` Report Composition agent (enqueues section renders) — all via outbox | `eip.reports.job-runner` |
+| `<group>.dlq` (one per consumer group) | the group's owning module | consumer error handlers | DLQ inspection/replay API (`APIDesign.md` §4.3) |
+
+Two former constructs are explicitly gone:
+
+- **`eip-app` consumes no Kafka.** The earlier SSE-on-Kafka bridge for `eip.ai.results` is replaced by polling / Postgres LISTEN-NOTIFY on `agent_runs`: workers update the run row, and `eip-app` streams status to clients from the DB. All Kafka consumption lives in `eip-workers`.
+- **There is no `eip.reports.triggers` group or topic.** Reports are triggered by Quartz schedules and the API, which enqueue `eip.reports.jobs`; the Report Composition agent (`eip-ai`) enqueues renders the same way. Nothing in `eip-reports` subscribes to domain or metric topics.
 
 ## 10. Error handling taxonomy
 
@@ -214,7 +238,7 @@ Sealed hierarchy in `com.eip.core.error`, mapped centrally to RFC 7807 problem+j
 | ├ `ConflictException` (version/ETag, duplicate idempotency key with different body) | 409 / 412 | `/problems/conflict`, `/problems/precondition-failed` |
 | ├ `RateLimitedException` | 429 | `/problems/rate-limited` (with `Retry-After`) |
 | ├ `ConnectorException` (sealed: `ConnectorAuthException`, `ConnectorRateLimitException`, `ConnectorUnavailableException`, `ConnectorConfigException`) | 502/503/400 | `/problems/connector/*` |
-| ├ `LlmProviderException` (budget exceeded, provider down, guardrail block) | 502/402-semantics-as-409/422 | `/problems/llm/*` |
+| ├ `LlmProviderException` (budget exceeded → 429 `/problems/llm/quota-exceeded`; provider unavailable → 502; provider timeout → 504; guardrail/validation block → 422) | 429 / 502 / 504 / 422 | `/problems/llm/*` |
 | └ `InternalException` (catch-all; logged with traceId, generic detail to client) | 500 | `/problems/internal` |
 
 Every problem+json response carries `traceId` (from `traceparent`) and `tenantId`-safe detail only. Worked example in `APIDesign.md` §7.
@@ -229,7 +253,7 @@ Every problem+json response carries `traceId` (from `traceparent`) and `tenantId
 
 - **OpenTelemetry SDK everywhere:** traces, metrics, and logs exported to the OTel Collector (→ Prometheus + Grafana + Tempo/Loki, optional per install). Auto-instrumentation for HTTP server/client, JDBC, and Kafka; manual spans for connector SPI operations (`connector.sync`, `connector.testConnection`), agent steps (`agent.plan`, `agent.tool_call`, `llm.call`), and report rendering.
 - **Trace continuity across async hops:** the event envelope's `traceparent` field carries the W3C trace context through the outbox and Kafka, so a Jira webhook can be traced webhook intake → raw topic → normalizer → domain event → metric recompute → dashboard query.
-- **Micrometer metric naming:** `eip.<module>.<thing>` with mandatory tags `tenant` (bounded cardinality: tenant id) and module-specific tags — e.g., `eip.ingestion.events.processed{topic,group,outcome}`, `eip.analytics.metric.compute.duration{metricKey}`, `eip.ai.llm.tokens{provider,model,agent,direction}`, `eip.outbox.lag.seconds`, `eip.connector.calls{connector,outcome}`.
+- **Micrometer metric naming:** `eip.<module>.<thing>` with mandatory tags `tenant` (bounded cardinality: tenant id) and module-specific tags — e.g., `eip.ingestion.events.processed{topic,group,outcome}`, `eip.analytics.metric.compute.duration{metricKey}`, `eip.ai.llm.tokens{provider,model,agent,direction}`, `eip.outbox.lag_seconds`, `eip.connector.calls{connector_type,outcome}`.
 - **Golden signals per worker role** (dashboards shipped in `/infra/grafana`): consumer lag, DLQ depth, outbox lag, sync duration/failure rate, LLM latency/cost, report render time.
 - Health: liveness = process up; readiness = DB + Kafka + Redis reachable; the aggregate `/api/v1/system/health` endpoint composes these with worker heartbeats (rows in a `worker_heartbeat` table refreshed every 10s).
 
@@ -296,7 +320,7 @@ A backend story is done only when all of the following hold:
 - [ ] Errors map to the taxonomy (§10); no raw stack traces or cross-tenant leakage in responses.
 - [ ] Config additions are validated `@ConfigurationProperties` records with metadata; connector config changes update the JSON Schema and its version.
 - [ ] Tests at every applicable layer of §14; new metric logic ships with a golden-dataset test including caveats/limitations text.
-- [ ] OpenAPI updated (operationId conventions per `APIDesign.md` §12); generated TS client compiles.
+- [ ] OpenAPI updated (operationId conventions per `APIDesign.md` §10); generated TS client compiles.
 - [ ] Micrometer metrics + trace spans on new external calls and jobs; structured log events with tenantId.
 - [ ] Audited action types registered for any new mutating admin/AI capability.
 - [ ] `local` and `demo` profiles run the feature end-to-end per `../infrastructure/LocalDevelopment.md`.

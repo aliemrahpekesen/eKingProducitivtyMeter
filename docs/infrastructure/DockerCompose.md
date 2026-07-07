@@ -51,13 +51,13 @@ All EIP images are non-root, read-only-rootfs-compatible, and expose healthcheck
 | eip-app | `eip/eip-app:${EIP_VERSION}` | API application (modular monolith composition root) | internal `8080` (API), `8081` (actuator); not host-published — fronted by `frontend` nginx | none (stateless) | `GET :8081/actuator/health/readiness` | eip-migrate (completed), postgres/redis/kafka/minio/keycloak (healthy) | 2.0 / 4g |
 | eip-workers | `eip/eip-workers:${EIP_VERSION}` | Async worker runtime (ingestion, analytics, ai, reports consumer groups) | internal `8081` (actuator) | none (stateless) | `GET :8081/actuator/health/readiness` | eip-migrate (completed), postgres/redis/kafka/minio (healthy) | 2.0 / 4g per replica |
 | frontend | `eip/frontend:${EIP_VERSION}` (nginx) | Serves the built SPA; reverse-proxies `/api` → eip-app, `/auth` → keycloak | `80:8080`, `443:8443` | `nginx/tls` (ro, when TLS enabled) | `GET :8080/healthz` | eip-app (started) | 0.5 / 256m |
-| eip-migrate | `eip/eip-app:${EIP_VERSION}` (command `migrate`) | One-shot Flyway migration job; runs and exits before app/workers start | none | none | exit code (one-shot) | postgres (healthy) | 1.0 / 1g |
+| eip-migrate | `eip/eip-app:${EIP_VERSION}` (command `migrate`) | One-shot Flyway migration + Kafka topic-creation job; runs and exits before app/workers start | none | none | exit code (one-shot) | postgres (healthy), kafka (healthy) | 1.0 / 1g |
 | postgres | `pgvector/pgvector:pg16` | Primary store + pgvector vector store | `5432` internal only | `eip_pg_data:/var/lib/postgresql/data`, init SQL (ro) | `pg_isready -U eip` | — | 2.0 / 4g |
 | redis | `redis:7-alpine` | Cache, Redisson locks, rate-limit state | `6379` internal only | `eip_redis_data:/data` (AOF) | `redis-cli ping` | — | 0.5 / 512m |
 | kafka | `apache/kafka:3.7.0` | Event backbone, single-broker KRaft | `9092` internal; `29092:29092` optional host listener for debugging | `eip_kafka_data:/var/lib/kafka/data` | broker API check via `kafka-broker-api-versions.sh` | — | 1.5 / 2g |
 | minio | `minio/minio:RELEASE.2024-06-13T22-53-53Z` | S3-compatible object storage (artifacts, ingested files) | `9000` internal; `9001:9001` console optional | `eip_minio_data:/data` | `mc ready local` | — | 1.0 / 1g |
 | minio-init | `minio/mc` (one-shot) | Creates buckets `eip-artifacts`, `eip-ingest`; applies retention policy | none | none | exit code | minio (healthy) | 0.2 / 128m |
-| keycloak | `quay.io/keycloak/keycloak:24.0` | OIDC provider (on-prem default IdP) | `8180` internal; proxied at `/auth` by frontend | `eip_keycloak_data` + realm import (ro) | `GET /health/ready` (mgmt port 9000) | postgres (healthy; uses schema `keycloak` in the same instance) | 1.0 / 1.5g |
+| keycloak | `quay.io/keycloak/keycloak:24.0` | OIDC provider (on-prem default IdP); started with `KC_HTTP_RELATIVE_PATH=/auth` so issuer/redirect URLs match the `/auth` proxy prefix (`${EIP_PUBLIC_URL}/auth/realms/eip`) | `8180` internal; proxied at `/auth` by frontend | `eip_keycloak_data` + realm import (ro) | `GET /health/ready` (mgmt port 9000) | postgres (healthy; uses schema `keycloak` in the same instance) | 1.0 / 1.5g |
 | otel-collector | `otel/opentelemetry-collector-contrib:0.102.0` | OTLP intake from app/workers; metric export to Prometheus | `4317`, `4318` internal only | `otel/collector.yaml` (ro) | `GET :13133/` (health ext.) | — | 0.5 / 512m |
 | prometheus | `prom/prometheus:v2.53.0` | Metrics TSDB (15d retention default) | `9090` internal; publish only if needed | `eip_prom_data:/prometheus`, config (ro) | `GET /-/ready` | otel-collector (started) | 1.0 / 2g |
 | grafana | `grafana/grafana:11.1.0` | Self-observability dashboards (provisioned from `/infra/grafana`) | `3001:3000` | `eip_grafana_data`, provisioning (ro) | `GET /api/health` | prometheus (started) | 0.5 / 512m |
@@ -82,6 +82,7 @@ services:
       EIP_DB_PASSWORD: ${EIP_DB_PASSWORD}
     depends_on:
       postgres: { condition: service_healthy }
+      kafka:    { condition: service_healthy }   # the topic-creation step needs the broker
     restart: "no"                           # a failed migration must halt the rollout
 
   eip-app:
@@ -176,7 +177,7 @@ flowchart LR
 Order is enforced entirely by healthcheck-gated `depends_on`; no sleep loops or external scripts:
 
 1. Stateful services start in parallel: postgres, redis, kafka, minio, keycloak (keycloak waits on postgres).
-2. `eip-migrate` runs once postgres is healthy: Flyway migrations, then Kafka topic creation for all `eip.*` topics (idempotent, with the DLQ-per-consumer-group naming from the event model). Exit 0 gates everything downstream; a non-zero exit stops the rollout with the schema untouched-or-forward, never half-applied (Flyway transactional migrations).
+2. `eip-migrate` runs once postgres and kafka are healthy: Flyway migrations, then Kafka topic creation for all `eip.*` topics (idempotent, with the DLQ-per-consumer-group naming from the event model). Exit 0 gates everything downstream; a non-zero exit stops the rollout with the schema untouched-or-forward, never half-applied (Flyway transactional migrations).
 3. `eip-app` and `eip-workers` start after `eip-migrate` completes successfully and all infra healthchecks pass.
 4. `frontend` starts after `eip-app`; the optional `eip-sim-seed` job (simulation profile) runs last, calling the API to create the simulation connector and trigger a full sync.
 
@@ -207,6 +208,8 @@ Grouped by concern. Names are identical to the local-dev and Kubernetes contract
 | Observability | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://otel-collector:4318` | App/workers export traces/metrics/logs here. |
 | Observability | `GF_SECURITY_ADMIN_PASSWORD` | `CHANGE_ME` | Grafana admin. |
 | Workers | `EIP_WORKER_PROFILES` | `ingestion,analytics,ai,reports` | All groups in one worker container by default; split across differently-configured replicas for larger installs. |
+| Network | `HTTPS_PROXY` / `HTTP_PROXY` | empty | Enterprise egress proxy for connector syncs and remote LLM endpoints (Section 14). |
+| Network | `NO_PROXY` | `postgres,redis,kafka,minio,keycloak,otel-collector,ollama` | Must list all in-network service names so internal traffic never routes through the proxy (Section 14). |
 
 ## 6. Persistence and Volume Strategy
 
@@ -224,14 +227,21 @@ Named volumes only (no bind mounts for data), so `docker compose down` without `
 
 ## 7. Backup
 
-Compose installs are single-host; backups are the only disaster-recovery mechanism. The provided `backup/eip-backup.sh` (spec):
+Compose installs are single-host; backups are the only disaster-recovery mechanism. Recovery objectives for this deployment shape: **RPO ≤ 15 min (NFR-021)** for production installs; **RTO ≤ 4 h** — the single-node restore-from-backup bound of NFR-022.
 
-1. `pg_dump -Fc` of the `eip` database (includes pgvector data and the Keycloak schema when co-hosted) — the primary backup; taken online.
+The provided `backup/eip-backup.sh` (spec):
+
+1. `pg_dump -Fc` of the `eip` database (includes pgvector data and the Keycloak schema when co-hosted) — the full-backup baseline; taken online.
 2. `mc mirror` of MinIO buckets to the backup target.
 3. Kafka is **not** backed up: topics are re-derivable (raw staging is in Postgres/MinIO) and consumers checkpoint in Postgres. After restore, offsets reset per the checkpoint table.
 4. Tar of `/infra/docker-compose/.env`, secrets files, TLS material — stored encrypted, separately from data backups.
 
-Recommended cadence: nightly `pg_dump` + MinIO mirror, retained 14 days minimum. Restore drill (dump → fresh host → `up` → smoke test, Section 14) is part of the production readiness bar for any compose install kept beyond evaluation.
+**Production installs** must additionally run continuous protection on top of the nightly baseline to meet RPO ≤ 15 min (NFR-021):
+
+- **PostgreSQL WAL archiving** to the backup target (`archive_command`, or pgBackRest/wal-g) — enables point-in-time recovery to within minutes of failure; the nightly `pg_dump` remains the restore baseline the WAL stream replays onto.
+- **Continuous object-storage replication:** `mc mirror --watch` from the MinIO buckets to the backup target, instead of relying only on the nightly mirror pass.
+
+**Demo/evaluation installs** may run the nightly-only cadence (`pg_dump` + one `mc mirror` pass, retained 14 days minimum) — this explicitly relaxes RPO to 24 h and does **not** meet NFR-021; it is not acceptable for a production install. Restore drill (dump → fresh host → `up` → smoke test, Section 13) is part of the production readiness bar for any compose install kept beyond evaluation.
 
 ## 8. TLS Termination
 
@@ -260,7 +270,9 @@ Infrastructure images (postgres, kafka, keycloak, etc.) are upgraded independent
 |---|---|---|---|---|
 | Demo / evaluation, simulation data, no local LLM | 4 | 8 GB | 50 GB SSD | `core` (+ `simulation`); AI features pointed at an external endpoint or disabled. |
 | Small production, external LLM endpoint | 8 | 16 GB | 200 GB SSD | `core` + `observability`, 2 worker replicas. |
-| Full stack with local LLM (`ai-local`) | **8 (minimum)** | **16 GB (minimum)**, 24 GB comfortable | 300 GB SSD | Ollama with an 8B-class model; a GPU is strongly recommended for acceptable agent latency, CPU-only works for evaluation. |
+| Full stack with local LLM (`ai-local`) | **8 (minimum)** | **24 GB (minimum)**, 32 GB comfortable | 300 GB SSD | Ollama with an 8B-class model adds ~8 GB over the baseline; a GPU is strongly recommended for acceptable agent latency, CPU-only works for evaluation. |
+
+**NFR-050 startup gate:** the 16 GB "small production" row is the reference shape for NFR-050 — a fresh `docker compose --profile core --profile observability up -d` on a 16 GB host must have every service healthy within **15 minutes**. The Section 13 smoke-test checklist is the timing gate: start the clock at `up -d`, stop when the checklist's health assertions pass. The `ai-local` profile is an optional add-on outside this assertion.
 
 Postgres disk is the growth axis — plan ~1–2 GB per 100 active engineers per month of retained history (connector-mix dependent, dominated by SCM and CI/CD events).
 
@@ -288,12 +300,14 @@ Air-gapped installs must set `EIP_LLM_PROVIDER=ollama` (or point at an in-networ
 
 Accepted limitations of the compose deployment:
 
-- **No HA anywhere:** single Postgres, single Kafka broker (RF=1), single Redis, single `eip-app`. Any component failure is an outage until restart; host failure requires restore from backup.
+- **No HA anywhere:** single Postgres, single Kafka broker (RF=1), single Redis, single `eip-app`. Any component failure is an outage until restart; host failure requires restore from backup (RTO ≤ 4 h single-node bound, Section 7).
 - **Vertical scaling only** (except `eip-workers --scale`, which is still bound to one host's resources). No autoscaling — worker throughput under backlog is fixed.
 - Single-host blast radius, plaintext internal network, no zero-downtime deploys (Section 9's window), no PDB/anti-affinity/zone-spread concepts.
 - `eip-app` is single-replica by design here: session-less and lock-safe (Redisson), but compose provides no load balancing or rolling replacement, so multiple replicas add risk without availability benefit.
 
-Graduate to Kubernetes/OpenShift (`./KubernetesOpenShift.md`) when any of these hold: availability target above best-effort (~99%), more than ~500 tracked engineers or sustained Kafka consumer lag with workers already scaled to host capacity, compliance requiring encrypted internal traffic/NetworkPolicy/secret-manager integration, or organizational need for rolling zero-downtime upgrades. Migration path: `pg_dump`/`mc mirror` out of the compose volumes into operator-managed Postgres/MinIO; Kafka state is not migrated (checkpoints replay).
+A monitored single-node compose install with `restart: unless-stopped`, the production backup posture of Section 7, and a tested restore procedure meets the **99.5 % single-node availability bound (NFR-020)**; only unmonitored demo installs should be treated as ~99 % best-effort.
+
+Graduate to Kubernetes/OpenShift (`./KubernetesOpenShift.md`) when any of these hold: availability target above 99.5 % (targets such as the 99.9 % HA bound of NFR-020 require the `k8s-prod` topology), more than ~500 tracked engineers or sustained Kafka consumer lag with workers already scaled to host capacity, compliance requiring encrypted internal traffic/NetworkPolicy/secret-manager integration, or organizational need for rolling zero-downtime upgrades. Migration path: `pg_dump`/`mc mirror` out of the compose volumes into operator-managed Postgres/MinIO; Kafka state is not migrated (checkpoints replay).
 
 ## 13. Post-Install Smoke Test Checklist
 
@@ -309,3 +323,15 @@ Graduate to Kubernetes/OpenShift (`./KubernetesOpenShift.md`) when any of these 
 - [ ] Report path: generate a sprint report; artifact appears in the artifact library (stored in `eip-artifacts` bucket).
 - [ ] Observability (if enabled): Grafana shows the EIP overview dashboard with live JVM/Kafka/HTTP panels.
 - [ ] Backup script completes and produces a restorable `pg_dump` (verify with `pg_restore --list`).
+
+## 14. Enterprise Network Integration
+
+Compose installs inside enterprise networks commonly sit behind an egress proxy and a private PKI. Both are supported without image changes:
+
+- **Egress proxy:** connector syncs and the LLM provider SPI honor the standard `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY` environment variables. Set them in `.env` (Section 5); compose passes them to `eip-app` and `eip-workers`. `NO_PROXY` must include every in-network service name (`postgres,redis,kafka,minio,keycloak,otel-collector,ollama`) so internal traffic never routes through the proxy.
+- **Custom CA bundle:** when connector targets or LLM endpoints present certificates from an enterprise CA, mount the PEM bundle read-only at `/etc/eip/ca/` on `eip-app` and `eip-workers` (e.g. `./ca/enterprise-ca.pem:/etc/eip/ca/enterprise-ca.pem:ro`). The image entrypoint imports every certificate found in that directory into the JVM truststore before startup — no custom image build required. Node-based tooling run against the install (e.g. Playwright smoke tests) trusts the same bundle via `NODE_EXTRA_CA_CERTS`.
+
+## 15. Hardened and Regulated Environments
+
+- **SELinux-enforcing hosts (RHEL family):** bind-mounted files (`nginx/tls`, `otel/collector.yaml`, `prometheus/prometheus.yml`, the postgres init SQL, secrets and CA bundles) need SELinux volume labels — append `:z` (shared among containers) or `:Z` (private to one container) to the bind-mount options, or `chcon -t container_file_t` the host paths. Named data volumes are labeled automatically by the container runtime.
+- **FIPS mode:** EIP images use standard JCA/JSSE cryptography only (TLS, AES-256-GCM envelope encryption, JWT signature validation) and run on FIPS-enabled hosts without non-approved algorithms. Validate a FIPS-mode host with the Section 13 smoke test as part of hardened-install acceptance.

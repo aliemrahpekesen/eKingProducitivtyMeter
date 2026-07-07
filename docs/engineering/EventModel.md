@@ -83,29 +83,33 @@ Every message on every `eip.*` topic (raw, domain, analytics, AI, reports, DLQ) 
 
 Serialization: JSON (UTF-8) in v1. The envelope is small; payload compression is delegated to Kafka producer compression (`zstd`).
 
+`traceparent` is schema-optional but required by convention for every pipeline-originated event (any event produced by an EIP module, normalizer, sync run, or relay); it may be absent only on externally-injected raw events (e.g. `webhook:*` sources or OTLP push) where no upstream trace context exists. Contract-test fixtures for pipeline producers include it.
+
 ## 3. Topic catalog
 
 Partitions guidance assumes the on-prem baseline (3-broker KRaft, Section 11); single-broker dev uses the same topic names with 1–3 partitions (Section 12).
 
-| Topic | Key | Partitions | Retention | Producers | Consumers | Payload family |
-|---|---|---|---|---|---|---|
-| `eip.raw.<connector>` (one per connector type, e.g. `eip.raw.jira`, `eip.raw.github`) | `tenantId:externalId` | 6 | delete, 7 d | Connector sync runs, webhook intake | Normalizers (`eip-ingestion`) | Raw source records (as-fetched) |
-| `eip.domain.workitem` | `tenantId:entityId` | 12 | delete, 30 d | Work-item normalizers | Analytics, RAG indexer, report engine | WorkItem lifecycle events |
-| `eip.domain.scm` | `tenantId:entityId` | 12 | delete, 30 d | SCM normalizers (GitHub/GitLab/Bitbucket) | Analytics, RAG indexer | Commit/PR/review events |
-| `eip.domain.cicd` | `tenantId:entityId` | 12 | delete, 30 d | CI/CD + K8s/OpenShift normalizers | Analytics (DORA), ops correlation | Build/pipeline/deployment events |
-| `eip.domain.quality` | `tenantId:entityId` | 6 | delete, 30 d | SonarQube normalizer, quality analyzers | Analytics, AI agents | Quality gate/finding/debt events |
-| `eip.domain.ops` | `tenantId:entityId` | 6 | delete, 30 d | Prometheus/Grafana/OTLP normalizers, incident normalizers | Analytics, Incident Analysis agent | Incident/alert/SLO events |
-| `eip.analytics.metrics` | `tenantId:metricKey` | 6 | delete, 90 d | Metric engines (`eip-analytics`) | Dashboards cache builder, AI agents, report engine | Computed metric points |
-| `eip.ai.jobs` | `tenantId:jobId` | 6 | delete, 7 d | API layer, schedulers, agents (sub-jobs) | AI worker runtime (`eip-workers`) | Agent/RAG job requests |
-| `eip.ai.results` | `tenantId:jobId` | 6 | delete, 7 d | AI workers | API layer (job status), report engine | Agent/RAG job outcomes |
-| `eip.reports.jobs` | `tenantId:jobId` | 3 | delete, 7 d | API layer, schedulers, Report Composition agent | Report workers (`eip-reports`) | Report generation requests |
-| `eip.<group>.dlq` (one per consumer group, e.g. `eip.analytics.flow-metrics.dlq`) | original key | 3 | delete, 30 d | DLQ router of the owning group | Replay API, operators | Failed envelope + failure metadata |
+| Topic | Owning module | Key | Partitions | Retention | Producers | Consumers | Payload family |
+|---|---|---|---|---|---|---|---|
+| `eip.raw.<connector>` (one per connector type, e.g. `eip.raw.jira`, `eip.raw.github`) | `eip-ingestion` | `tenantId:externalId` | 6 | delete, 7 d | Connector sync runs (`RawEmitter`), webhook intake — **direct produce** (Section 9) | Normalizers (`eip.ingestion.*-normalizer`) | Raw source records (as-fetched) |
+| `eip.domain.workitem` | `eip-ingestion` | `tenantId:entityId` | 12 | delete, 30 d | Work-item normalizers (outbox) | `eip.analytics.*` metric groups, `eip.ai.rag-indexer` | WorkItem lifecycle events |
+| `eip.domain.scm` | `eip-ingestion` | `tenantId:entityId` | 12 | delete, 30 d | SCM normalizers (GitHub/GitLab/Bitbucket) (outbox) | `eip.analytics.*` metric groups, `eip.ai.rag-indexer` | Commit/PR/review events |
+| `eip.domain.cicd` | `eip-ingestion` | `tenantId:entityId` | 12 | delete, 30 d | CI/CD + K8s/OpenShift normalizers (outbox) | `eip.analytics.*` metric groups (DORA, ops correlation) | Build/pipeline/deployment events |
+| `eip.domain.quality` | `eip-ingestion` | `tenantId:entityId` | 6 | delete, 30 d | SonarQube normalizer, quality analyzers (outbox) | `eip.analytics.*` metric groups, `eip.ai.rag-indexer` | Quality gate/finding/debt events |
+| `eip.domain.ops` | `eip-ingestion` | `tenantId:entityId` | 6 | delete, 30 d | Prometheus/Grafana/OTLP normalizers, incident normalizers (outbox) | `eip.analytics.*` metric groups (incident correlation) | Incident/alert/SLO events |
+| `eip.analytics.metrics` | `eip-analytics` | `tenantId:metricKey` | 6 | delete, 90 d | Metric engines (`eip-analytics`) (outbox) | `eip.analytics.read-models` (read-model / dashboard-cache projector) | Computed metric points |
+| `eip.ai.jobs` | `eip-ai` | `tenantId:jobId` | 6 | delete, 7 d | API layer, schedulers, agents (sub-jobs) — via outbox | `eip.ai.orchestrator` (AI worker runtime, `eip-workers`) | Agent/RAG job requests |
+| `eip.ai.results` | `eip-ai` | `tenantId:jobId` | 6 | delete, 7 d | AI workers (outbox) | None in-platform (see note below) | Agent/RAG job outcomes |
+| `eip.reports.jobs` | `eip-reports` | `tenantId:jobId` | 3 | delete, 7 d | API layer, schedulers, Report Composition agent (`eip-ai`) — via outbox | `eip.reports.job-runner` (report workers) | Report generation requests |
+| `<group>.dlq` (one per consumer group; group names already carry the `eip.` prefix, e.g. group `eip.analytics.flow-metrics` → topic `eip.analytics.flow-metrics.dlq`) | the group's owning module | original key | 3 | delete, 30 d | DLQ router of the owning group | Replay API, operators | Failed envelope + failure metadata |
 
 Notes:
 
+- **Owning module** — exactly one per topic — owns the topic's payload schemas, partition/retention settings, and DLQ policy: `eip.raw.*` + `eip.domain.*` → `eip-ingestion`; `eip.analytics.metrics` → `eip-analytics`; `eip.ai.jobs`/`eip.ai.results` → `eip-ai`; `eip.reports.jobs` → `eip-reports`. `BackendPlan.md` §9.1 and `../architecture/ComponentModel.md` mirror this matrix verbatim.
+- **`eip-app` consumes no Kafka topic.** Agent-run status is served from the `agent_runs` row (updated by workers) via polling / Postgres LISTEN-NOTIFY, not from `eip.ai.results` — consequently `eip.ai.results` has no in-platform consumer group and functions as an audit/integration stream within its retention. Reports are triggered via schedules + API + `eip.reports.jobs`, never by subscribing to domain or metric topics. AI agents and the report engine read metric data through the `eip-analytics` query API, not from `eip.analytics.metrics`.
 - Raw topics are short-retention transport; durable raw history lives in `raw_*` JSONB staging and MinIO, so 7 d covers replays of consumer bugs without duplicating storage.
 - All topics use `cleanup.policy=delete`. Compaction is deliberately not used (Section 11): events are facts, not state snapshots, and the DB rebuilds state.
-- Every consumer group owns exactly one DLQ topic named `eip.<group>.dlq` — created with the group, monitored per Section 9.
+- Every consumer group owns exactly one DLQ topic named `<group>.dlq` — literally the group name plus the `.dlq` suffix (group `eip.analytics.flow-metrics` → topic `eip.analytics.flow-metrics.dlq`) — created with the group, monitored per Section 9.
 
 ## 4. Event taxonomy
 
@@ -128,6 +132,8 @@ Notes:
 
 ### 4.3 Example events
 
+`externalRef` objects in payloads carry `externalId` — the **immutable source-native id** (Jira numeric issue id, GitHub node id) — and `externalKey`, the human-readable, mutable key (`PAY-1421`, `acme/payments#912`) used for display and text-correlation heuristics only, per `../architecture/DomainModel.md` §12.1. Contract-test fixtures pin `externalId` to the immutable form so source-side renames never destabilize identity.
+
 `workitem.transitioned` on `eip.domain.workitem`:
 
 ```json
@@ -143,7 +149,7 @@ Notes:
   "schemaVersion": "1.2",
   "payload": {
     "workItemType": "STORY",
-    "externalRef": { "sourceSystem": "jira", "externalId": "PAY-1421", "url": "https://jira.internal.example.com/browse/PAY-1421" },
+    "externalRef": { "sourceSystem": "jira", "externalId": "10241", "externalKey": "PAY-1421", "url": "https://jira.internal.example.com/browse/PAY-1421" },
     "fromState": "IN_PROGRESS",
     "toState": "IN_REVIEW",
     "workflowStateCategory": "WIP",
@@ -172,7 +178,7 @@ Notes:
   "ingestedAt": "2026-07-06T10:02:40Z",
   "schemaVersion": "1.0",
   "payload": {
-    "externalRef": { "sourceSystem": "github", "externalId": "acme/payments#912", "url": "https://github.internal.example.com/acme/payments/pull/912" },
+    "externalRef": { "sourceSystem": "github", "externalId": "PR_kwDOEjjQvs5aX9zB", "externalKey": "acme/payments#912", "url": "https://github.internal.example.com/acme/payments/pull/912" },
     "repositoryId": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
     "targetBranch": "main",
     "sourceBranch": "feat/idempotency-keys",
@@ -185,7 +191,7 @@ Notes:
     "additions": 642,
     "deletions": 187,
     "linkedWorkItems": [
-      { "sourceSystem": "jira", "externalId": "PAY-1421" }
+      { "sourceSystem": "jira", "externalKey": "PAY-1421" }
     ]
   },
   "traceparent": "00-7ac93f4588c45eb7b4df03ae1f1f5847-11a178bb1cb013c8-01"
@@ -206,7 +212,7 @@ Notes:
   "ingestedAt": "2026-07-06T11:31:12Z",
   "schemaVersion": "1.1",
   "payload": {
-    "externalRef": { "sourceSystem": "azure-devops", "externalId": "payments-cd/run/5581", "url": "https://ado.internal.example.com/acme/payments/_build/results?buildId=5581" },
+    "externalRef": { "sourceSystem": "azure-devops", "externalId": "5581", "externalKey": "payments-cd/run/5581", "url": "https://ado.internal.example.com/acme/payments/_build/results?buildId=5581" },
     "serviceId": "7c8d9e0f-1a2b-4c3d-8e4f-5a6b7c8d9e0f",
     "environment": "production",
     "releaseId": "4e5f6a7b-8c9d-4e0f-9a1b-2c3d4e5f6a7b",
@@ -237,7 +243,7 @@ Notes:
   "ingestedAt": "2026-07-06T13:05:21Z",
   "schemaVersion": "1.0",
   "payload": {
-    "externalRef": { "sourceSystem": "jira", "externalId": "OPS-3327", "url": "https://jira.internal.example.com/browse/OPS-3327" },
+    "externalRef": { "sourceSystem": "jira", "externalId": "30871", "externalKey": "OPS-3327", "url": "https://jira.internal.example.com/browse/OPS-3327" },
     "severity": "SEV2",
     "serviceIds": ["7c8d9e0f-1a2b-4c3d-8e4f-5a6b7c8d9e0f"],
     "openedAt": "2026-07-06T09:47:00Z",
@@ -255,6 +261,7 @@ Notes:
 
 - `schemaVersion` is `MAJOR.MINOR`. Within a major: **additive-only** — new optional fields, new enum values only where the field is documented as open-enum, never renames, removals, type changes, or semantic changes.
 - Breaking changes bump MAJOR. Both majors are produced in parallel during a migration window only if a consumer outside our deploy unit needs it; inside the modular monolith we prefer upgrading consumers first, then producers.
+- **Unknown or newer MAJOR on consume:** a consumer that receives an event whose `schemaVersion` MAJOR it does not support never guesses — the event is routed to the group's DLQ (`<group>.dlq`, failure class `UNKNOWN_SCHEMA`, Section 10) and an alert fires immediately (version skew is a deployment/producer bug, not data weather), per FR-038.
 - **Upcasting on consume:** consumers register upcasters per (eventType, fromMinor) that transform older payloads to the latest minor before handler code runs. Handlers only ever see the newest minor of their supported major.
 - Producers always emit the latest version. Version negotiation does not exist; consumers must accept every minor ≤ latest of a supported major.
 
@@ -281,7 +288,7 @@ Runtime behavior: producers validate payloads against the registry index before 
 
 ## 8. Consumer conventions
 
-- **Group naming:** `eip.<module>.<purpose>` — e.g. `eip.ingestion.workitem-normalizer`, `eip.analytics.flow-metrics`, `eip.analytics.dora-metrics`, `eip.ai.rag-indexer`, `eip.reports.job-runner`. The group name determines the DLQ topic (`eip.analytics.flow-metrics.dlq`).
+- **Group naming:** `eip.<module>.<purpose>`. This section is the **canonical group-name list** — `BackendPlan.md` §9.1 and `../architecture/ComponentModel.md` use exactly these names: `eip.ingestion.<stream>-normalizer` groups (e.g. `eip.ingestion.workitem-normalizer`), `eip.analytics.flow-metrics`, `eip.analytics.dora-metrics`, `eip.analytics.read-models` (read-model / dashboard-cache projector, owned by `eip-analytics`), `eip.ai.rag-indexer`, `eip.ai.orchestrator` (claims `eip.ai.jobs`), `eip.reports.job-runner` (consumes `eip.reports.jobs`). The group name determines the DLQ topic (`eip.analytics.flow-metrics.dlq`).
 - **Batching:** `max.poll.records=200` default (raw normalizers 500; AI/report job consumers 1 — jobs are long-running), `fetch.min.bytes=64KB`, `fetch.max.wait.ms=250`.
 - **max.poll guidance:** `max.poll.interval.ms` must exceed worst-case batch processing time with margin — 300 s default; AI/report job consumers set 30 min and heartbeat via a separate thread (Spring Kafka default). If a handler can block longer, it must hand off to an internal job table instead of holding the poll loop.
 - **Manual ack after idempotent write.** `enable.auto.commit=false`; offsets are acknowledged only after the handler's idempotent write (upsert keyed on `eventId` or natural key) has committed to PostgreSQL. Crash between write and ack ⇒ redelivery ⇒ dedup absorbs it. Never ack-then-write.
@@ -290,13 +297,17 @@ Runtime behavior: producers validate payloads against the registry index before 
 
 ## 9. Transactional outbox → Kafka publishing
 
-Producers never write to the DB and Kafka independently — all domain event publication goes through a transactional outbox in PostgreSQL, relayed by a poller in `eip-workers`.
+**Scope (ADR-017):** the transactional outbox is mandatory for **domain, analytics, and job events** — everything on `eip.domain.*`, `eip.analytics.metrics`, `eip.ai.*`, and `eip.reports.*`. For those families, producers never write to the DB and Kafka independently: publication goes through the transactional outbox in PostgreSQL, and no producer of those families (normalizer, metric engine, agent runtime, report scheduler, or API layer) ever publishes to Kafka directly.
+
+**Raw intake is the sole, deliberate exception:** connector sync runs (`RawEmitter`) and webhook intake publish **directly** to `eip.raw.<connector>`. Durability on that path is the staged `raw_*` row, committed **before** the produce — a raw record always exists in staging before it exists on Kafka, so replay re-produces from staging — and `staging.webhook_intake_buffer` buffers webhook intake during Kafka outages. This keeps high-volume raw traffic out of the outbox table and preserves the webhook intake latency budget.
+
+The relay is not a single-runtime component: `OutboxRelay` runs in **both** runtimes — `eip-app` and `eip-workers` — each instance relaying the outbox rows written by its own runtime (`BackendPlan.md` §6/§8), so events originated in the API app never stall when workers are down.
 
 ```mermaid
 sequenceDiagram
     participant N as Normalizer / Metric engine
     participant PG as PostgreSQL (canonical tables + outbox)
-    participant R as Outbox Relay (eip-workers)
+    participant R as Outbox Relay (eip-app + eip-workers, each for its own writes)
     participant K as Kafka
     participant C as Consumer group
 
@@ -316,14 +327,22 @@ sequenceDiagram
     C-->>K: commit offset (manual ack)
 ```
 
-Properties: no lost events (event row commits with the state change), no ghost events (rollback discards both), at-least-once from relay retries, per-key order preserved by publishing outbox rows in insertion order per key. Relay lag is a first-class metric (`eip.outbox.lag_seconds`, alert > 60 s).
+Properties: no lost events (event row commits with the state change), no ghost events (rollback discards both), at-least-once from relay retries, per-key order preserved by publishing outbox rows in insertion order per key. Relay lag is a first-class metric (`eip.outbox.lag_seconds`, exported as `eip_outbox_lag_seconds`); the alert is `EipOutboxRelayStalled` (lag > 60 s) in the `../architecture/ObservabilityModel.md` §7 catalog.
 
 ## 10. Dead letter queue policy
 
-- **Max retries:** a failing record is retried in-consumer with backoff (1 s, 10 s, 60 s — 3 attempts). Still failing ⇒ routed to `eip.<group>.dlq` with failure metadata headers (`x-eip-failure-class`, `x-eip-exception`, `x-eip-attempts`, `x-eip-original-topic`, `x-eip-original-partition-offset`) and the offset is committed so the partition keeps flowing.
-- **Park + replay API:** `/api/v1/admin/dlq` lists parked events per group (tenant-scoped, RBAC-guarded), supports inspect, discard-with-reason (audited), and replay — replay republishes to the original topic with the original key, so ordering relative to new traffic is best-effort and the target consumer's idempotency absorbs any interleaving.
-- **Alerting:** DLQ depth > 0 for 15 min ⇒ warning; > 100 events or growth > 10/min ⇒ page. Every DLQ route increments `eip.consumer.dlq.routed` tagged by group and failure class.
-- Poison classification: schema-validation failures alert immediately (indicates a producer bug, not data weather).
+- **Failure-class taxonomy (drives every retry/DLQ decision; mirrored in `../architecture/DataFlow.md` global invariants).** Every consumer failure is classified before any retry or DLQ routing, and the class is stamped into the `x-eip-failure-class` header:
+
+| Failure class | Meaning (examples) | Handling |
+|---|---|---|
+| `TRANSIENT_INFRA` | Platform or source infrastructure unavailable — Postgres, Kafka, Redis, MinIO, or the source system down or timing out | Pause the partition and retry with exponential backoff until the dependency recovers — **never DLQ**. An infrastructure outage must not convert the in-flight stream into DLQ traffic requiring manual replay. |
+| `DATA_POISON` | The message itself is unprocessable — deserialization failure, envelope or payload schema-validation failure | **DLQ immediately, no retry** — retrying cannot repair a malformed message. |
+| `LOGIC_BUG` | Handler exception on a well-formed message — a consumer-code defect | Bounded in-consumer retry with backoff (1 s, 10 s, 60 s — 3 attempts), then DLQ + alert. |
+| `UNKNOWN_SCHEMA` | Unsupported `schemaVersion` MAJOR (Section 5) | **DLQ immediately + alert** — version skew is a deployment/producer bug, not data weather, per FR-038. |
+
+- **DLQ routing:** a DLQ-bound record is routed to the group's `<group>.dlq` topic (e.g. `eip.analytics.flow-metrics.dlq`) with failure metadata headers (`x-eip-failure-class` populated from the taxonomy above, `x-eip-exception`, `x-eip-attempts`, `x-eip-original-topic`, `x-eip-original-partition-offset`) and the offset is committed so the partition keeps flowing. `TRANSIENT_INFRA` is the exception: nothing is routed and the partition stays paused until the dependency recovers.
+- **Park + replay API:** the DLQ admin endpoints (`GET /api/v1/dlq/groups`, `GET /api/v1/dlq/groups/{group}/messages`, `POST /api/v1/dlq/groups/{group}/replay`, `DELETE /api/v1/dlq/groups/{group}/messages/{msgId}` — see [APIDesign.md](APIDesign.md) §4.3) list parked events per group (tenant-scoped, RBAC-guarded), support inspect, discard-with-reason (audited), and replay — replay republishes to the original topic with the original key, so ordering relative to new traffic is best-effort and the target consumer's idempotency absorbs any interleaving.
+- **Alerting:** alert names, the metric, and thresholds are owned by the single alert catalog in `../architecture/ObservabilityModel.md` §7. Every DLQ route increments `eip_kafka_dlq_messages_total{group, failure_class}`, and `EipDlqNonEmpty` fires on it: any increase over 10 min ⇒ warning; > 100 events/h ⇒ critical. This section defines no separate DLQ metric or threshold set.
 
 ## 11. Event sourcing stance
 
@@ -331,6 +350,7 @@ EIP is **not event-sourced**. The event log is a derived integration layer:
 
 - **PostgreSQL is the system of record.** Canonical entities are authoritative rows; events describe changes for downstream consumers but are never replayed to reconstruct primary state. Topic retention (7–90 d) makes this structurally impossible by design — nobody can quietly start depending on infinite replay.
 - **Where replay is supported: analytics rebuild.** Metric engines can rebuild derived aggregates from (a) canonical tables — the normal path for full recomputation, and (b) topic replay within retention for recent-window reprocessing after a metric-engine bug fix (`analytics.metric.backfilled` marks recomputed points). RAG re-indexing likewise reads from canonical tables + object storage, not from Kafka history.
+- **Analytics data-access rule (ADR-019; stated identically in `../architecture/ArchitectureOverview.md` §5, `BackendPlan.md` §5, and `../architecture/ComponentModel.md`):** the canonical-table rebuild path above uses `eip-analytics`' READ-ONLY SQL access to the canonical schemas (`work`/`scm`/`cicd`/`quality`/`ops`) via a dedicated read-only DB grant, for recomputation/rollups only. Reads of `staging.raw_*` and any canonical writes are forbidden. At module extraction, this access becomes a canonical read replica or an API.
 - Rationale: source tools already hold the deep history (and connectors can re-sync); event sourcing would duplicate that burden while complicating tenant deletes (GDPR-style erasure is a DB operation plus retention-bounded topic aging, not a log rewrite).
 
 ## 12. Backpressure and lag SLOs
@@ -342,7 +362,7 @@ EIP is **not event-sourced**. The event log is a derived integration layer:
 | RAG indexer | p95 < 15 min | Batch re-index; drops to scheduled mode under sustained lag |
 | AI / report job consumers | job start p95 < 60 s | Bounded worker pool; queue depth surfaced to UI with position |
 
-Lag is measured as time-lag (now − timestamp of last consumed record), exported via `eip.consumer.lag_seconds` per group/topic and burrow-style offset lag from the broker; both alarm against the SLO. Producers apply backpressure naturally through the outbox (relay throttles when the broker is slow) — the API layer never blocks on Kafka.
+Lag is measured as time-lag (now − timestamp of last consumed record), exported via `eip.consumer.lag_seconds` per group/topic and burrow-style offset lag from the broker; both alarm against the SLO via `EipKafkaConsumerLagGrowing` in the `../architecture/ObservabilityModel.md` §7 alert catalog. Producers of outbox-scoped families apply backpressure naturally through the outbox (relay throttles when the broker is slow) — the API layer never blocks on Kafka; on the direct-produce raw path (Section 9), webhook intake falls back to `staging.webhook_intake_buffer` and sync scheduling slows on raw-topic lag.
 
 ## 13. Kafka on-prem operations
 
@@ -370,7 +390,7 @@ Lag is measured as time-lag (now − timestamp of last consumed record), exporte
 - [ ] Given any event published to any `eip.*` topic, then it validates against the envelope schema and its (eventType, schemaVersion) payload schema.
 - [ ] Given a consumer crash after DB write but before offset commit, when the group rebalances, then redelivery produces no duplicate canonical rows and no duplicate downstream events.
 - [ ] Given two events for the same `tenantId:entityId`, then every consumer observes them in `occurredAt`-consistent publish order.
-- [ ] Given a poison message, then the partition continues within one retry cycle, the event lands in `eip.<group>.dlq` with full failure metadata, and replay through the admin API converges to correct state.
-- [ ] Given a producer transaction rollback, then no event for that transaction ever reaches Kafka (outbox atomicity).
+- [ ] Given a poison message, then the partition continues within one retry cycle, the event lands in the group's `<group>.dlq` topic with full failure metadata, and replay through the admin API converges to correct state.
+- [ ] Given a producer transaction rollback, then no event for that transaction ever reaches Kafka (outbox atomicity — domain/analytics/job families per the Section 9 scope; on the raw path, a failed staging transaction produces nothing because the staged row commits before the produce).
 - [ ] Given a schema change PR that removes or retypes a field within a major version, then CI fails.
 - [ ] Given the single-broker dev stack with simulation connectors, then the full pipeline (raw → domain → analytics → AI jobs → reports) runs end-to-end with all topics from Section 3 present.

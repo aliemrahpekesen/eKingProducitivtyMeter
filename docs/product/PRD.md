@@ -100,7 +100,7 @@ Detailed personas are defined in ../product/Personas.md. Summary of roles this P
 
 ## 5. Functional Requirements
 
-Requirement IDs are stable; do not renumber. Priority: P0 = must-have for the phase where the capability first ships, P1 = should-have, P2 = later.
+Requirement IDs are stable; do not renumber. ID gaps within section ranges are intentional (reserved or retired IDs); IDs are never renumbered. Priority: P0 = must-have for the phase where the capability first ships, P1 = should-have, P2 = later.
 
 ### 5.1 Integrations / Connector Framework (FR-001–FR-019)
 
@@ -118,7 +118,7 @@ Requirement IDs are stable; do not renumber. Priority: P0 = must-have for the ph
 | FR-010 | The system SHALL persist a checkpoint per connector + stream and resume incremental sync from the last committed checkpoint after restart or failure. | P0 | 1 |
 | FR-011 | The system SHALL expose per-connector sync status: last full/incremental sync time, records processed, error counts, current health, and rate-limit state. | P0 | 1 |
 | FR-012 | Webhook intake endpoints SHALL authenticate requests (shared secret/signature per connector type) and enqueue payloads to `eip.raw.<connector>` without synchronous processing. | P0 | 1 |
-| FR-013 | Connector sync failures SHALL be retried with exponential backoff + jitter; poison payloads SHALL be routed to the consumer group's `.<group>.dlq` topic with replay tooling. | P0 | 1 |
+| FR-013 | Connector sync failures SHALL be retried with exponential backoff + jitter; poison payloads SHALL be routed to the consumer group's `<group>.dlq` topic with replay tooling. | P0 | 1 |
 | FR-014 | Operators SHALL be able to trigger on-demand full or incremental sync per connector instance via UI and API. | P0 | 1 |
 | FR-015 | The system SHALL rate-limit outbound calls per connector instance according to configured limits and observed provider headers. | P0 | 1 |
 | FR-016 | All connector upserts SHALL be idempotent, keyed on `ExternalRef` (sourceSystem, externalId). | P0 | 1 |
@@ -132,7 +132,7 @@ Requirement IDs are stable; do not renumber. Priority: P0 = must-have for the ph
 | --- | --- | --- | --- |
 | FR-030 | Ingestion SHALL follow the pattern: collectors → raw staging (`raw_*` JSONB tables + object storage for blobs) → normalizers → canonical model → domain events on Kafka → analytics/RAG/report consumers. | P0 | 1 |
 | FR-031 | Every event SHALL use the canonical envelope: `eventId (UUIDv7), tenantId, source, entityType, entityId, eventType, occurredAt, ingestedAt, schemaVersion, payload, traceparent`. | P0 | 1 |
-| FR-032 | The system SHALL publish to the canonical topics: `eip.raw.<connector>`, `eip.domain.workitem`, `eip.domain.scm`, `eip.domain.cicd`, `eip.domain.quality`, `eip.domain.ops`, `eip.analytics.metrics`, `eip.ai.jobs`, `eip.ai.results`, `eip.reports.jobs`, with a DLQ per consumer group named `.<group>.dlq`. | P0 | 1 |
+| FR-032 | The system SHALL publish to the canonical topics: `eip.raw.<connector>`, `eip.domain.workitem`, `eip.domain.scm`, `eip.domain.cicd`, `eip.domain.quality`, `eip.domain.ops`, `eip.analytics.metrics`, `eip.ai.jobs`, `eip.ai.results`, `eip.reports.jobs`, with a DLQ per consumer group named `<group>.dlq` (the consumer-group name plus `.dlq` suffix). | P0 | 1 |
 | FR-033 | Delivery SHALL be at-least-once with idempotent consumers (dedup on eventId) and ordering per key (tenantId+entityId). | P0 | 1 |
 | FR-034 | Normalizers SHALL map source records to the canonical domain vocabulary (Organization, BusinessUnit, Team, Member, Product, Project, Roadmap, Initiative, Epic, Feature, Story, Task, Bug, Incident, Risk, Dependency, Repository, Branch, Commit, PullRequest, CodeReview, Build, Pipeline, Deployment, Release, Environment, Artifact, Service, ApiEndpoint, Metric, Alert, LogReference, TraceReference, Document, DecisionRecord, Sprint, Board, WorkflowState, SlaSlo, SecurityFinding, QualityGate, TechnicalDebtItem, GeneratedReport). | P0 | 1 |
 | FR-035 | Work items SHALL be normalized to the unified `WorkItem` supertype (type: EPIC\|FEATURE\|STORY\|TASK\|BUG\|INCIDENT_TICKET) with `ExternalRef` identity mapping. | P0 | 1 |
@@ -223,7 +223,7 @@ Requirement IDs are stable; do not renumber. Priority: P0 = must-have for the ph
 | FR-117 | Exports SHALL include at minimum Markdown, HTML, and PDF for documents; PNG/SVG for diagrams. | P1 | 4 |
 | FR-118 | The artifact library SHALL support browsing, RBAC-scoped sharing, retention policies, and full-text search of generated artifacts. | P1 | 4 |
 
-### 5.8 Admin & Configuration, Security, Observability, Multi-Tenancy (FR-120–FR-141)
+### 5.8 Admin & Configuration, Security, Observability, Multi-Tenancy (FR-120–FR-144)
 
 | ID | Requirement | Priority | Phase |
 | --- | --- | --- | --- |
@@ -231,17 +231,20 @@ Requirement IDs are stable; do not renumber. Priority: P0 = must-have for the ph
 | FR-121 | AuthN SHALL support OIDC with Keycloak as on-prem default, pluggable enterprise IdP (AD FS/Azure AD/Okta), and local accounts fallback. | P0 | 0 |
 | FR-122 | AuthZ SHALL be RBAC with roles plus fine-grained permissions, tenant-scoped; permission checks enforced server-side on every API and MCP capability. | P0 | 0 |
 | FR-123 | All administrative and security-relevant actions SHALL be recorded in an append-only, tenant-scoped audit log with actor, action, target, timestamp, and outcome. | P0 | 0 |
-| FR-113 | Secrets SHALL use AES-256-GCM envelope encryption with master key from env/file/Vault (pluggable KMS SPI); never stored or returned in plaintext, masked in UI, access audited, rotation supported. | P0 | 0 |
+| FR-113 | Secrets SHALL use AES-256-GCM envelope encryption with master key from env/file/Vault (pluggable KMS SPI); never stored or returned in plaintext, masked in UI, access audited, rotation supported. (Numbered in the 11x block, defined here with the security cluster.) | P0 | 0 |
 | FR-125 | The REST API SHALL be `/api/v1`, documented via OpenAPI 3 (springdoc), with cursor pagination, RFC 7807 problem+json errors, and idempotency keys on mutating batch endpoints. | P0 | 0 |
 | FR-126 | The platform SHALL emit OpenTelemetry traces, metrics, and logs (Micrometer metrics, structured JSON logging) to an OTel Collector, with Prometheus + Grafana dashboards shipped in /infra/grafana; Tempo/Loki optional. | P0 | 0 |
 | FR-127 | Trace context (`traceparent`) SHALL propagate through the event envelope across ingestion, analytics, AI, and report pipelines. | P0 | 1 |
-| FR-128 | Every tenant-owned row SHALL carry `tenant_id` enforced by Postgres RLS; no query path may bypass RLS. | P0 | 0 |
+| FR-128 | Every tenant-owned row SHALL carry `tenant_id` enforced by Postgres RLS; no application query path may bypass RLS for tenant-owned data. (Audited maintenance operations by the dedicated `eip_maintenance` role and SECURITY DEFINER admin functions are the sole, audited exceptions. Materialized views are not used for tenant-scoped data for this reason — RLS cannot attach to them; tenant-scoped read models are projector-maintained plain tables, ADR-015.) | P0 | 0 |
 | FR-129 | Tenants SHALL be isolated across data, vector indexes, Kafka processing keys, object storage prefixes, budgets/quotas, and configuration. | P0 | 0–3 |
 | FR-130 | Per-tenant quotas SHALL cover ingest rate, storage, AI token budgets, and concurrent agent runs, with enforcement and alerting. | P1 | 3 |
 | FR-131 | Database schema changes SHALL be managed exclusively via Flyway migrations. | P0 | 0 |
 | FR-132 | Deployment artifacts SHALL include Docker Compose (local/demo) and Kubernetes Kustomize base + overlays with OpenShift notes. | P0 | 0 (Compose), 5 (K8s GA) |
 | FR-140 | Redis 7 (with Redisson) SHALL back caching, distributed locks, and rate-limit state; the platform SHALL remain correct (degraded performance permitted) on cache loss. | P0 | 0 |
 | FR-141 | The platform SHALL provide backup/restore procedures and tested upgrade paths (DB migrations, topic schema evolution, artifact compatibility). | P0 | 5 |
+| FR-142 | The system SHALL support tenant-scoped data-subject erasure and DSAR export for Member-linked data: deletion/anonymization propagated across the canonical model, RAG/vector indexes, generated artifacts, and caches, with audit-preserving redaction (works-council/GDPR). | P1 | 2 |
+| FR-143 | Dashboards and the admin console SHALL conform to WCAG 2.1 AA (keyboard navigation, contrast, screen-reader labels on charts/tables). | P1 | 2 |
+| FR-144 | The REST API SHALL enforce per-tenant request rate limits with 429 + Retry-After and per-tenant quotas surfaced to admins (complements FR-130). | P1 | 3 |
 
 ## 6. Non-Functional Requirements
 
@@ -256,7 +259,7 @@ Requirement IDs are stable; do not renumber. Priority: P0 = must-have for the ph
 | NFR-012 | Freshness — ingestion lag | Webhook-driven events visible in the canonical model within 60 s p95; polled connectors within one poll interval + 5 min p95. |
 | NFR-013 | Latency — AI jobs | Interactive agent runs (e.g., Sprint Review) complete within 5 min p95 with local models on reference hardware; long-running report jobs within 30 min p95. |
 | NFR-020 | Availability | 99.5% monthly availability single-node reference deployment; 99.9% for HA Kubernetes deployment (Phase 5). |
-| NFR-021 | RPO | ≤ 15 minutes (PostgreSQL WAL archiving/streaming + object storage replication; Kafka retention ≥ 7 days permits replay). |
+| NFR-021 | RPO | ≤ 15 minutes (PostgreSQL WAL archiving/streaming + object storage replication; Kafka retention ≥ 7 days permits replay). Applies to production deployments (WAL archiving/streaming + continuous object-storage replication); demo/eval installs running nightly-dump-only backups are explicitly relaxed to RPO ≤ 24 h. |
 | NFR-022 | RTO | ≤ 4 hours single-node; ≤ 30 minutes HA (Phase 5). |
 | NFR-030 | Durability & correctness | At-least-once delivery with idempotent consumers; zero acknowledged-event loss; dedup on eventId; per-key ordering (tenantId+entityId). |
 | NFR-040 | Security — transport & at-rest | TLS on all external interfaces; secrets AES-256-GCM envelope encrypted; DB/object-store encryption at rest supported via platform/infra configuration. |
@@ -346,7 +349,7 @@ Phases are the canonical roadmap; each phase releases only when its checklist pa
 | 4 | Prompt redaction policy defaults: what is redacted from audited prompts out of the box, per tenant policy? | FR-081 | Phase 3 design |
 | 5 | Which internal capabilities are in the initial MCP server allow-list catalog? | FR-105, FR-106 | Phase 4 design |
 | 6 | PDF/PPTX rendering approach for air-gapped deployments (bundled renderer selection)? | FR-111, FR-117 | Phase 4 design |
-| 7 | Tenant-level data-retention and right-to-erasure workflows for Member-linked data under works-council/GDPR constraints? | NFR-070, FR-034 | Phase 2 design |
+| 7 | Tenant-level data-retention and right-to-erasure workflows for Member-linked data under works-council/GDPR constraints? (FR-142 now sets the erasure/DSAR baseline; remaining open detail is tenant workflow/retention specifics.) | NFR-070, FR-034, FR-142 | Phase 2 design |
 | 8 | Reference hardware specification for published NFR benchmarks (CPU/GPU tiers)? | NFR-003, NFR-010, NFR-013 | Phase 1 design |
 
 ---

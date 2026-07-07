@@ -4,6 +4,8 @@ Agentic AI backend design for the Engineering Intelligence Platform (EIP). All g
 
 Related documents: `../ai/RAGArchitecture.md`, `../ai/MCPArchitecture.md`, `../architecture/SecurityModel.md`.
 
+Requirements traceability: this document implements PRD FR-080–FR-089 — agent runtime with budgets and guardrails (FR-080, FR-088), full LLM-call audit (FR-081), the canonical agent roster (FR-082), phased agent delivery (FR-083), the LLM provider SPI (FR-084), per-tenant/per-agent routing with fallbacks and budgets (FR-085), async run lifecycle with status, cancellation, and retry semantics (FR-086), citation-checked validation (FR-087), and optional isolated Python workers (FR-089) — and honors FR-130 (per-tenant quotas including concurrent agent runs), NFR-013 (AI job latency SLOs), and NFR-041 (tenant isolation across agent contexts).
+
 ## 1. Design Principles
 
 1. **On-premise first.** Agents run against local LLMs (Ollama, vLLM) by default; SaaS LLM providers are optional and explicitly configured per tenant. The platform must run fully air-gapped.
@@ -27,7 +29,7 @@ Related documents: `../ai/RAGArchitecture.md`, `../ai/MCPArchitecture.md`, `../a
 | `RunStore` | PostgreSQL persistence of `agent_run`, `agent_run_step`, `llm_call` rows (tenant_id + RLS, like all EIP tables). |
 | `GuardrailPipeline` | Pre-call input policies (redaction, injection screening) and post-call output policies (schema validation, citation checks, banned-content rules). |
 
-`AgentOrchestrator` instances run in `eip-workers` deployments; the `eip-app` API app only enqueues runs and serves run status/results. This keeps long LLM calls off the request path.
+`AgentOrchestrator` instances run in `eip-workers` deployments; the `eip-app` API app only enqueues runs, serves run status/results, and accepts cancellation requests (`POST /api/v1/ai/runs/{id}/cancel`, Section 2.2). This keeps long LLM calls off the request path.
 
 ### 2.2 Run lifecycle
 
@@ -46,25 +48,31 @@ stateDiagram-v2
     executing --> failed : unrecoverable error / budget exceeded
     validating --> failed : validation failed, retries exhausted
     queued --> failed : expired before pickup (TTL)
+    queued --> cancelled : cancel requested before pickup
+    planning --> cancelled : cancel observed at checkpoint
+    executing --> cancelled : cancel observed at step checkpoint
+    validating --> cancelled : cancel observed before revision
     completed --> [*]
     failed --> [*]
+    cancelled --> [*]
 ```
 
 State semantics:
 
-- **queued** — request row exists, message published to `eip.ai.jobs` (key: `tenantId+runId`). Idempotency key on the enqueue endpoint prevents duplicate runs.
+- **queued** — request row exists, message published to `eip.ai.jobs` (key: `tenantId:runId`). Idempotency key on the enqueue endpoint prevents duplicate runs.
 - **planning** — the orchestrator asks the routed model for a bounded plan (max steps from budget), or uses the agent's static plan when the agent is non-generative in its planning (most single-purpose agents ship a fixed plan template).
 - **executing** — steps run sequentially (parallel fan-out only in Report Composition, Section 6). Each step's inputs/outputs are persisted before advancing, so runs are resumable.
 - **validating** — output-schema check, citation check, and (for user-facing outputs) a mandatory Validation Agent pass.
 - **completed / failed** — result envelope published to `eip.ai.results`; artifacts written to object storage (MinIO) and registered as `GeneratedReport` / `Artifact` domain entities where applicable.
+- **cancelled** — terminal state entered via `POST /api/v1/ai/runs/{id}/cancel` (FR-086), authorized for the initiating principal and tenant admins. Cancellation is **cooperative**: the endpoint sets a persisted cancel flag; a `queued` run is cancelled before pickup, a claimed run observes the flag at each step checkpoint (before the next tool or LLM call) and stops there, persisting `cancelled` with all completed steps intact. In-flight LLM calls are abandoned client-side but still audited. Staged `writeArtifact` output is discarded — a cancelled run never publishes partial artifacts. A terminal result envelope with `status=cancelled` is published to `eip.ai.results` so parent compositions and API pollers observe the outcome. Cancelling an already-terminal run is an idempotent no-op returning the current state; every cancel request is audited with the requesting principal. Note the two distinct retry notions: the **validation-retry loop** (`validating → executing`, bounded by `maxValidationRetries`) is internal to a run, while **run-level retry** is always a new run explicitly enqueued by the caller — cancellation halts the former and never triggers the latter.
 
 ## 3. Execution Model
 
 ### 3.1 Async jobs on Kafka
 
-- Request topic: `eip.ai.jobs`. Result topic: `eip.ai.results`. Consumer-group DLQs follow the platform convention `.<group>.dlq` (e.g. `eip.ai.jobs.ai-orchestrator.dlq`).
-- Envelope: the standard EIP event envelope (`eventId (UUIDv7), tenantId, source, entityType=AgentRun, entityId=runId, eventType, occurredAt, ingestedAt, schemaVersion, payload, traceparent`).
-- Guarantees: at-least-once delivery with idempotent consumers (dedup on `eventId`), ordered per key (`tenantId+entityId`).
+- Request topic: `eip.ai.jobs`. Result topic: `eip.ai.results`. Consumer-group DLQs follow the platform convention `<group>.dlq` (e.g. the `eip.ai.orchestrator` consumer group dead-letters to `eip.ai.orchestrator.dlq`).
+- Envelope: the standard EIP event envelope (`eventId (UUIDv7), tenantId, source, entityType=AgentRun, entityId=runId, eventType, occurredAt, ingestedAt, schemaVersion, payload, traceparent`). `AgentRun` is an AI-runtime entity type used on the AI topics only — it is deliberately not part of the FR-034 canonical domain vocabulary (agent runs are operational records, not ingested domain entities).
+- Guarantees: at-least-once delivery with idempotent consumers (dedup on `eventId`), ordered per key (`tenantId:entityId`, per EventModel §7). Offset handling on `eip.ai.jobs` is **commit-on-claim** — Kafka delivers the job, the database owns the run from claim onward (Section 3.5).
 - Triggers: interactive API calls, report schedules (`eip.reports.jobs` fan-in), domain-event reactions (e.g. Incident Analysis on incident-closed events from `eip.domain.ops`), and MCP server invocations (see `../ai/MCPArchitecture.md`).
 
 ### 3.2 Resumable steps
@@ -86,6 +94,28 @@ Each run carries a resolved budget — agent defaults, overridden per tenant, ca
 
 Budget consumption is recorded per step and surfaced in run status responses and in the tenant quota ledger (Section 11).
 
+Budgets are hard-stop ceilings, not latency targets. The performance targets are NFR-013's SLOs — interactive agent runs complete within 5 min p95, long-running report jobs within 30 min p95, on reference hardware with local models — and alerting/capacity planning key on those SLOs (Section 10.1), not on the budgets. `maxWallClock` (10 min interactive / 60 min scheduled) deliberately sits well above the p95 SLOs so that slow-but-succeeding runs finish while runaway runs are cut off; a run that finishes inside its budget can still breach the SLO and burn error budget.
+
+### 3.4 Context-window management
+
+Multi-step runs accumulate context — plan, tool results, prior drafts — across up to `maxSteps` steps and `maxToolCalls` tool calls. The orchestrator manages this against the routed model's `ModelDescriptor.contextWindow` (Section 7.1):
+
+- **Assembly.** The context for each LLM call is assembled fresh from: the system prompt and rendered template, the retained plan, the full outputs of the most recent steps, and a running summarized history of older steps. Step summaries are produced at checkpoint time and persisted with the step, so assembly is deterministic and resumable.
+- **Compaction.** When the assembled context would exceed a configured fraction (default 80%) of `contextWindow`, the orchestrator compacts: the oldest full step outputs are replaced by their persisted summaries, and oversized tool results are re-truncated per Section 4, rule 5 (truncation flagged so the agent can paginate).
+- **Overflow.** If a single step's mandatory inputs (template + output schema + the evidence the step is instructed to use) cannot fit even after compaction, the run fails with `BUDGET_EXCEEDED` (reason `CONTEXT`). The orchestrator never silently drops mandatory evidence to make a prompt fit — that path produces confidently wrong output.
+
+Compaction and truncation events are recorded on the step, so audits can reconstruct exactly what context each LLM call saw.
+
+### 3.5 Job claim & offset semantics
+
+Agent runs last 10–60 minutes — orders of magnitude longer than a Kafka poll loop tolerates (`max.poll.interval.ms` defaults to 5 minutes; holding a message un-acked for a run's duration would evict the consumer and trigger rebalance storms). The `eip.ai.jobs` consumer (`eip.ai.orchestrator` group) therefore decouples message consumption from run execution:
+
+- **Commit-on-claim.** On receiving a job message, the consumer claims the run — it persists the `queued → planning` transition and takes the Redisson lock on `runId` with a watchdog-renewed lease covering `maxWallClock` — and **commits the Kafka offset immediately**. From that point the `agent_run` row is the source of truth for the run; Kafka's delivery role is complete.
+- **Dedicated run executor.** Run execution happens on a dedicated executor pool, never on the consumer poll thread, so `max.poll.interval.ms` never bounds run duration and the consumer keeps polling and claiming while runs execute.
+- **Quota-held runs are parked in the database, not on the partition.** A run that cannot start because its tenant is at `maxConcurrentRuns` (the Section 10 queue-hold) is *not* held un-acked on the partition: the offset is committed and the run row remains `queued` (parked). A DB-backed dispatch check — the Redis per-tenant concurrency counter plus a poll of parked runs, oldest first — claims parked runs as slots free. One tenant sitting at its cap therefore never head-of-line-blocks other tenants' jobs on the same partition.
+- **Crash/rebalance recovery is RunStore-driven, never Kafka-redelivery-driven.** If a worker dies after claim, its Redisson lease expires and another worker's recovery sweep reclaims the run from the database, resuming from the last persisted step (Section 3.2). Kafka redelivery plays no role after the claim commit; duplicate deliveries before the commit are absorbed by `eventId` dedup and the claim's lock-plus-state-check uniqueness.
+- **Autoscaling signal.** Because offsets are committed at claim time, consumer lag is a poor load signal for ai workers; autoscaling keys on **run-backlog depth and age** (parked/queued run count and oldest-queued age), per `../architecture/DeploymentModel.md` §6.
+
 ## 4. Tool-Calling Contract
 
 Agents interact with the platform exclusively through **typed tools**: each tool has a name, JSON Schema for input and output, an RBAC permission requirement, and a tenant scope. LangChain4j tool specifications are generated from these definitions.
@@ -96,7 +126,7 @@ Agents interact with the platform exclusively through **typed tools**: each tool
 | Metric queries | `getMetricSeries`, `getMetricSnapshot`, `getDoraMetrics`, `getFlowMetrics`, `getReleaseReadiness` | `eip-analytics` | Returns metric values with grain, formula version, and caveats attached — agents must propagate caveats into outputs. |
 | RAG retrieval | `ragSearch`, `ragFetchChunk` | `eip-ai` RAG subsystem | Permission-aware, citation-bearing (see `../ai/RAGArchitecture.md`). |
 | MCP tools | admin-allow-listed external tools via `McpClientGateway` | `eip-ai` | Treated as untrusted input; see `../ai/MCPArchitecture.md`. |
-| Artifact writer | `writeArtifact` (markdown/HTML/PDF/PPTX/Mermaid/CSV) | `eip-reports` + MinIO | Only mutating tool available to agents; writes are staged until the run completes. |
+| Artifact writer | `writeArtifact` (markdown/HTML/PDF/PPTX/Mermaid/CSV) | `eip-reports` + MinIO | Only mutating tool available to agents; writes are staged until the run completes. HTML content is sanitized at write time (rule 6). |
 
 Contract rules:
 
@@ -105,31 +135,34 @@ Contract rules:
 3. **Schema validation both ways.** Tool inputs produced by the model are validated against the input schema before execution (invalid → structured error returned to the model, counted against `maxToolCalls`); tool outputs are validated before being appended to the context.
 4. **Read-mostly.** Except `writeArtifact` and explicitly allow-listed MCP tools, all tools are read-only. No agent tool mutates canonical domain data.
 5. **Result size limits.** Tool results are truncated/summarized above a configurable size to protect the context window; truncation is flagged so agents can paginate instead of guessing.
+6. **Artifact sanitization (stored-XSS defense).** `writeArtifact` sanitizes HTML content against a strict allow-list before staging: no `script`/`style` elements, no event-handler attributes, no non-allow-listed URI schemes or external resource loads. Markdown is rendered to HTML through the same sanitizer in `eip-reports`. The Validation Agent's `POLICY` check additionally flags unsafe markup that survives generation. Render paths treat artifacts as untrusted regardless — the SPA sanitizes generated report HTML again before render (see `../implementation/FrontendPlan.md`), so a single missed layer never becomes an exploit.
 
 ## 5. Canonical Agent Catalog
 
 The 18 canonical agents. Names are fixed vocabulary; do not invent variants.
 
-| # | Agent | Category | Primary output | Typical trigger | User-facing (Validation Agent mandatory) |
-|---|---|---|---|---|---|
-| 1 | Data Ingestion Agent | Operations | Connector configuration/mapping suggestions, sync diagnostics | Admin request, sync failure event | No (admin-facing, advisory) |
-| 2 | Data Quality Agent | Operations | Data quality findings report | Schedule, post-sync | No (admin-facing) |
-| 3 | Engineering Metrics Agent | Analytics narrative | Metric interpretation narrative | Dashboard "explain", report section | Yes |
-| 4 | Delivery Risk Agent | Analytics narrative | Risk assessment per epic/project/release | Schedule, risk threshold event | Yes |
-| 5 | Sprint Review Agent | Reporting | Sprint review report | Sprint close, schedule | Yes |
-| 6 | Release Notes Agent | Reporting | Release notes document | Release event, on demand | Yes |
-| 7 | Documentation Agent | Reporting | Technical/process documentation drafts | On demand | Yes |
-| 8 | Use Case Diagram Agent | Diagramming | Mermaid/PlantUML use case diagrams | On demand, report section | Yes |
-| 9 | Architecture Diagram Agent | Diagramming | Mermaid/PlantUML architecture diagrams | On demand, report section | Yes |
-| 10 | Executive Summary Agent | Reporting | Executive-level narrative summary | Schedule, report section | Yes |
-| 11 | Incident Analysis Agent | Analytics narrative | Incident/postmortem analysis | Incident closed, on demand | Yes |
-| 12 | Code Quality Agent | Analytics narrative | Code quality narrative and hotspot analysis | Schedule, quality gate event | Yes |
-| 13 | Team Health Agent | Analytics narrative | Team-level health narrative (anti-ranking guardrails) | Schedule | Yes |
-| 14 | RAG Retrieval Agent | Infrastructure | Ranked, cited context bundles | Invoked by other agents / MCP server | No (feeds other agents) |
-| 15 | Report Composition Agent | Orchestration | Composed multi-section reports | Report schedule, on demand | Yes (composes validated sections; final pass) |
-| 16 | Validation Agent | Quality | Validation verdict + issue list | Mandatory post-step of user-facing runs | No (it *is* the validator) |
-| 17 | Security Review Agent | Analytics narrative | Security posture narrative (finding aging, gate status) | Schedule, security finding events | Yes |
-| 18 | Configuration Assistant Agent | Operations | Guided platform configuration answers/suggestions | Admin interactive session | No (admin-facing, advisory, never applies changes itself) |
+| # | Agent | Category | Phase | Primary output | Typical trigger | User-facing (Validation Agent mandatory) |
+|---|---|---|---|---|---|---|
+| 1 | Data Ingestion Agent | Operations | 4 | Connector configuration/mapping suggestions, sync diagnostics | Admin request, sync failure event | No (admin-facing, advisory) |
+| 2 | Data Quality Agent | Operations | 4 | Data quality findings report | Schedule, post-sync | No (admin-facing) |
+| 3 | Engineering Metrics Agent | Analytics narrative | 4 | Metric interpretation narrative | Dashboard "explain", report section | Yes |
+| 4 | Delivery Risk Agent | Analytics narrative | 3 | Risk assessment per epic/project/release | Schedule, risk threshold event | Yes |
+| 5 | Sprint Review Agent | Reporting | 3 | Sprint review report | Sprint close, schedule | Yes |
+| 6 | Release Notes Agent | Reporting | 3 | Release notes document | Release event, on demand | Yes |
+| 7 | Documentation Agent | Reporting | 4 | Technical/process documentation drafts | On demand | Yes |
+| 8 | Use Case Diagram Agent | Diagramming | 4 | Mermaid/PlantUML use case diagrams | On demand, report section | Yes |
+| 9 | Architecture Diagram Agent | Diagramming | 4 | Mermaid/PlantUML architecture diagrams | On demand, report section | Yes |
+| 10 | Executive Summary Agent | Reporting | 4 | Executive-level narrative summary | Schedule, report section | Yes |
+| 11 | Incident Analysis Agent | Analytics narrative | 4 | Incident/postmortem analysis | Incident closed, on demand | Yes |
+| 12 | Code Quality Agent | Analytics narrative | 4 | Code quality narrative and hotspot analysis | Schedule, quality gate event | Yes |
+| 13 | Team Health Agent | Analytics narrative | 4 | Team-level health narrative (anti-ranking guardrails) | Schedule | Yes |
+| 14 | RAG Retrieval Agent | Infrastructure | 4 | Ranked, cited context bundles | Invoked by other agents / MCP server | No (feeds other agents) |
+| 15 | Report Composition Agent | Orchestration | 4 | Composed multi-section reports | Report schedule, on demand | Yes (composes validated sections; final pass) |
+| 16 | Validation Agent | Quality | 3 | Validation verdict + issue list | Mandatory post-step of user-facing runs | No (it *is* the validator) |
+| 17 | Security Review Agent | Analytics narrative | 4 | Security posture narrative (finding aging, gate status) | Schedule, security finding events | Yes |
+| 18 | Configuration Assistant Agent | Operations | 4 | Guided platform configuration answers/suggestions | Admin interactive session | No (admin-facing, advisory, never applies changes itself) |
+
+Phase assignments follow FR-083: Phase 3 delivers at minimum the Sprint Review, Release Notes, and Delivery Risk agents; the remaining canonical agents ship in Phase 4. The Validation Agent also ships in Phase 3 (FR-087, P0/Phase 3) because it gates publication of every user-facing output — the Phase-3 agents cannot publish without it. Two Phase-3 dependencies are worth calling out explicitly: (a) the RAG retrieval subsystem (`ragSearch`/`ragFetchChunk`, FR-095–FR-101) is part of the Phase-3 AI core even though the dedicated RAG Retrieval Agent (LLM query decomposition, Section 5.14) completes in Phase 4 — Phase-3 agents call the deterministic retrieval tools directly; (b) the Phase-3 agents run under the full validation pipeline from day one, so validation behavior does not change when the rest of the fleet arrives in Phase 4.
 
 ### 5.1 Data Ingestion Agent
 
@@ -253,7 +286,7 @@ The 18 canonical agents. Names are fixed vocabulary; do not invent variants.
 - **Purpose:** Infrastructure agent providing high-quality, permission-aware, cited context bundles to other agents and to the MCP server's retrieval capability. Performs query decomposition, hybrid search invocation, re-rank, deduplication, and citation assembly.
 - **Inputs:** Retrieval request `{query, scopeFilters, k, diversity, callerPrincipal}` from a calling agent run.
 - **Tools:** RAG retrieval primitives (`ragSearch`, `ragFetchChunk`) — no domain mutation, no artifact writer.
-- **Output contract:** `contextBundle {chunks[] {chunkId, text, source, url, score}, coverageNotes, unresolvedAspects[]}` — exactly the citation contract in `../ai/RAGArchitecture.md`.
+- **Output contract:** `contextBundle {chunks[] {chunkId, snippet, source, sourceUrl, score, retrievalAuditId}, coverageNotes, unresolvedAspects[]}` — field names match the RAG chunk metadata model and retrieval API (`../ai/RAGArchitecture.md` Sections 7 and 11); `retrievalAuditId` carries the `rag_retrieval_audit` reference from the ragSearch response into the bundle so every downstream citation is independently verifiable against the audit trail (citation contract, `../ai/RAGArchitecture.md` Section 12).
 - **Guardrails:** Inherits the calling run's principal — cannot widen scope; returns empty-with-explanation rather than lowering the relevance floor.
 - **Prompt skeleton:** system role (retrieval planner) → query decomposition instruction → filter vocabulary → bundle assembly rules. (Query decomposition is the only LLM step; search itself is deterministic.)
 
@@ -263,7 +296,7 @@ The 18 canonical agents. Names are fixed vocabulary; do not invent variants.
 - **Inputs:** Report template ID, scope parameters, output formats.
 - **Tools:** Agent-invocation tool (spawn child runs — the only agent with this tool), artifact writer, RAG retrieval (prior reports for continuity).
 - **Output contract:** Composed `GeneratedReport` (markdown + optional HTML/PDF/PPTX via `eip-reports`) with per-section provenance (child runId, agent, version).
-- **Guardrails:** Child runs inherit principal, tenant, and a partitioned share of the parent budget; composition may reorder/trim but not alter section facts; final Validation Agent pass over the composed document.
+- **Guardrails:** Child runs inherit principal, tenant, and a partitioned share of the parent budget (equal split with a 20% compose reserve — Section 6.1); composition may reorder/trim but not alter section facts; final Validation Agent pass over the composed document.
 - **Prompt skeleton:** system role (editor-in-chief) → template outline with section contracts → child section outputs → unification instruction (tone, dedup, cross-references) → no-new-facts rule.
 
 ### 5.16 Validation Agent
@@ -272,7 +305,7 @@ The 18 canonical agents. Names are fixed vocabulary; do not invent variants.
 - **Inputs:** Candidate output, producing agent's output contract, list of tool calls/results from the producing run.
 - **Tools:** Same read tools as the producing run (same principal — validation must not see more than the producer), citation resolver.
 - **Output contract:** `verdict {pass|fail}, issues[] {type: FACT|CITATION|SCHEMA|POLICY, location, detail, severity}`; on fail, issues feed the producing run's revision loop (bounded by `maxValidationRetries`).
-- **Guardrails:** Runs with a different model than the producer where the routing table allows (cross-model checking); its own budget is charged to the parent run.
+- **Guardrails:** Runs with a different model than the producer where the routing table allows (cross-model checking); its own budget is charged to the producing run — within a Report Composition, per-section passes charge the child section's budget partition and only the final composed-document pass charges the compose reserve (Section 6.1).
 - **Prompt skeleton:** system role (adversarial fact-checker) → claim-extraction instruction → per-claim verification protocol (query tool, compare, verdict) → issue schema.
 
 ### 5.17 Security Review Agent
@@ -293,6 +326,55 @@ The 18 canonical agents. Names are fixed vocabulary; do not invent variants.
 - **Guardrails:** Strictly advisory (no mutation tool); secrets never enter context; drafts are schema-validated before display; admin RBAC required to start a session.
 - **Prompt skeleton:** system role (platform SME, advisory-only) → relevant JSON Schemas → current masked config → conversation history → draft-formatting rules.
 
+### 5.19 Representative output contract (JSON Schema)
+
+Every agent's output contract is a versioned JSON Schema stored with the agent definition in the `AgentRegistry` and enforced twice: as a structured-output request where the provider supports native JSON Schema output (Section 7.2), and deterministically in the `validating` state. Representative example — the Delivery Risk Agent contract (Section 5.4):
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "eip:agent-output:delivery-risk:1",
+  "type": "object",
+  "required": ["riskLevel", "drivers", "recommendations", "confidence", "limitations", "citations"],
+  "additionalProperties": false,
+  "properties": {
+    "riskLevel": { "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+    "drivers": {
+      "type": "array", "minItems": 1, "maxItems": 10,
+      "items": {
+        "type": "object",
+        "required": ["factor", "evidence", "weight"],
+        "additionalProperties": false,
+        "properties": {
+          "factor": { "type": "string", "maxLength": 200 },
+          "evidence": { "type": "string", "maxLength": 1000 },
+          "weight": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+    "recommendations": { "type": "array", "maxItems": 8, "items": { "type": "string", "maxLength": 500 } },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "limitations": { "type": "array", "minItems": 1, "items": { "type": "string", "maxLength": 500 } },
+    "citations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["n", "chunkId", "sourceUrl"],
+        "additionalProperties": false,
+        "properties": {
+          "n": { "type": "integer", "minimum": 1 },
+          "chunkId": { "type": "string", "format": "uuid" },
+          "sourceUrl": { "type": "string", "format": "uri" },
+          "retrievalAuditId": { "type": "string", "format": "uuid" }
+        }
+      }
+    }
+  }
+}
+```
+
+Conventions shared by all agent output schemas: `additionalProperties: false` everywhere (no model-invented fields), explicit array/string maxima (context and budget protection), a mandatory `limitations` (or equivalent caveats) element on user-facing contracts, and citation entries matching the machine-readable citation contract in `../ai/RAGArchitecture.md` Section 12 (`sourceUrl`/`snippet` field naming, `retrievalAuditId` back-reference).
+
 ## 6. Multi-Agent Composition
 
 ### 6.1 Report Composition Agent as orchestrator
@@ -300,11 +382,15 @@ The 18 canonical agents. Names are fixed vocabulary; do not invent variants.
 The Report Composition Agent is the only agent permitted to spawn child runs. Composition flow:
 
 1. Resolve the report template (versioned; per-tenant overrides) into an ordered section list, each bound to a section agent and parameter mapping.
-2. Spawn child runs on `eip.ai.jobs` (fan-out; independent sections run in parallel across workers). Each child inherits `tenantId`, initiating principal, `traceparent`, and a budget partition.
-3. Await child results on `eip.ai.results` (correlation by parent runId); a failed non-critical section degrades to an "unavailable" placeholder with the failure reason, a failed critical section fails the composition.
+2. Spawn child runs on `eip.ai.jobs` (fan-out; independent sections run in parallel across workers). Each child inherits `tenantId`, initiating principal, `traceparent`, and a budget partition. **Partitioning rule:** the parent's remaining token, cost, and tool-call budgets are split **equally across the spawned sections after reserving 20% for the compose-and-validate pass**; wall-clock is shared (children run against the parent's `maxWallClock`), not split. A child that exhausts its partition fails with `BUDGET_EXCEEDED` and its section degrades to the "unavailable" placeholder (step 3) — child exhaustion never draws down the compose reserve or sibling partitions, so one runaway section cannot starve the rest of the report.
+3. Await child results on `eip.ai.results` (correlation by parent runId); a failed non-critical section (including budget-exhausted children) degrades to an "unavailable" placeholder with the failure reason, a failed critical section fails the composition.
 4. Compose: unify tone, dedupe overlapping facts, build cross-references and table of contents. Composition may not introduce facts absent from section outputs.
 5. Final Validation Agent pass over the composed document (in addition to per-section validation).
 6. Render output formats via `eip-reports` and register the `GeneratedReport`.
+
+**Concurrency admission (no self-deadlock).** Children count against the tenant's `maxConcurrentRuns` like any other run (Section 10), so composition is admitted only when the tenant cap is **≥ 2** — at cap 1 the parent would hold the sole slot while its children wait for one, a guaranteed deadlock; enqueueing a composition run for a cap-1 tenant is rejected with RFC 7807 `quota-exceeded` and an explanatory detail. While in the await-children state (step 3 — the parent holds no executor and makes no LLM calls), the **parent releases its concurrency slot** and re-acquires one before the compose pass (step 4; re-acquisition queue-holds like any other claim). Children respect the cap among themselves, so a wide fan-out at cap *N* runs at most *N* sections in parallel and the rest queue-hold.
+
+**Validation budget attribution.** Per-section Validation Agent passes draw from **that child's budget partition** — validation is part of producing the section, and a section whose validation exhausts its partition degrades exactly like any other budget-exhausted child. Only the final composed-document pass (step 5) draws from the **20% compose reserve**. This is the precise reading of Section 5.16's "charged to the parent run": for a standalone run the producing run pays; inside a composition the child's partition pays for its own section's validation.
 
 ### 6.2 Validation Agent as mandatory post-step
 
@@ -317,13 +403,22 @@ Every agent marked user-facing in the catalog table has `validating` wired to a 
 ```java
 public interface LlmProvider {
     String id();                          // e.g. "ollama-local", "vllm-cluster-a"
-    Set<LlmCapability> capabilities();    // CHAT, TOOL_CALLING, STRUCTURED_OUTPUT, STREAMING, EMBEDDINGS
-    List<ModelDescriptor> models();       // id, contextWindow, pricePer1kTokens (0 for local), maxOutputTokens
+    List<ModelDescriptor> models();       // per-model contract — capabilities live here, not on the provider
     ChatResponse chat(ChatRequest req);   // messages, tools, responseSchema?, budgetGuard
     Flux<ChatChunk> chatStream(ChatRequest req);
     HealthStatus health();                // used by routing/fallback and admin UI
 }
+
+public record ModelDescriptor(
+    String id,
+    Set<LlmCapability> capabilities,      // CHAT, TOOL_CALLING, STRUCTURED_OUTPUT, STREAMING, EMBEDDINGS — declared per model
+    int contextWindow,
+    int maxOutputTokens,
+    BigDecimal pricePer1kTokens           // 0 for local
+) {}
 ```
+
+Capabilities are declared **per model, not per provider**: one Ollama or vLLM endpoint routinely serves models with divergent tool-calling, structured-output, and context-window support, so a provider-level capability set is unimplementable — there is no provider-level `capabilities()` method (streaming support is likewise a per-model capability). This granularity is fixed **before** the SPI is published under semver (NFR-060), so no breaking SPI change is needed later. Capability discovery for admin-registered local models: capabilities are **admin-declared at registration** and **verified by a startup/health probe** — a tool-call smoke test and a JSON-schema structured-output smoke test per declared capability; a model that fails its probe is marked capability-degraded in the admin UI and excluded from routes requiring the failed capability. Routing resolution (Section 7.2) reads per-model capabilities.
 
 Implementations (all configurable per tenant, secrets via the platform secret vault):
 
@@ -335,10 +430,12 @@ Implementations (all configurable per tenant, secrets via the platform secret va
 | Anthropic-compatible | HTTP | Anthropic Messages API wire format. |
 | Custom enterprise endpoint | HTTP (adapter) | Thin adapter SPI for bespoke internal gateways. |
 
+Tenant isolation on shared inference (NFR-041): when multiple tenants share an inference endpoint (a shared vLLM cluster or Ollama host), cross-request optimizations that could carry state between requests — prefix/KV-cache reuse, server-side prompt caching, speculative-decoding caches — are **disabled or tenant-partitioned** (cache keys include `tenantId`); the provider adapter refuses to route to a shared endpoint whose configuration cannot guarantee one of the two. Embedding batches never mix tenants (see `../ai/RAGArchitecture.md` Section 3.1). Tenants with stricter requirements can pin dedicated workers or endpoints via the routing table. The CI isolation test suite (NFR-041) includes a shared-endpoint scenario asserting that no cross-tenant prompt or cache residue is observable in responses.
+
 ### 7.2 Routing, fallbacks, streaming, structured output
 
 - **Routing table** (`llm_route`, DB-managed, admin UI): key = `(tenantId, agentName, purpose)` where purpose ∈ {PLANNING, DRAFTING, VALIDATION, EMBEDDING}; value = ordered provider+model list. Resolution: exact match → tenant default → platform default.
-- **Fallback chains:** on provider error/timeout/health failure, the orchestrator advances down the route list; each hop is audited; capability mismatches (e.g., no tool calling) are excluded at resolution time, not discovered at call time.
+- **Fallback chains:** on provider error/timeout/health failure, the orchestrator advances down the route list; each hop is audited; capability mismatches (e.g., no tool calling) are excluded at resolution time against the per-model `ModelDescriptor.capabilities` (Section 7.1), not discovered at call time.
 - **Streaming:** interactive surfaces (Configuration Assistant, dashboard "explain") stream via SSE from `eip-app`; batch runs consume non-streaming. Streamed responses are buffered server-side so audit records and guardrail post-checks always see the complete output.
 - **Structured output enforcement:** where the provider supports native JSON Schema output, it is used; otherwise the orchestrator applies constrained-prompt + parse-and-repair (bounded retries) and the schema check in `validating` remains the final gate.
 
@@ -352,26 +449,50 @@ Implementations (all configurable per tenant, secrets via the platform secret va
 ## 9. Evaluation & Quality
 
 - **Golden datasets from simulation mode.** The `/simulation` data packs provide deterministic tenants with known ground truth (planted risks, known sprint outcomes, seeded incidents). Golden cases pair inputs with expected structured outputs/claims.
-- **Regression evals per agent:** run in CI against a pinned local model and on demand against tenant-routed models; scored on schema validity, fact accuracy vs. ground truth, citation resolution rate, guardrail compliance (e.g., anti-ranking lexicon for Team Health), and budget adherence. Promotion of a prompt template or agent version requires non-regression on its eval suite.
+- **Regression evals per agent — never on the merge path.** The CC-5 merge gate runs only **deterministic prompt-contract tests**: golden prompt and tool-schema assertions exercised against `FakeLlmProvider` — no live model anywhere in gating CI, consistent with `../testing/TestingStrategy.md` (which places model-based evals nightly) and the EOS AI validation workflow. The **model-based eval suite** — scored on schema validity, fact accuracy vs. ground truth, citation resolution rate, guardrail compliance (e.g., anti-ranking lexicon for Team Health), and budget adherence — runs **nightly** and at **release gates** (RG1 for AI-phase releases) on reference hardware against the pinned local model, and on demand against tenant-routed models. Promotion of a prompt template or agent version requires non-regression on its eval suite, evidenced by the nightly/release-gate runs — eval results never gate PR merges (ADR-020).
 - **Human feedback loop:** every user-facing output carries accept/edit/reject feedback affordances; feedback rows link runId + templateKey/version + verdict + optional comment, feeding eval-case candidates and template tuning. Feedback is about outputs, never about people, consistent with platform anti-goals.
 
 ## 10. Cost & Quota Management
 
 - Provider price tables (per model, per 1k prompt/completion tokens; zero for local) are admin-maintained; every `llm_call` row stores computed cost.
-- Quota ledger per tenant: daily/monthly token and cost ceilings, per-agent sub-quotas optional. Enforcement at enqueue (reject with RFC 7807 `quota-exceeded`) and pre-call (fail run with `BUDGET_EXCEEDED`).
-- Dashboards (Grafana + in-product admin) show spend by tenant/agent/model, cache-hit and fallback rates, and eval scores over time via Micrometer/OTel metrics.
+- Quota ledger per tenant: daily/monthly token and cost ceilings, per-agent sub-quotas optional, and a per-tenant **`maxConcurrentRuns`** cap (FR-130). Token/cost enforcement happens at enqueue (reject with RFC 7807 `quota-exceeded`) and pre-call (fail run with `BUDGET_EXCEEDED`). Concurrency enforcement happens at **claim time** in the `AgentOrchestrator`: a Redis-backed per-tenant counter gates run claims, so a worker never claims a run that would exceed the tenant's cap — the run stays `queued` (queue-hold) until a slot frees or its TTL expires; interactive enqueues beyond a configurable queued-run depth are rejected immediately with RFC 7807 `quota-exceeded` rather than silently piling up. Queue-held runs are parked in the database with their Kafka offsets already committed (Section 3.5), so a capped tenant never blocks the partition for other tenants. Child runs spawned by Report Composition count against the cap like any other run; composition admission therefore requires `maxConcurrentRuns` ≥ 2, and the parent releases its slot while awaiting children (Section 6.1).
+- **LLM response cache.** The cache behind the "cache-hit rate" dashboards is an **exact-prompt response cache**: entries are keyed on `tenantId` + `principalGrantHash` + `(templateKey, templateVersion)` + the hash of the exact rendered prompt + model id. Keying on `principalGrantHash` means results are never shared across differing permission sets (same rule as the retrieval cache, `../ai/RAGArchitecture.md` Section 8), and keying on the template version makes every template change an implicit cache invalidation. Only deterministic, non-interactive calls (temperature 0 / fixed seed where the provider supports it) are cache-eligible; entries are TTL-bounded (default 24 h) and tenant-scoped in Redis. Cache hits are still audited as `llm_call` rows (`cacheHit=true`, zero cost, zero provider latency), so audit completeness (Section 11) is unaffected.
+- Dashboards (Grafana + in-product admin) show spend by tenant/agent/model, cache-hit and fallback rates, and eval scores over time via the Micrometer/OTel metrics in Section 10.1.
+
+### 10.1 AI metrics
+
+Micrometer → OTel → Prometheus/Grafana, consistent with the RAG and MCP metric catalogs (`../ai/RAGArchitecture.md` Section 15, `../ai/MCPArchitecture.md` Section 6):
+
+| Metric | Type | Labels | Alerting guidance |
+|---|---|---|---|
+| `eip.ai.run.latency` | histogram | tenant, agent, trigger (interactive/scheduled) | Alert against NFR-013: interactive p95 > 5 min or scheduled-report p95 > 30 min over the SLO window. |
+| `eip.ai.run.failures` | counter | tenant, agent, reason (BUDGET, CONTEXT, VALIDATION, PROVIDER, TIMEOUT, TTL) | Alert on failure-rate threshold; a VALIDATION spike is a quality-regression signal (template or model drift), not an ops signal. |
+| `eip.ai.llm.tokens` | counter | tenant, agent, model, kind (prompt/completion) | Quota forecasting; warn at 80% of the tenant ceiling. |
+| `eip.ai.llm.cost` | counter | tenant, agent, model | Warn at a configurable share of the tenant budget; hard enforcement is the quota ledger, not the metric. |
+| `eip.ai.validation.fail_rate` | gauge | tenant, agent | Alert on sustained rise above the agent's eval baseline. |
+| `eip.ai.provider.fallback` | counter | tenant, provider, model | Any sustained nonzero rate → provider health review; correlates with `HealthStatus` flips. |
+| `eip.ai.eval.score` | gauge | agent, suite | Alert on regression below the suite baseline (Section 9); gates template promotion. |
+
+Alerting is keyed to the NFR-013 SLOs, not to the budget ceilings in Section 3.3 — budgets are hard stops sitting above the p95 SLOs, so "no budget breaches" does not mean "SLO met".
 
 ## 11. Auditability
 
-Every LLM call is audited without exception: `llm_call (id, runId, stepIndex, tenantId, principal, provider, model, templateKey, templateVersion, promptRedacted, completionRedacted, promptTokens, completionTokens, cost, latencyMs, finishReason, error?)`. Redaction policy (per tenant) controls whether full prompts, hashed prompts, or metadata-only are retained. Tool calls, MCP calls, and RAG retrievals are audited in their own trails (see sibling docs). All audit rows are tenant-scoped (RLS), immutable, and exportable; `traceparent` links audit rows to OTel traces.
+Every LLM call is audited without exception: `llm_call (id, runId, stepIndex, tenantId, principal, provider, model, templateKey, templateVersion, promptRedacted, completionRedacted, promptTokens, completionTokens, cost, latencyMs, finishReason, cacheHit, error?)`. Redaction policy (per tenant) controls whether full prompts, hashed prompts, or metadata-only are retained. Tool calls, MCP calls, and RAG retrievals are audited in their own trails (see sibling docs). All audit rows are tenant-scoped (RLS), immutable, and exportable; `traceparent` links audit rows to OTel traces.
 
 ## 12. Acceptance Criteria
 
-- [ ] Given a run request from a principal lacking permission to an entity, when any tool call touches that entity, then the tool returns an authorization error and no data reaches the model.
-- [ ] Given a worker crash mid-run, when another worker claims the run, then it resumes from the last persisted step with no duplicated `writeArtifact` effects.
-- [ ] Given a user-facing agent output, when validation runs, then fact, citation, and schema checks all execute and a failure with exhausted retries yields `failed`, never an unvalidated `completed`.
-- [ ] Given any completed or failed run, when an auditor queries it, then every LLM call, tool call, template version, token count, and cost is retrievable.
-- [ ] Given a provider outage, when a routed call fails, then the fallback chain is attempted in order and each hop is audited.
+These criteria trace to FR-080–FR-089, FR-130, NFR-013, and NFR-041.
+
+- [ ] Given a run request from a principal lacking permission to an entity, when any tool call touches that entity, then the tool returns an authorization error and no data reaches the model (FR-088, NFR-041).
+- [ ] Given a worker crash mid-run, when another worker claims the run, then it resumes from the last persisted step with no duplicated `writeArtifact` effects (FR-086).
+- [ ] Given a user-facing agent output, when validation runs, then fact, citation, and schema checks all execute and a failure with exhausted retries yields `failed`, never an unvalidated `completed` (FR-087).
+- [ ] Given any completed or failed run, when an auditor queries it, then every LLM call, tool call, template version, token count, and cost is retrievable (FR-081).
+- [ ] Given a provider outage, when a routed call fails, then the fallback chain is attempted in order and each hop is audited (FR-085).
+- [ ] Given a running agent run, when an authorized principal calls `POST /api/v1/ai/runs/{id}/cancel`, then the run reaches `cancelled` at the next step checkpoint, no staged artifact is published, a `status=cancelled` envelope is published to `eip.ai.results`, and the cancellation is audited (FR-086).
+- [ ] Given a tenant at its `maxConcurrentRuns` cap, when further runs are enqueued, then no worker claim exceeds the cap — additional runs queue-hold, and interactive enqueues beyond the queued-depth limit are rejected with RFC 7807 `quota-exceeded` (FR-130).
+- [ ] Given a run whose mandatory step inputs cannot fit the routed model's context window after compaction, when the step executes, then the run fails with `BUDGET_EXCEEDED` reason `CONTEXT` rather than silently dropping evidence (FR-088, NFR-013).
+- [ ] Given a shared inference endpoint serving two tenants, when the isolation suite runs, then no cross-tenant prompt or cache residue is observable in any response (NFR-041).
+- [ ] Given an agent produces HTML containing script or event-handler markup, when `writeArtifact` stages it, then sanitization strips the disallowed markup and the Validation Agent `POLICY` check flags the attempt (FR-088).
 
 ## 13. Degradation Behavior Without an LLM
 

@@ -29,9 +29,9 @@ Phase summary:
 |-------|---------|---------------------|----------|--------------------------------------|
 | 0 | v0.1 | 2 months | Foundations: tenancy, RBAC, audit, secrets, observability, Compose stack | 20 |
 | 1 | v0.2 | 2.5 months | Ingestion core: connector SPI, Kafka pipeline, Jira + GitHub + simulation | 19 |
-| 2 | v0.3 | 3 months | Analytics & dashboards: full canonical metric set, dashboard suite, P1 connectors | 28 |
-| 3 | v0.4 | 3 months | AI core: LLM SPI, RAG, first agents, report engine + Artifacts Library | 25 |
-| 4 | v0.5 | 3 months | Full 18-agent suite, MCP both directions, complete output catalog | 34 |
+| 2 | v0.3 | 3 months | Analytics & dashboards: core canonical metric set (flow, DORA, quality, ops, team health), dashboard suite, P1 connectors | 26 |
+| 3 | v0.4 | 3 months | AI core: LLM SPI, RAG, first agents, delivery-risk analytics, report engine + Artifacts Library | 32 |
+| 4 | v0.5 | 3 months | Full 18-agent suite, MCP both directions, complete output catalog | 32 |
 | 5 | v1.0 | 3 months | Enterprise hardening: K8s/OpenShift GA, HA, security certification, remaining connectors | 16 |
 
 ## 2. Phase gate process
@@ -57,17 +57,17 @@ Legend: ● = primary delivery in this phase, ◐ = partial/extended, — = not 
 
 | Capability area | P0 | P1 | P2 | P3 | P4 | P5 |
 |-----------------|----|----|----|----|----|----|
-| Platform & Tenancy | ● | ◐ | — | — | — | ● (K8s GA, HA, backup) |
-| Admin & Configuration | ● (org/team/user/roles, credentials) | ● (data sources, jobs, queue/storage) | ◐ (metrics, risk rules, retention) | ◐ (LLM, RAG, agents, templates) | ◐ (MCP, notifications) | — |
+| Platform & Tenancy | ● | ◐ | — | ◐ (API rate limiting) | — | ● (K8s GA, HA, backup) |
+| Admin & Configuration | ● (org/team/user/roles, credentials) | ● (data sources, jobs, queue/storage) | ◐ (metrics, retention, notifications) | ◐ (LLM, RAG, agents, templates, risk rules) | ◐ (MCP) | — |
 | Connectors | — | ● (SPI, Jira, GitHub, simulation) | ● (GitLab, SonarQube, CI/CD, Prometheus) | — | — | ● (remaining connectors) |
 | Ingestion & Normalization | — | ● | ◐ (tuning) | — | — | ◐ (scale validation) |
-| Analytics & Metrics | — | — | ● | — | — | ◐ (performance) |
-| Dashboards | — | ◐ (admin, system health, monitors) | ● (productivity, sprint, kanban, quality, risk, release, ops) | — | — | — |
+| Analytics & Metrics | — | — | ● | ◐ (delivery risk, risk scoring) | — | ◐ (performance) |
+| Dashboards | — | ◐ (admin, system health, monitors) | ● (productivity, sprint, kanban, quality, ops, accessibility) | ◐ (delivery risk, release) | — | — |
 | AI Agents | — | — | — | ● (runtime, SPI, first agents) | ● (full 18-agent suite) | — |
 | RAG | — | — | — | ● | ◐ (scale, re-index SLAs) | — |
 | MCP | — | — | — | — | ● | — |
 | Report Center & Artifacts Library | — | — | — | ● (engine, library, first reports) | ● (all output types, scheduling) | — |
-| Security & Audit | ● (secrets, audit) | — | ◐ (rotation, governance) | ◐ (LLM audit) | — | ● (certification checklist) |
+| Security & Audit | ● (secrets, audit) | — | ◐ (rotation, governance, erasure/DSAR) | ◐ (LLM audit) | — | ● (certification checklist) |
 | Observability | ● | ◐ (monitors) | ◐ (SLO alerting) | — | — | ◐ (HA observability) |
 
 ## 4. Phase 0 – Foundations (v0.1)
@@ -89,8 +89,8 @@ FEAT-001, FEAT-002, FEAT-003, FEAT-004, FEAT-005, FEAT-006, FEAT-007, FEAT-011, 
 - Frontend shell (React 18 + TS + Vite, TanStack Query, ECharts primitives, i18n-ready) with login, org/team/user administration.
 
 ### 4.4 Exit criteria
-- AC-001–AC-011, AC-013, AC-016–AC-018, AC-085–AC-088, AC-091–AC-095 pass in CI.
-- `docker compose up` brings the full stack healthy in under 10 minutes on a clean host (AC-009).
+- AC-001–AC-011, AC-013, AC-016–AC-018, AC-085–AC-088, AC-091–AC-095, AC-097 pass in CI.
+- `docker compose up` brings the full stack healthy within 15 minutes on a 16 GB host (NFR-050, AC-009).
 - Cross-tenant sweep test covers 100% of shipped endpoints with zero leaks.
 - CI green on every merge; Spring Modulith boundary verification enforced.
 
@@ -118,7 +118,7 @@ FEAT-024, FEAT-035, FEAT-036, FEAT-050, FEAT-051, FEAT-052, FEAT-053, FEAT-075, 
 - Data source administration UI, scheduled jobs administration, admin dashboard, system health dashboard, job/queue/cache/connector monitors.
 
 ### 5.4 Exit criteria
-- AC-014, AC-015, AC-019, AC-023, AC-025–AC-037, AC-054, AC-055 pass.
+- AC-014, AC-015, AC-023, AC-025–AC-037, AC-054, AC-055 pass.
 - Kill-and-resume test: interrupted incremental sync resumes from checkpoint with zero loss/duplication (AC-025); double re-ingestion produces zero duplicates (AC-027).
 - Simulation pack round-trip: simulated Jira+GitHub tenant fully populated through the same code paths as live (AC-035).
 - Sustained ingest of the reference simulation pack (≥100k WorkItems, ≥500k events) within agreed lag SLOs on the Compose stack.
@@ -134,26 +134,27 @@ Connect a real Jira and GitHub, click "Test connection", run a full sync, watch 
 ## 6. Phase 2 – Analytics & dashboards (v0.3)
 
 ### 6.1 Objectives
-Turn ingested data into trustworthy, caveated insight: metric engine with the full canonical metric set (flow, DORA, quality, delivery risk, ops, team health), the user-facing dashboard suite, and the remaining P1 connectors (GitLab, SonarQube, Generic CI/CD, Prometheus).
+Turn ingested data into trustworthy, caveated insight: metric engine with the core canonical metric set (flow, DORA, quality, ops, team health — delivery-risk metrics follow in Phase 3), the user-facing dashboard suite, the remaining P1 connectors (GitLab, SonarQube, Generic CI/CD, Prometheus), operational notification channels, accessibility conformance, and Member data erasure/DSAR handling.
 
 ### 6.2 Feature scope
-FEAT-031, FEAT-032, FEAT-033, FEAT-037, FEAT-054, FEAT-056, FEAT-058, FEAT-059, FEAT-090, FEAT-091, FEAT-092, FEAT-093, FEAT-094, FEAT-095, FEAT-096, FEAT-097, FEAT-098, FEAT-110, FEAT-112, FEAT-113, FEAT-114, FEAT-115, FEAT-116, FEAT-117, FEAT-118, FEAT-196, FEAT-200, FEAT-210.
+FEAT-031, FEAT-033, FEAT-034, FEAT-037, FEAT-054, FEAT-056, FEAT-058, FEAT-059, FEAT-090, FEAT-091, FEAT-092, FEAT-093, FEAT-095, FEAT-096, FEAT-098, FEAT-110, FEAT-112, FEAT-114, FEAT-115, FEAT-117, FEAT-118, FEAT-196, FEAT-200, FEAT-210, FEAT-211, FEAT-212.
 
 ### 6.3 Deliverables
 - Metric engine + time-series store + metrics API; every metric shipped with purpose, formula, inputs, grain, caveats/limitations, gaming risks.
-- Flow metrics (velocity, throughput, cycle time, lead time, WIP, flow efficiency, blocked time, sprint predictability, scope churn); DORA (deployment frequency, lead time for changes, change failure rate, MTTR); quality metrics; delivery-risk metrics and risk scoring engine; ops metrics; team-health metrics (team-grain only).
-- Dashboards: productivity, delivery risk, sprint, kanban, release, quality, operational health, on the shared dashboard framework.
+- Flow metrics (velocity, throughput, cycle time, lead time, WIP, flow efficiency, blocked time, sprint predictability, scope churn); DORA (deployment frequency, lead time for changes, change failure rate, MTTR); quality metrics; ops metrics; team-health metrics (team-grain only). Delivery-risk metrics and the risk scoring engine follow in Phase 3.
+- Dashboards: productivity, sprint, kanban, quality, operational health, on the shared dashboard framework (delivery risk and release dashboards follow in Phase 3); WCAG 2.1 AA accessibility conformance across dashboards and admin console (FEAT-212).
 - GitLab, SonarQube, Generic CI/CD (Jenkins/Azure DevOps/GitHub Actions/GitLab CI), Prometheus connectors.
-- Metric definition and risk rule administration, retention policies, secret rotation, metric governance guardrails, platform SLO alerting.
+- Metric definition administration, retention policies, secret rotation, metric governance guardrails, platform SLO alerting, and notification channel administration for operational alerts (FEAT-034; report-delivery usage arrives with FR-112 in Phase 4).
+- Member data erasure & DSAR handling (FEAT-211): erasure propagated across canonical model, RAG/vector indexes, artifacts, and caches with audit-preserving redaction.
 
 ### 6.4 Exit criteria
-- AC-012, AC-021, AC-022, AC-024, AC-038–AC-053, AC-089, AC-096 pass, including the concrete cycle-time (AC-039) and change-failure-rate (AC-042) fixtures.
+- AC-012, AC-019, AC-021, AC-022, AC-024, AC-038–AC-045, AC-047–AC-052, AC-089, AC-096, AC-098–AC-102 pass, including the concrete cycle-time (AC-039) and change-failure-rate (AC-042) fixtures (AC-098–AC-100 apply to the Phase-2 dashboards; the release dashboard is verified when it ships in Phase 3).
 - Sprint dashboard freshness: webhook-driven updates visible within 5 minutes (AC-049).
 - Metric governance scan: no individual-ranking surface anywhere (AC-047, AC-089).
 - Simulation pack extended with CI/CD, quality, and ops data; all dashboards render fully from simulation alone.
 
 ### 6.5 Demo milestone — what can be shown
-A product-complete analytics demo on simulated or live data: sprint and kanban dashboards updating live from a Jira webhook, DORA metrics with drill-down to the deployments behind change failure rate, a release readiness score with its contributing signals, and every metric explaining its own formula, caveats, and gaming risks in the UI.
+A product-complete analytics demo on simulated or live data: sprint and kanban dashboards updating live from a Jira webhook, DORA metrics with drill-down to the deployments behind change failure rate, an operational alert delivered through a configured notification channel, and every metric explaining its own formula, caveats, and gaming risks in the UI.
 
 ### 6.6 Risks & mitigations
 - **Metric distrust ("these numbers are wrong")** → fixture-verified formulas (AC-039–AC-044), drill-down to underlying entities from every widget, explicit coverage caveats when correlation is incomplete.
@@ -163,20 +164,23 @@ A product-complete analytics demo on simulated or live data: sprint and kanban d
 ## 7. Phase 3 – AI core (v0.4)
 
 ### 7.1 Objectives
-Introduce the AI layer safely: LLM provider SPI with routing/failover, the agent runtime with budgets/guardrails/audit, the RAG pipeline with permission-aware retrieval, and the first agents (Sprint Review, Release Notes, Delivery Risk) delivering through the report engine and Artifacts Library.
+Introduce the AI layer safely: LLM provider SPI with routing/failover, the agent runtime with budgets/guardrails/audit, the RAG pipeline with permission-aware retrieval, and the first agents (Sprint Review, Release Notes, Delivery Risk, with the Validation Agent gating publication) delivering through the report engine and Artifacts Library. This phase also delivers the delivery-risk analytics suite (delivery-risk metrics, risk scoring engine, risk rule configuration, delivery risk and release dashboards) and per-tenant API rate limiting.
 
 ### 7.2 Feature scope
-FEAT-026, FEAT-027, FEAT-029, FEAT-030, FEAT-130, FEAT-131, FEAT-132, FEAT-136, FEAT-137, FEAT-138, FEAT-146, FEAT-147, FEAT-155, FEAT-156, FEAT-157, FEAT-158, FEAT-159, FEAT-160, FEAT-170, FEAT-171, FEAT-172, FEAT-174, FEAT-175, FEAT-177, FEAT-198.
+FEAT-026, FEAT-027, FEAT-029, FEAT-030, FEAT-032, FEAT-094, FEAT-097, FEAT-113, FEAT-116, FEAT-130, FEAT-131, FEAT-132, FEAT-136, FEAT-137, FEAT-138, FEAT-146, FEAT-147, FEAT-148, FEAT-155, FEAT-156, FEAT-157, FEAT-158, FEAT-159, FEAT-160, FEAT-170, FEAT-171, FEAT-172, FEAT-174, FEAT-175, FEAT-177, FEAT-198, FEAT-213.
 
 ### 7.3 Deliverables
-- `eip-ai` agent runtime (Java + LangChain4j): plan/execute, tool-calling, budgets, guardrails, full LLM-call audit; optional Python worker path isolated behind Kafka/REST.
+- `eip-ai` agent runtime (Java + LangChain4j): plan/execute, tool-calling, budgets, guardrails, full LLM-call audit; Python worker path isolated behind Kafka/REST (optional Python workers: Phase 4, FR-089).
+- Delivery-risk analytics: delivery-risk metrics, risk scoring engine, and risk rule administration; delivery risk and release dashboards on the Phase-2 dashboard framework.
+- Per-tenant API rate limiting with 429 + `Retry-After` and admin-visible quotas (FEAT-213).
 - LLM provider SPI (Ollama, vLLM, OpenAI-compatible generic, Anthropic-compatible, custom endpoint) with per-tenant/per-agent routing, fallbacks, token budgets; LLM provider administration UI.
 - RAG: ingestion→chunking→embedding→vector store (pgvector default, Qdrant option via VectorStore SPI), permission-aware retrieval with citations, incremental + scheduled re-indexing, RAG audit.
 - Report Generation Center, template engine, versioned Artifacts Library in MinIO.
-- Agents: Sprint Review, Release Notes, Delivery Risk, RAG Retrieval, Report Composition; first report types: sprint review presentation, release notes, risk report.
+- Agents: Sprint Review, Release Notes, Delivery Risk, RAG Retrieval, Report Composition, Validation; first report types: sprint review presentation, release notes, risk report.
 
 ### 7.4 Exit criteria
-- AC-020, AC-056–AC-062, AC-067–AC-074, AC-078–AC-083 pass.
+- AC-020, AC-046, AC-053, AC-056–AC-063, AC-067–AC-074, AC-078–AC-083, AC-103 pass (AC-098–AC-100 re-run to cover the release dashboard).
+- Validation Agent gates publication: uncited claims block or annotate per policy (AC-063).
 - Air-gapped run: all Phase 3 AI features work with local Ollama only, zero egress (AC-058).
 - Provider failover test: primary down → transparent fallback with audited model switch (AC-059).
 - Adversarial cross-tenant RAG test: zero foreign-tenant chunks retrieved (AC-070).
@@ -186,7 +190,7 @@ FEAT-026, FEAT-027, FEAT-029, FEAT-030, FEAT-130, FEAT-131, FEAT-132, FEAT-136, 
 On a fully air-gapped laptop: run the Sprint Review Agent against the simulation tenant, watch the agent plan, retrieve permission-scoped context, and produce a cited sprint review presentation stored as version 1 in the Artifacts Library; kill the primary LLM provider mid-run and show transparent failover; show the complete LLM-call audit with tokens and cost.
 
 ### 7.6 Risks & mitigations
-- **Hallucinated claims in generated outputs** → mandatory citations (AC-060/061/071), Report Composition citation-index enforcement, Validation Agent hardening in Phase 4; humans review before external sharing.
+- **Hallucinated claims in generated outputs** → mandatory citations (AC-060/061/071), Report Composition citation-index enforcement, and the Validation Agent gating publication from Phase 3 (advanced validation hardening may continue in Phase 4); humans review before external sharing.
 - **Local-model quality varies across customer hardware** → provider SPI benchmarked with a model qualification guide; per-agent routing lets strong models serve hard tasks.
 - **RAG permission leakage** → permission metadata filtered at query time (never post-filtered only), adversarial isolation tests in CI (AC-069/070), RAG audit for detection.
 - **LLM cost/latency runaways** → hard token budgets per run and per tenant (AC-056), cost counters on dashboards.
@@ -194,20 +198,19 @@ On a fully air-gapped laptop: run the Sprint Review Agent against the simulation
 ## 8. Phase 4 – Full agent suite + MCP + generated outputs (v0.5)
 
 ### 8.1 Objectives
-Complete the AI-native promise: all 18 canonical agents, MCP client and server with per-capability RBAC and audit, the full generated-output catalog (presentations, diagrams, exec reports, and the rest), plus scheduling and notification channels.
+Complete the AI-native promise: all 18 canonical agents, MCP client and server with per-capability RBAC and audit, the full generated-output catalog (presentations, diagrams, exec reports, and the rest), plus scheduling and report delivery through the notification channels shipped in Phase 2.
 
 ### 8.2 Feature scope
-FEAT-028, FEAT-034, FEAT-133, FEAT-134, FEAT-135, FEAT-139, FEAT-140, FEAT-141, FEAT-142, FEAT-143, FEAT-144, FEAT-145, FEAT-148, FEAT-149, FEAT-150, FEAT-165, FEAT-166, FEAT-167, FEAT-173, FEAT-176, FEAT-178, FEAT-179, FEAT-180, FEAT-181, FEAT-182, FEAT-183, FEAT-184, FEAT-185, FEAT-186, FEAT-187, FEAT-188, FEAT-189, FEAT-190, FEAT-191.
+FEAT-028, FEAT-133, FEAT-134, FEAT-135, FEAT-139, FEAT-140, FEAT-141, FEAT-142, FEAT-143, FEAT-144, FEAT-145, FEAT-149, FEAT-150, FEAT-165, FEAT-166, FEAT-167, FEAT-173, FEAT-176, FEAT-178, FEAT-179, FEAT-180, FEAT-181, FEAT-182, FEAT-183, FEAT-184, FEAT-185, FEAT-186, FEAT-187, FEAT-188, FEAT-189, FEAT-190, FEAT-191.
 
 ### 8.3 Deliverables
-- Remaining agents: Data Ingestion, Data Quality, Engineering Metrics, Documentation, Use Case Diagram, Architecture Diagram, Executive Summary, Incident Analysis, Code Quality, Team Health, Validation, Security Review, Configuration Assistant — completing the 18-agent canonical suite.
+- Remaining agents: Data Ingestion, Data Quality, Engineering Metrics, Documentation, Use Case Diagram, Architecture Diagram, Executive Summary, Incident Analysis, Code Quality, Team Health, Security Review, Configuration Assistant — completing the 18-agent canonical suite.
 - MCP client (enterprise MCP servers as agent tools) and MCP server (allow-listed internal capabilities), with per-capability RBAC + audit and the MCP server registry UI.
 - Full output catalog: executive report, status report, blocker analysis, incident summary, tech debt report, security findings report, code quality report, user manual, use case diagram, architecture diagram, dependency map, API/service inventory, readiness reports, change impact, stakeholder comms draft.
-- Report scheduling and distribution; notification channel administration (email, webhooks).
+- Report scheduling and distribution via the notification channels administered since Phase 2 (report-delivery usage per FR-112).
 
 ### 8.4 Exit criteria
-- AC-063–AC-066, AC-075–AC-077, AC-084 pass; all 18 agents runnable against the simulation pack with cited outputs.
-- Validation Agent gates publication: uncited claims block or annotate per policy (AC-063).
+- AC-064–AC-066, AC-075–AC-077, AC-084 pass; all 18 agents runnable against the simulation pack with cited outputs.
 - MCP allow-list and RBAC enforced both directions with full audit (AC-075–AC-077).
 - Every catalog output type generates successfully from simulation data with versioned artifacts.
 - Scheduled weekly exec report delivered end-to-end via a notification channel (AC-084).
@@ -271,6 +274,7 @@ Explicitly not in the 1.0 release (candidates for 1.x, subject to demand):
 - Additional vector stores beyond pgvector and Qdrant; additional IdP protocols beyond OIDC (SAML-only IdPs via gateway guidance).
 - Marketplace/third-party plugin distribution for connectors and agents (SPI is public, but no marketplace tooling).
 - Cross-tenant benchmarking or anonymized industry comparisons.
+- Tenant self-service structured data export (bulk export UI/API of the canonical model) — out of 1.0 scope; read-only BI/SQL access against the database is the interim answer. Data-subject DSAR export and erasure (FEAT-211) remain in scope and are unaffected.
 
 ## 12. Cross-references
 

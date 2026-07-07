@@ -68,14 +68,24 @@ A feature is Done only when all of the following hold, in addition to its specif
 - **Then** every item is returned exactly once and cursors remain stable under concurrent inserts.
 
 ### AC-009 — FEAT-007 — One-command stack
-- **Given** a clean host with Docker,
+- **Given** a host with Docker and 16 GB of RAM,
 - **When** `docker compose up` is run in `/infra/docker-compose`,
-- **Then** the full stack (app, workers, PostgreSQL+pgvector, Redis, Kafka, MinIO, Keycloak, OTel Collector, Prometheus, Grafana) is healthy within 10 minutes and the demo tenant is reachable.
+- **Then** the full stack (app, workers, PostgreSQL+pgvector, Redis, Kafka, MinIO, Keycloak, OTel Collector, Prometheus, Grafana) is healthy within 15 minutes (NFR-050) and the demo tenant is reachable.
 
 ### AC-010 — FEAT-010 — Backup and restore
 - **Given** a running instance with data,
 - **When** the documented backup is taken and restored to a fresh environment,
 - **Then** all tenant data, artifacts, checkpoints, and audit logs are intact and a checksum-based verification report passes.
+
+### AC-097 — FEAT-002 — Organization hierarchy lifecycle and mapping
+- **Given** a tenant admin,
+- **When** they create, update, move, and delete BusinessUnits, Teams, and Members through the hierarchy API/UI and map Teams to source-tool structures (boards, repositories, projects),
+- **Then** the hierarchy reflects every change consistently (moves preserve membership history; deletes require an empty node or explicit reassignment), the source-tool mappings drive metric attribution (AC-012), and every change is audited.
+
+### AC-103 — FEAT-213 — Per-tenant API rate limiting
+- **Given** a tenant with a configured API request rate limit,
+- **When** that tenant's clients exceed the limit,
+- **Then** excess requests receive 429 problem+json with a `Retry-After` header, requests from other tenants are unaffected, and per-tenant quota consumption is visible to tenant admins.
 
 ## 3. Admin & Configuration
 
@@ -186,7 +196,7 @@ A feature is Done only when all of the following hold, in addition to its specif
 ### AC-031 — FEAT-081 — DLQ and replay
 - **Given** a poison message that fails processing after configured retries,
 - **When** retries are exhausted,
-- **Then** the message lands on the consumer group's `.<group>.dlq`, an alert fires on DLQ growth, and an operator can replay it after fix-forward with successful processing.
+- **Then** the message lands on the consumer group's `<group>.dlq`, an alert fires on DLQ growth, and an operator can replay it after fix-forward with successful processing.
 
 ### AC-032 — FEAT-082 — Rate-limit compliance
 - **Given** a source API returns 429 with a Retry-After header,
@@ -288,6 +298,8 @@ A feature is Done only when all of the following hold, in addition to its specif
 - **Given** only scheduled sync is available,
 - **Then** the change appears within one sync interval; in both cases the dashboard displays "data as of" freshness per data source.
 
+Note: the 5-minute end-to-end budget layers the 60 s webhook ingestion freshness (NFR-012) with the metric recompute and dashboard render budgets.
+
 ### AC-050 — FEAT-114 — Single source of truth
 - **Given** a running Sprint with the AC-041 fixture,
 - **When** the sprint dashboard renders,
@@ -317,6 +329,26 @@ A feature is Done only when all of the following hold, in addition to its specif
 - **Given** a tenant admin opens the admin dashboard,
 - **When** any data source is unhealthy or a scheduled job failed in the last 24 hours,
 - **Then** this is visible above the fold with links to the failing item.
+
+### AC-098 — FEAT-115, FEAT-116, FEAT-117, FEAT-118 — Dashboard rendering and drill-down
+- **Given** the kanban, release, quality, and operational health dashboards with simulation data,
+- **When** each dashboard renders,
+- **Then** every widget shows metric-engine values only (no client-side recomputation) with per-data-source freshness timestamps, and drill-down from any chart point reaches the underlying entity list for that data point's filter context (FR-067, consistent with AC-051).
+
+### AC-099 — FEAT-115, FEAT-116, FEAT-117, FEAT-118 — Metric definitions surfaced
+- **Given** any widget on the kanban, release, quality, or operational health dashboard,
+- **When** the user requests the metric definition,
+- **Then** purpose, formula, inputs, grain, caveats/limitations, and gaming risks are rendered (FR-068, consistent with AC-038).
+
+### AC-100 — FEAT-115, FEAT-116, FEAT-117, FEAT-118 — Dashboard RBAC scoping
+- **Given** a user whose RBAC scope covers Team T1 only,
+- **When** they open any of the kanban, release, quality, or operational health dashboards,
+- **Then** only data within their scope is rendered or reachable via drill-down (FR-069), verified by the permission sweep test.
+
+### AC-102 — FEAT-212 — Accessibility conformance (WCAG 2.1 AA)
+- **Given** the dashboards and admin console,
+- **When** a keyboard-only walkthrough of the core journeys is performed and an automated axe accessibility scan runs in CI,
+- **Then** every interactive element is keyboard-reachable and operable, charts and tables expose screen-reader labels, contrast meets WCAG 2.1 AA, and the axe scan reports zero critical violations (CI gate).
 
 ## 7. AI Agents & LLM Infrastructure
 
@@ -407,7 +439,7 @@ A feature is Done only when all of the following hold, in addition to its specif
 ### AC-072 — FEAT-159 — Incremental re-index SLA
 - **Given** a source Document is updated or deleted,
 - **When** incremental re-indexing processes the change event,
-- **Then** retrieval reflects the update within the configured re-index SLA and deleted content is no longer retrievable.
+- **Then** the incremental re-index is visible in retrieval p95 < 10 minutes after the change event (default, per-tenant configurable) and deleted content is no longer retrievable.
 
 ### AC-073 — FEAT-160 — Retrieval audit
 - **Given** any RAG retrieval,
@@ -507,6 +539,14 @@ A feature is Done only when all of the following hold, in addition to its specif
 - **When** a release candidate is cut,
 - **Then** dependency/container scans show no unwaived critical findings, TLS is enforced on all listeners, and the checklist document is complete for that version.
 
+### AC-101 — FEAT-211 — Member data erasure and DSAR handling
+- **Given** a data-subject erasure request for a Member,
+- **When** the erasure job completes,
+- **Then** the Member's personal data is deleted or anonymized across the canonical model, RAG/vector indexes, generated artifacts, and caches, and the erased identity is no longer retrievable through any API, retrieval, or generated output.
+- **Given** audit records referencing the erased Member,
+- **When** the erasure applies audit-preserving redaction,
+- **Then** the identity is redacted while record integrity, sequence, and non-personal content remain intact; a DSAR export produced before erasure contains all Member-linked data; and the erasure itself is audited.
+
 ## 12. Observability
 
 ### AC-091 — FEAT-205 — Every API request traced
@@ -543,4 +583,4 @@ A feature is Done only when all of the following hold, in addition to its specif
 
 ## 13. Traceability
 
-Every P0/P1 feature in `./FeatureCatalog.md` is covered by at least one AC above or by the Definition of Done (section 1), which applies universally. Features whose observable behavior is primarily infrastructural (FEAT-006, FEAT-011, FEAT-036, FEAT-098, and the Phase 5 hardening features FEAT-008/FEAT-009) are verified through the DoD checklist plus the phase exit criteria in `./Roadmap.md`.
+Every P0/P1 feature in `./FeatureCatalog.md` is covered by at least one AC above or by the Definition of Done (section 1), which applies universally. The features verified through the DoD checklist plus the phase exit criteria in `./Roadmap.md` — with no dedicated AC — are, exhaustively: the infrastructural features FEAT-006, FEAT-008, FEAT-009, FEAT-011, and FEAT-036, and the configuration/output features FEAT-021, FEAT-027, FEAT-028, FEAT-029, FEAT-030, FEAT-095, FEAT-176, FEAT-179, FEAT-187, and FEAT-189, whose behavior is exercised indirectly by the ACs of the features they configure or feed.

@@ -1,6 +1,6 @@
 # Kubernetes / OpenShift Deployment Specification
 
-This document is the authoritative specification for deploying the **Engineering Intelligence Platform (EIP)** on Kubernetes and OpenShift. It is the target for production, HA, and enterprise installs (Phase 5 GA per the roadmap in `../vision/Vision.md`); the manifests it describes live under `/infra/kubernetes` and do not exist yet — build them to match this spec. For demo/eval/small installs use Docker Compose (`./DockerCompose.md`); for the application architecture and event model see `../architecture/ArchitectureOverview.md`.
+This document is the authoritative specification for deploying the **Engineering Intelligence Platform (EIP)** on Kubernetes and OpenShift. It is the target for production, HA, and enterprise installs (Phase 5 GA per the roadmap in `../product/Roadmap.md`); the manifests it describes live under `/infra/kubernetes` and do not exist yet — build them to match this spec. For demo/eval/small installs use Docker Compose (`./DockerCompose.md`); for the application architecture and event model see `../architecture/ArchitectureOverview.md`.
 
 Supported platforms: Kubernetes 1.28+ (any conformant distribution) and OpenShift 4.14+.
 
@@ -63,7 +63,7 @@ flowchart TB
   end
   APP & WI & WA & WAI & WR --> PG & KF & RD & MO
   APP & WI & WA & WAI & WR -. OTLP .-> OC --> PR
-  KEDA[KEDA - Kafka lag] -.scales.-> WI & WA & WAI & WR
+  KEDA[KEDA - Kafka lag; ai: run backlog] -.scales.-> WI & WA & WAI & WR
 ```
 
 ## 3. Workload Catalog
@@ -73,7 +73,7 @@ flowchart TB
 | eip-app | Deployment | 1 / 3 | HPA on CPU (prod: min 3, max 6, target 70%) | Stateless API; rolling update `maxUnavailable: 0, maxSurge: 1`. |
 | eip-workers-ingestion | Deployment | 1 / 2 | **KEDA ScaledObject on Kafka consumer lag** (Section 11) | `EIP_WORKER_PROFILES=ingestion`; consumes `eip.raw.*`, domain normalizer groups. |
 | eip-workers-analytics | Deployment | 1 / 2 | KEDA on lag of `eip.domain.*`, `eip.analytics.metrics` groups | `EIP_WORKER_PROFILES=analytics`. |
-| eip-workers-ai | Deployment | 1 / 2 | KEDA on lag of `eip.ai.jobs` | `EIP_WORKER_PROFILES=ai`; long-poll LLM calls, generous termination grace (300 s). |
+| eip-workers-ai | Deployment | 1 / 2 | KEDA on run-backlog depth/age (Section 11) — not `eip.ai.jobs` lag | `EIP_WORKER_PROFILES=ai`; long-poll LLM calls, generous termination grace (300 s). |
 | eip-workers-reports | Deployment | 1 / 1 | KEDA on lag of `eip.reports.jobs` | `EIP_WORKER_PROFILES=reports`. |
 | frontend | Deployment | 1 / 2 | none (static + proxy, negligible load) | nginx serving SPA; `/api` upstream is the `eip-app` Service. |
 | eip-migrate | Job | per release | n/a | Flyway + topic provisioning; gates rollout (Section 13). `backoffLimit: 0`, new Job name per version. |
@@ -108,6 +108,21 @@ Rule for enterprises with managed DB/Kafka/S3: every dependency is switchable to
 - **External Secrets Operator / Vault**: the `k8s-prod` overlay includes `ExternalSecret` resources mapping each Secret to an enterprise backend (Vault KV, AWS SM, Azure KV). Direct Vault Agent injection is also supported for the master key. Plain `kubectl create secret` remains valid for `k8s-small`.
 - **Secrets master key delivery**: the AES-256-GCM envelope-encryption master key (see `../architecture/ArchitectureOverview.md`) is mounted as a file — Secret `eip-master-key` → volume → `EIP_SECRETS_MASTER_KEY_FILE=/etc/eip/keys/master.key`. The inline env-var variant is prohibited in cluster deployments (visible via `kubectl describe`/crash dumps). With Vault, the pluggable KMS SPI can instead delegate envelope operations to Vault Transit (`EIP_SECRETS_KMS_PROVIDER=vault-transit`), removing the raw key from the cluster entirely. Key rotation follows the platform's secrets rotation procedure: new master key mounted alongside old (`master.key.next`), re-encryption job, swap, old key retired.
 
+### 5.1 Certificate Management
+
+Three TLS surfaces need explicit certificate ownership; each supports a cert-manager path and a BYO path:
+
+- **External Ingress/Route certificate:** default is **cert-manager** with a site `ClusterIssuer` (enterprise ACME, Vault PKI, or CA issuer) — the `k8s-prod` overlay annotates the Ingress for automatic issuance and renewal. BYO alternative: the operator provides a `kubernetes.io/tls` Secret and rotates it by site process; on OpenShift, edge-terminated Routes may also fall back to the cluster's default ingress certificate.
+- **Kafka TLS (`eip-kafka-tls`):** by default **Strimzi generates and rotates its own cluster CA and clients CA**, issuing broker certificates and the `KafkaUser` client certificates consumed by app/worker clients and the KEDA `TriggerAuthentication` (Section 12.2). Enterprises with a mandatory internal PKI configure Strimzi with a **BYO CA** (`clusterCa`/`clientsCa` Secrets); rotation then follows the enterprise CA cadence and must be coordinated with Strimzi's rolling broker restarts.
+- **MinIO TLS:** the MinIO Operator auto-generates certificates by default; a BYO cert Secret is supported. External S3 endpoints presenting enterprise-CA certificates are trusted via the custom CA bundle (Section 5.2).
+
+Rotation cadence: cert-manager renews automatically at two-thirds of certificate lifetime; Strimzi CAs default to 365-day validity with automated renewal windows; BYO certificates follow enterprise policy (typically ≤ 90 days external, ≤ 1 year internal). Certificate expiry must be monitored (cert-manager metrics or a probe rule routed to the enterprise alerting channel) and rotation rehearsed before production (Section 15).
+
+### 5.2 Enterprise Network Integration (Egress Proxy and Custom CA)
+
+- **Egress proxy:** connector syncs and the LLM provider SPI honor the standard `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY` environment variables, set in `eip-app-config`/`eip-workers-config`. `NO_PROXY` must cover cluster-internal service DNS (`.svc`, `.cluster.local`, and the `eip-data`/`eip-observability` service names) so only the NetworkPolicy row 11 connector egress routes through the proxy. On OpenShift, values can be sourced from the cluster-wide `Proxy` object.
+- **Custom CA bundle:** mount the enterprise PEM bundle as a ConfigMap at `/etc/eip/ca/` on eip-app and the worker Deployments — on OpenShift, a ConfigMap labeled `config.openshift.io/inject-trusted-cabundle: "true"` is populated with the cluster trust bundle automatically. The image entrypoint imports every certificate found in that directory into the JVM truststore before startup; Node-based tooling run against the cluster trusts the same bundle via `NODE_EXTRA_CA_CERTS`.
+
 ## 6. OpenShift Specifics
 
 The `openshift` overlay assumes **no custom SCC**: everything runs under `restricted-v2`.
@@ -115,6 +130,7 @@ The `openshift` overlay assumes **no custom SCC**: everything runs under `restri
 - **Image conformance (applies to all EIP images, enforced in CI):** non-root (`USER 1001` numeric), no privilege escalation (`allowPrivilegeEscalation: false`, all capabilities dropped, seccomp `RuntimeDefault`), and **arbitrary-UID support** — group-0 writable where writes are required, no UID assumptions in entrypoints; images run correctly under OpenShift's random project UID.
 - **Routes vs Ingress:** base uses Ingress; the `openshift` overlay replaces it with a `Route` (edge TLS termination default, re-encrypt supported when the frontend serves TLS). Only `frontend` is externally exposed; `/api` and `/auth` are proxied through it exactly as in the compose topology.
 - **Internal registry:** the overlay rewrites image references to `image-registry.openshift-image-registry.svc:5000/eip-system/<image>` (or the enterprise mirror, Section 14); ImageStreams are optional and not required by the manifests.
+- **FIPS and SELinux (hardened/regulated environments):** EIP supports FIPS-enabled clusters (OpenShift installed with `fips: true`) — all platform cryptography (TLS, AES-256-GCM envelope encryption, JWT signature validation) uses standard JCA/JSSE providers, so FIPS-validated host crypto modules apply and no non-approved algorithms are required. SELinux remains enforcing on OpenShift by default: all pods run under `restricted-v2` with no SELinux-context customization, and all volumes are Secrets/ConfigMaps/CSI-provisioned PVCs, so no manual relabeling (compose-style `:z`/`:Z`) is ever needed.
 - **NetworkPolicy — default deny, explicit allows:** `/base/policy` ships a `default-deny-all` (ingress+egress) policy per namespace, plus:
 
 | # | From | To | Port/Proto | Purpose |
@@ -151,7 +167,7 @@ Requests are sized for steady state; limits cap noisy neighbors. JVM services de
 
 | Component | CPU req / limit | Mem req=limit | Startup probe | Liveness | Readiness |
 |---|---|---|---|---|---|
-| eip-app | 500m / 2 | 3 Gi | `GET :8081/actuator/health/liveness`, 30 × 5 s (≤150 s JVM start) | same endpoint, 10 s period, 3 failures | `GET :8081/actuator/health/readiness` (checks db, kafka, redis, s3, oidc) |
+| eip-app | 500m / 2 | 3 Gi | `GET :8081/actuator/health/liveness`, 30 × 5 s (≤150 s JVM start) | same endpoint, 10 s period, 3 failures | `GET :8081/actuator/health/readiness` (hard gates: db reachable + `flyway_schema_history` at the release's required version, Section 13; kafka/redis/s3/oidc surface as degraded component detail only, per `../architecture/ObservabilityModel.md` §9) |
 | eip-workers-* | 500m / 2 | 3 Gi | as eip-app | as eip-app | readiness gates only consumer registration; workers receive no HTTP traffic |
 | frontend | 50m / 250m | 128 Mi | `GET :8080/healthz`, 6 × 5 s | same | same |
 | otel-collector | 200m / 1 | 512 Mi | — | `GET :13133/` | same |
@@ -159,6 +175,8 @@ Requests are sized for steady state; limits cap noisy neighbors. JVM services de
 | postgres / kafka / minio / redis | operator- or site-defined | — | — | operator-managed | operator-managed |
 
 ## 9. Topology and HA (`k8s-prod`)
+
+The `k8s-prod` overlay is the reference topology for the platform availability and recovery targets: **99.9 % availability (NFR-020)** and **RTO ≤ 30 min (NFR-022)** for any single-component or single-AZ failure, achieved by automated failover (CNPG replica promotion, Kafka RF=3 with `min.insync.replicas=2`, multi-replica app/workers behind PDBs and anti-affinity), with **RPO ≤ 15 min (NFR-021)** via CNPG WAL archiving and MinIO multi-AZ redundancy. A full-platform rebuild from backup is a separate, rarer scenario bounded at ≤ 4 h — distinct from the failover RTO. The single-replica `k8s-small` overlay does not meet these HA targets and carries the single-node bounds instead (RTO ≤ 4 h restore-from-backup).
 
 - **Pod anti-affinity:** required-during-scheduling anti-affinity on hostname for eip-app replicas; preferred for each worker Deployment and frontend.
 - **Zone spread:** `topologySpreadConstraints` on `topology.kubernetes.io/zone`, `maxSkew: 1`, `whenUnsatisfiable: ScheduleAnyway` for app/workers; CNPG, Strimzi, and MinIO configured for zone-spread replicas where the cluster spans zones (RF=3 aligns with 3 zones).
@@ -178,7 +196,7 @@ Requests are sized for steady state; limits cap noisy neighbors. JVM services de
 | eip-app | HPA | CPU 70% | 3 / 6 (prod) | HPA default stabilization (300 s down) |
 | eip-workers-ingestion | KEDA ScaledObject | Kafka lag > 5000 across `eip.raw.*` + normalizer groups | 1 / 8 | 120 s |
 | eip-workers-analytics | KEDA ScaledObject | Kafka lag > 5000 (`eip.domain.*`, `eip.analytics.metrics` groups) | 1 / 6 | 120 s |
-| eip-workers-ai | KEDA ScaledObject | Kafka lag > 50 on `eip.ai.jobs` | 1 / 4 | 300 s (LLM jobs are long) |
+| eip-workers-ai | KEDA ScaledObject | **Run-backlog depth/age** via `prometheus` trigger (queued + claimed `agent_run` backlog gauge) — not Kafka lag: the `eip.ai.jobs` offset is committed on claim (`../ai/AgentArchitecture.md` §3.5), so consumer lag stays ~0 regardless of load | 1 / 4 | 300 s (LLM jobs are long) |
 | eip-workers-reports | KEDA ScaledObject | Kafka lag > 100 on `eip.reports.jobs` | 1 / 3 | 120 s |
 | frontend, CronJobs, data layer | none | — | — | Static / operator-managed |
 
@@ -280,7 +298,9 @@ spec:
 
 - **Versioning:** each EIP release tags images and ships a matching `/infra/kubernetes` tree; sites track it in Git (GitOps), and site patches live only in overlays, so `git merge` of a new release never conflicts with base.
 - **Schema policy — expand-contract:** every release's migrations are *expand* (additive, backward-compatible with the previous app version); *contract* migrations (drops/renames) ship one release later and are flagged in release notes. Consequence: app version N and N-1 can run against the same schema during rollout, and image rollback one version back is always safe.
-- **Rollout order per upgrade:** (1) apply new manifests — the migration Job (new name `eip-migrate-<version>`, `backoffLimit: 0`) is applied first / as a pre-sync hook in Argo CD; (2) Job success gates (3) rolling update of eip-app (`maxUnavailable: 0`), then (4) worker Deployments, then (5) frontend. CronJobs update with the manifest apply.
+- **Rollout order per upgrade:** (1) apply new manifests — the migration Job (new name `eip-migrate-<version>`, `backoffLimit: 0`) is applied first / as a pre-sync hook in Argo CD; (2) Job success gates (3) rolling update of eip-app (`maxUnavailable: 0`), then (4) worker Deployments, then (5) frontend. CronJobs update with the manifest apply. This is the canonical order everywhere: migrations job → eip-app → workers (ingestion, analytics, ai, reports) → frontend (`../architecture/DeploymentModel.md` §8, `../operations/OperationsGuide.md` §7).
+- **Migration gate for non-GitOps installs (plain `kubectl`/Kustomize apply) — normative:** Argo CD pre-sync hooks provide ordering only in GitOps installs; a bare `kubectl apply -k` of the whole tree has none, and new app pods could start against an un-migrated schema. The release therefore ships `scripts/deploy.sh` implementing the required sequence: (a) apply the `eip-migrate-<version>` Job (plus its ConfigMap/Secret dependencies) alone; (b) `kubectl wait --for=condition=complete job/eip-migrate-<version> -n eip-system --timeout=15m` — abort the deploy on failure or timeout; (c) apply the remaining manifests. Applying everything in one pass is unsupported.
+- **Startup version gate (defense in depth):** independent of apply ordering, eip-app and every worker profile fail **readiness** when `flyway_schema_history` lacks the release's required migration version — the `../architecture/DeploymentModel.md` §8 version handshake. A pod rolled out ahead of its migration Job sheds traffic/consumption until the Job completes instead of serving against the wrong schema; this is the same Flyway hard-readiness dependency as `../architecture/ObservabilityModel.md` §9.
 - **Rollback:** `kubectl rollout undo` (or Git revert in GitOps) on app/workers/frontend — safe within one version by the expand-contract guarantee. A failed migration Job halts everything before any app pod restarts; recovery is fix-forward or restore from the pre-upgrade database backup (CNPG point-in-time recovery).
 - Data-layer upgrades (Postgres minor, Kafka broker, Keycloak) are operator-driven and decoupled from EIP releases; the compatibility matrix in release notes is authoritative.
 
@@ -296,6 +316,7 @@ spec:
 
 - [ ] Overlay chosen and reviewed; `kustomize build` output diffed and signed off by security.
 - [ ] All secrets sourced from External Secrets/Vault (no literal Secret values in Git); master key delivered as file mount or Vault Transit; rotation procedure tested.
+- [ ] Certificate management (Section 5.1): issuance path chosen (cert-manager `ClusterIssuer` or BYO cert Secrets); Strimzi CA strategy decided (operator-managed vs BYO CA) and a rotation rehearsed; Route/Ingress and MinIO certificate expiry monitored and alerting.
 - [ ] CNPG cluster: 3 instances, scheduled backups + WAL archiving to object storage, PITR restore drill executed successfully.
 - [ ] Strimzi: 3 brokers, RF=3 and `min.insync.replicas=2` on all `eip.*` topics, TLS client auth for app/workers.
 - [ ] MinIO (or external S3): erasure coding / redundancy confirmed; artifact bucket lifecycle policy set.
@@ -307,5 +328,5 @@ spec:
 - [ ] PDBs + anti-affinity verified via a drain test (`kubectl drain` one node: no API downtime, workers rebalance).
 - [ ] Observability: ServiceMonitors scraping, EIP Grafana dashboards live, alert rules (consumer lag, DLQ depth, migration Job failure, readiness flaps, CNPG replication lag) routed to the enterprise alerting channel.
 - [ ] Upgrade rehearsal on staging: N-1 → N with rollout order of Section 13, then rollback of app images, both without data loss.
-- [ ] Backup/restore drill for Postgres and MinIO completed end-to-end within the target RTO.
+- [ ] Backup/restore drill for Postgres and MinIO completed end-to-end within the target RTO (Section 9: failover ≤ 30 min per NFR-022; full rebuild-from-backup ≤ 4 h).
 - [ ] Smoke test suite (as in `./DockerCompose.md` Section 13, adapted to cluster endpoints) passes, including a simulation-connector sync and one agent run with audit records present.
