@@ -1,0 +1,27 @@
+{
+  "realm": "eip",
+  "enabled": true,
+  "displayName": "Engineering Intelligence Platform (dev)",
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "roles": {
+    "realm": [
+      { "name": "PLATFORM_ADMIN" },
+      { "name": "TENANT_ADMIN" },
+      { "name": "ANALYST" },
+      { "name": "VIEWER" },
+      { "name": "MEMBER" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "eip-frontend",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "redirectUris": ["http://localhost:5173/*"],
+      "webOrigins": ["http://localhost:5173"],
+      "protocol": "openid-connect"
+    }
+  ]
+}
