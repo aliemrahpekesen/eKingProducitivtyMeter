@@ -5,6 +5,51 @@
 - **Branch:** `feature/TASK-0003-compose-dev-stack` · **Base:** `integration/SPRINT-00` · **Commit:** `7b1fa86`
 - **Checklists applied:** [CodeReviewChecklist.md](../../engineering-operating-system/CodeReviewChecklist.md) · [Sprint00ReviewChecklist.md](../../sprints/sprint-00/Sprint00ReviewChecklist.md) · conformance cross-check vs [DockerCompose.md §1–4/§10/§13](../../docs/infrastructure/DockerCompose.md)
 
+## Overall verdict (re-review, fix commit `99f7912`): **APPROVED**
+
+> **Round 1 (commit `7b1fa86`): MAJOR — changes requested.** One MAJOR (`make dev-up` non-zero on fresh boot) + 3 MINOR + 4 NIT. Original findings preserved below.
+> **Round 2 (commit `99f7912`): APPROVED.** MAJOR-1 cleared, MINOR-1/2 fixed, MINOR-3 → DEBT-005 — all independently re-verified from a clean state (§ Re-review verification). Zero open BLOCKERs, zero unwaived MAJORs → the approval rule is met. May merge into `integration/SPRINT-00`.
+
+---
+
+## Re-review verification (2026-07-07, commit `99f7912`)
+
+Per [CodeReviewChecklist §2 step 7](../../engineering-operating-system/CodeReviewChecklist.md), only the fixes and new commits were verified; settled NITs were not reopened. The fix diff (`7b1fa86..99f7912`) is precisely scoped to the findings — no scope creep.
+
+| Finding | Fix in the diff | Reviewer re-verification | Status |
+|---|---|---|---|
+| **MAJOR-1** (`make dev-up` non-zero on fresh boot) | Makefile: `up -d --wait $(DEV_SERVICES)` (8 long-running services) then `run --rm minio-init` — the one-shot is out of the `--wait` set | Clean `make dev-down && make dev-up` → **EXIT 0** at 41 s; 8 services healthy; both buckets created via `run --rm` | ✅ CLEARED |
+| **MINOR-1** (image tags vs §2) | kafka `3.7.0`, minio `2024-06-13`, otel `0.102.0`, prometheus `v2.53.0`, grafana `11.1.0` | `docker … ps` shows the §2-aligned tags; all boot **healthy** (no regression from the downgrades) | ✅ FIXED |
+| **MINOR-2** (pgvector init SQL) | new `postgres/00-extensions.sql` (`CREATE EXTENSION IF NOT EXISTS vector`) mounted to `docker-entrypoint-initdb.d` | `select extname from pg_extension where extname='vector'` → **`vector`** | ✅ FIXED |
+| **MINOR-3** (`.env` CHANGE_ME) | filed as **DEBT-005** (owner R-DOA/R-SA; target = the app-container task) | Present in `work/debt-register.md` | ✅ RECORDED |
+
+**Independent validation (clean state):**
+
+| Command / check | Result |
+|---|---|
+| `docker compose config -q` | VALID |
+| `make dev-down` (clean start) | exit 0 |
+| **`make dev-up` (fresh, no pipe)** | **EXIT 0**, 41 s |
+| Long-running services | postgres/redis/kafka/minio/keycloak/prometheus/grafana **healthy**; otel-collector running (distroless) |
+| MinIO buckets | `eip-artifacts` + `eip-ingest` present |
+| pgvector | `vector` extension enabled |
+| Keycloak OIDC discovery | **200**, issuer `…/auth/realms/eip` |
+| `make dev-urls` | prints endpoints + dev creds |
+| `make dev-down` | exit 0, containers gone |
+| `.env` staged / secrets | `.env` git-ignored, **0 tracked `.env` files**; only documented dev placeholders (DEBT-005) — no real secrets |
+
+**Acceptance criteria (post-fix):** AC-1 ✅ (healthy < 2 min **and `make dev-up` exits 0**) · AC-2 ✅ · AC-3 ✅ · AC-4 ✅ — all now pass.
+
+**No new regression:** the fix diff only realigns image tags (all boot healthy), adds one init-SQL mount (pgvector verified), and reworks `dev-up`'s wait strategy (exits 0). Nothing else touched.
+
+**Remaining findings:** none blocking. The round-1 NITs (compose filename vs §1's `compose.yaml`, volume naming, Keycloak internal port, commit-message `[TASK-NNNN]` trailer) stand as author's-discretion items — NIT-4 to be honored in the squash-merge message; not reopened.
+
+**Merge decision:** **APPROVED for merge** into `integration/SPRINT-00`. Once merged and the TASK-0002 CI runs on push, the task completes MERGED → VERIFIED → DONE.
+
+---
+
+## Round-1 findings (commit `7b1fa86`) — preserved for the record
+
 ## Overall verdict: **MAJOR — changes requested**
 
 One MAJOR defect on the task's primary happy path (`make dev-up` returns a non-zero exit on a fresh boot). The stack itself comes up healthy and every other criterion passes — all independently re-run by the reviewer — but the approval rule ([CodeReviewChecklist §4](../../engineering-operating-system/CodeReviewChecklist.md): "zero open BLOCKERs and zero unwaived MAJORs") is not met, so **this cannot be merged until MAJOR-1 is fixed or explicitly waived** by the owning role (R-DOA) with a recorded justification + DEBT entry. Plus 3 MINOR (all from the deferred DockerCompose.md conformance cross-check) and 4 NIT.
