@@ -4,7 +4,9 @@
 
 EIP integrates with enterprise SDLC tools — Jira, Confluence, GitHub, GitLab, Bitbucket, SonarQube, Artifactory, Kubernetes/OpenShift, Docker registries, Prometheus, Grafana, OpenTelemetry, CI/CD systems, and custom internal project/demand tools — to collect, normalize, correlate, and analyze engineering data. It measures productivity, delivery health, sprint/kanban flow, release readiness, code quality, operational maturity, blockers, risks, delays, dependencies, incidents, and technical debt, and generates dashboards, reports, and AI-composed narrative outputs (sprint reviews, release notes, executive summaries, and more).
 
-> **Repository status:** This repository currently contains the **product specification workspace** — the complete documentation set that guides implementation. Application source code is intentionally not created yet; it will be built phase by phase according to [docs/implementation/PhaseBasedImplementationPlan.md](docs/implementation/PhaseBasedImplementationPlan.md).
+> **Repository status:** The **product specification workspace** (`/docs`), the **Engineering Operating System** (`/engineering-operating-system`), and the **development program** (`/program`, `/sprints`) are complete. Implementation has begun at **Phase 0 (v0.1)**: the monorepo scaffold — nine backend Gradle modules, the frontend Vite app, and the build wiring — now exists (TASK-0001). Substantive module content is built phase by phase per [docs/implementation/PhaseBasedImplementationPlan.md](docs/implementation/PhaseBasedImplementationPlan.md); the full developer onboarding guide lands in TASK-0004.
+>
+> **Build the scaffold:** backend — `cd backend && ./gradlew build` (Java 21 toolchain, auto-provisioned); frontend — `pnpm --dir frontend install && pnpm --dir frontend build`. The Compose dev stack (`make dev-up`) and CI arrive in TASK-0003 and TASK-0002.
 
 ## Product purpose
 

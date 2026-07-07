@@ -1,0 +1,25 @@
+# Build outputs
+backend/**/build/
+backend/.gradle/
+backend/buildSrc/build/
+backend/buildSrc/.gradle/
+frontend/dist/
+frontend/node_modules/
+node_modules/
+
+# Gradle
+.gradle/
+
+# IDE / OS
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# Local env / secrets — never committed (RepositoryRules: never commit secrets or real tenant data)
+*.local
+.env
+.env.*
+!.env.example
+*.pem
+*.key
