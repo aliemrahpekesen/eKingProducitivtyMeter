@@ -8,7 +8,7 @@
 
 | Task | Story/gov | Lane | Size | CC | State | Owner |
 |---|---|---|---|---|---|---|
-| TASK-0001 | P0-E1-S1 | L0 | S | CC-7 | IN_PROGRESS | R-IE (backend) |
+| TASK-0001 | P0-E1-S1 | L0 | S | CC-7 | MERGED | R-IE (backend) |
 | TASK-0002 | P0-E1-S2 | L1 | M | CC-7 | READY | R-IE (infra) |
 | TASK-0003 | P0-E1-S3 | L1 | M | CC-7 | READY | R-IE (infra) |
 | TASK-0004 | P0-E1-S4 | L3 | S | CC-6 | READY | R-DE |
@@ -34,6 +34,7 @@ No two in-flight tasks share a write-set path. The only shared file `/.github/wo
 ## Daily log
 
 - **2026-07-07** — TASK-0001 CLAIMED and started (R-IE): branch `feature/TASK-0001-monorepo-scaffolding`; scaffolding the monorepo tree per RepositoryStructure. Reconciliation recorded: Gradle build root lives under `/backend` per RepositoryStructure §2 (the TaskSpecs file list said repo root; AC-3 binds to RepositoryStructure, which wins — docs-first).
+- **2026-07-07** — TASK-0001 reviewed by R-CR ([../reviews/TASK-0001-review.md](../reviews/TASK-0001-review.md)): **APPROVED** (0 BLOCKER, 0 MAJOR, 2 MINOR, 3 NIT); all ACs independently re-run green. Merged into `integration/SPRINT-00` (local `--no-ff`). State → **MERGED**. Two MINORs filed as [DEBT-001/DEBT-002](../debt-register.md). Full `MERGED → VERIFIED → DONE` completes once TASK-0002 provides CI and re-verifies on the integration head. TASK-0002 opened next.
 
 ## Replan log
 
