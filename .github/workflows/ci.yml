@@ -1,0 +1,84 @@
+# EIP CI pipeline — enforces the QualityGatePolicy merge gates (G1/G2/G3-auto) on every PR to main.
+# Gate → stage map (CodingStandards.md §1): Spotless/Checkstyle/Error Prone/NullAway/Modulith/ArchUnit
+# = G1; JUnit + JaCoCo coverage ratchet = G2; ESLint + tsc = G1 (frontend); gitleaks + dependency
+# review = G3-automated. The docs-lint stage (G7) is added by TASK-0008. Branch protection making
+# these checks required is in .github/rulesets/main-protection.json (applied via .github/README.md).
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Static analysis (Spotless, Checkstyle, Error Prone, NullAway) — G1
+        working-directory: backend
+        run: ./gradlew --no-daemon spotlessCheck checkstyleMain checkstyleTest compileJava compileTestJava
+      - name: Build + unit + Modulith/ArchUnit tests — G1/G2
+        working-directory: backend
+        run: ./gradlew --no-daemon build check
+      - name: Coverage ratchet (JaCoCo) — G2
+        working-directory: backend
+        run: ./gradlew --no-daemon jacocoTestCoverageVerification
+
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Enable pinned pnpm (corepack)
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.15.9 --activate
+      - name: Install (frozen lockfile)
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+      - name: Static analysis (ESLint, tsc) — G1
+        working-directory: frontend
+        run: |
+          pnpm lint
+          pnpm typecheck
+      - name: Build — G1
+        working-directory: frontend
+        run: pnpm build
+
+  security:
+    name: security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Secret scan (gitleaks) — G3-auto
+        run: |
+          GITLEAKS_VERSION=8.21.2
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz -C /tmp gitleaks
+          /tmp/gitleaks detect --source . --no-banner --redact --exit-code 1
+      - name: Dependency review (PR only) — G3-auto
+        if: github.event_name == 'pull_request'
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
