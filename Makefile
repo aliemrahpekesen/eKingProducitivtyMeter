@@ -4,6 +4,9 @@
 
 COMPOSE := docker compose -f infra/docker-compose/docker-compose.yml --profile core --profile observability
 COMPOSE_ENV := infra/docker-compose/.env
+# Long-running services only — `up --wait` must not monitor the one-shot minio-init (it exits 0,
+# which compose reports as a failure). minio-init runs separately, to completion, after the wait.
+DEV_SERVICES := postgres redis kafka minio keycloak otel-collector prometheus grafana
 
 .PHONY: help
 help: ## Show available targets
@@ -13,7 +16,8 @@ help: ## Show available targets
 .PHONY: dev-up
 dev-up: ## Boot the local infra dev stack (Postgres, Redis, Kafka, MinIO, Keycloak, OTel, Prometheus, Grafana)
 	@test -f $(COMPOSE_ENV) || cp infra/docker-compose/.env.example $(COMPOSE_ENV)
-	$(COMPOSE) --env-file $(COMPOSE_ENV) up -d --wait --wait-timeout 900
+	$(COMPOSE) --env-file $(COMPOSE_ENV) up -d --wait --wait-timeout 900 $(DEV_SERVICES)
+	$(COMPOSE) --env-file $(COMPOSE_ENV) run --rm minio-init
 	@$(MAKE) --no-print-directory dev-urls
 
 .PHONY: dev-down
