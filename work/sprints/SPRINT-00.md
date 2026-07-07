@@ -12,12 +12,12 @@
 | TASK-0002 | P0-E1-S2 | L1 | M | CC-7 | MERGED | R-IE (infra) |
 | TASK-0003 | P0-E1-S3 | L1 | M | CC-7 | MERGED | R-IE (infra) |
 | TASK-0004 | P0-E1-S4 | L3 | S | CC-6 | MERGED | R-DE |
-| TASK-0005 | P0-E2-S1 | L2 | M | CC-1 | READY* | R-IE (backend) |
+| TASK-0005 | P0-E2-S1 | L2 | M | CC-1 | IN_PROGRESS | R-IE (backend) |
 | TASK-0006 | ADR-001..020 backfill | L3 | M | CC-6 | READY | R-CA + R-DE |
 | TASK-0007 | CODEOWNERS | L3 | S | CC-6 | READY | R-CA |
 | TASK-0008 | docs-lint CI | L3 | M | CC-7 | READY | R-DE + R-DOA |
 
-\* TASK-0005 pending CC-1 R-CA approach pre-approval before CLAIMED.
+CC-1 R-CA approach pre-approval for TASK-0005 recorded ([../approvals/TASK-0005-approach.md](../approvals/TASK-0005-approach.md), commit `2e95127`) → G0 satisfied, CLAIMED.
 
 ## Lanes / write-set disjointness
 
@@ -38,6 +38,7 @@ No two in-flight tasks share a write-set path. The only shared file `/.github/wo
 - **2026-07-07** — TASK-0002 reviewed by R-CR ([../reviews/TASK-0002-review.md](../reviews/TASK-0002-review.md)): **APPROVED** (0 BLOCKER, 0 MAJOR, 3 MINOR, 4 NIT); all ACs + CI stages independently re-run green, Spotless/Checkstyle block-then-pass confirmed. MINOR-2 fixed at closure; MINOR-1/3 filed as [DEBT-003/DEBT-004](../debt-register.md). Merged into `integration/SPRINT-00` (local `--no-ff`). State → **MERGED**. CI activates on push to `main` + ruleset application (deferred, `.github/README.md`). TASK-0003 opened next.
 - **2026-07-07** — TASK-0003 reviewed by R-CR: round 1 **MAJOR** (`make dev-up` non-zero on fresh boot) + 3 MINOR; author fixed all (MAJOR-1 one-shot out of `--wait`; MINOR-1 tags → DockerCompose §2; MINOR-2 pgvector init SQL; MINOR-3 → [DEBT-005](../debt-register.md)); round 2 ([../reviews/TASK-0003-review.md](../reviews/TASK-0003-review.md)) **APPROVED** — fresh `make dev-up` exits 0, all services healthy, buckets + pgvector + Keycloak OIDC verified. Merged into `integration/SPRINT-00` (local `--no-ff`). State → **MERGED**. TASK-0004 opened next.
 - **2026-07-07** — TASK-0004 reviewed by R-CR ([../reviews/TASK-0004-review.md](../reviews/TASK-0004-review.md)): **APPROVED** (0 BLOCKER, 0 MAJOR, 1 MINOR non-blocking, 3 NIT); links resolve, no placeholders, onboarding URLs match `make dev-urls`, `/docs` baseline untouched. Merged into `integration/SPRINT-00` (local `--no-ff`). State → **MERGED**. **Epic-1 (P0-E1-S1..S4) + P0-E2-S1 scaffolding complete.** Governance backfill remains: TASK-0005 (eip-core skeleton, CC-1), TASK-0006 (ADRs), TASK-0007 (CODEOWNERS), TASK-0008 (docs-lint). TASK-0005 approach approval prepared next.
+- **2026-07-07** — TASK-0005 CLAIMED and implemented (R-IE): branch `feature/TASK-0005-eip-core-skeleton` off `integration/SPRINT-00`. Shared-kernel base types (`WorkItemType`, `EntityType`, `ExternalRef`, `UuidV7Generator`+default, 11-field `EventEnvelope`, `SchemaVersion`, `DomainEventPayload`, sealed `EipException`+4 kernel leaves), SPI package roots, Modulith `verify()` + ArchUnit leaf test + committed Documenter output. `./gradlew :eip-core:check` green; **100% instruction / 100% branch coverage** (≥85% ratchet met); AC-5 leaf-violation build-red demonstrated and reverted. Conditions C1–C6 satisfied. State → **IN_PROGRESS**, awaiting R-CR + R-CA review (CC-1 two-approval G8). Not merged, not pushed. Reconciliation: `jspecify`/`assertj` added to the `/backend/gradle/libs.versions.toml` catalog (dependency SoT) — disjoint from other in-flight tasks.
 
 ## Replan log
 
