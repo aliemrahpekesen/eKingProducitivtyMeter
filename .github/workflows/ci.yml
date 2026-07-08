@@ -1,7 +1,7 @@
 # EIP CI pipeline — enforces the QualityGatePolicy merge gates (G1/G2/G3-auto) on every PR to main.
 # Gate → stage map (CodingStandards.md §1): Spotless/Checkstyle/Error Prone/NullAway/Modulith/ArchUnit
 # = G1; JUnit + JaCoCo coverage ratchet = G2; ESLint + tsc = G1 (frontend); gitleaks + dependency
-# review = G3-automated. The docs-lint stage (G7) is added by TASK-0008. Branch protection making
+# review = G3-automated; docs-lint (links/ids/counts/canonical greps) = G7. Branch protection making
 # these checks required is in .github/rulesets/main-protection.json (applied via .github/README.md).
 name: ci
 
@@ -82,3 +82,11 @@ jobs:
         uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: high
+
+  docs-lint:
+    name: docs-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Documentation lint (links, id refs, counts, canonical values) — G7
+        run: python3 scripts/docs-lint/docs_lint.py
