@@ -28,6 +28,10 @@ assertj = "3.26.3"
 
 [libraries]
 spring-boot-starter = { module = "org.springframework.boot:spring-boot-starter" }
+# Spring Boot dependency BOM — imported as a platform by library modules (which, unlike eip-app,
+# do not apply io.spring.dependency-management) so persistence/test versions (Flyway, Postgres,
+# Testcontainers, Mockito) resolve managed. Introduced with the persistence spine (TASK-0009).
+spring-boot-bom = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "springBoot" }
 spring-modulith-starter-core = { module = "org.springframework.modulith:spring-modulith-starter-core", version.ref = "springModulith" }
 spring-modulith-bom = { module = "org.springframework.modulith:spring-modulith-bom", version.ref = "springModulith" }
 jspecify = { module = "org.jspecify:jspecify", version.ref = "jspecify" }
