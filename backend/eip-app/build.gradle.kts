@@ -14,6 +14,11 @@ dependencies {
     implementation(project(":eip-reports"))
     implementation("org.springframework.boot:spring-boot-starter")
 
+    // Web + OpenAPI: the first /api/v1 read surface (TASK-0010). RFC 7807 problem+json is built into
+    // Spring 6 (ProblemDetail); springdoc generates the OpenAPI 3 contract at /v3/api-docs.
+    implementation("org.springframework.boot:spring-boot-starter-web")
+    implementation(libs.springdoc.openapi.webmvc)
+
     // Persistence: JDBC + Flyway forward-only migrations + PostgreSQL driver (DatabasePlan §3/§7).
     // Versions are managed by io.spring.dependency-management (boot-app-conventions).
     implementation("org.springframework.boot:spring-boot-starter-jdbc")

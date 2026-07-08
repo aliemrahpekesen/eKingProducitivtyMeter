@@ -1,0 +1,20 @@
+# eip-app runtime config. Production shape: the app connects as the RLS-enforced `eip_app`
+# (NOBYPASSRLS) role; Flyway runs its DDL as the privileged `eip_migrator` role (DatabasePlan §2/§5).
+# Values default for local dev and are overridden by env / the test harness.
+spring:
+  application:
+    name: eip-app
+  datasource:
+    url: ${EIP_DB_URL:jdbc:postgresql://localhost:5432/eip}
+    username: ${EIP_APP_DB_USER:eip_app}
+    password: ${EIP_APP_DB_PASSWORD:eip_app}
+  flyway:
+    enabled: true
+    url: ${EIP_DB_URL:jdbc:postgresql://localhost:5432/eip}
+    user: ${EIP_MIGRATOR_DB_USER:eip_migrator}
+    password: ${EIP_MIGRATOR_DB_PASSWORD:eip_migrator}
+    locations: classpath:db/migration
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
