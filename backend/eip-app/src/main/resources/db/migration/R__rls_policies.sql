@@ -19,8 +19,21 @@ DECLARE
     'core.role',
     'core.member',
     'core.member_identity',
-    'core.secret'
+    'core.secret',
+    'core.external_ref',
+    'core.entity_link',
+    'core.connector',
+    'core.connector_checkpoint',
+    'core.event_outbox',
+    'core.processed_events',   -- partitioned parent; policy propagates to partitions (PG11+)
+    'audit.audit_event',       -- partitioned parent
+    'work.work_item',
+    'analytics.metric_definition',
+    'analytics.metric_fact',   -- partitioned parent
+    'analytics.rm_team_flow_current'
   ];
+  -- Platform-scoped (enumerated no-RLS exceptions, DatabasePlan §2): core.tenant,
+  -- core.worker_heartbeat, analytics.analytics_watermark — deliberately absent from this list.
 BEGIN
   FOREACH t IN ARRAY tenant_scoped_tables LOOP
     EXECUTE format('ALTER TABLE %s ENABLE ROW LEVEL SECURITY', t);

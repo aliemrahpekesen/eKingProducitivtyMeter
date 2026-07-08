@@ -27,6 +27,7 @@ L0 (persistence + tenancy spine, `/backend/eip-core` + `/backend/eip-tenancy` + 
 ## Daily log
 
 - **2026-07-08** — Sprint-01 opened. Founder decisions recorded ([../../reviews/product-planning/FounderDecisions.md](../../reviews/product-planning/FounderDecisions.md), commit `7fc06ad`) — decisions 2/3/4 confirm the existing architecture (LLM provider SPI, vendor-neutral Connector SPI, DC/Cloud handling); decision 1 refines the target segment. No spec/architecture/roadmap change. TASK-0009 (DB + RLS baseline) CLAIMED and started (R-IE under R-DBA): branch `feature/TASK-0009-db-rls-baseline`; de-risking RLS first (the crux), then the tenancy-core schema.
+- **2026-07-08** — TASK-0009 increment 1 (`2f0ed26`): persistence wiring + tenancy-core + RLS mechanism + Testcontainers isolation test (4/4). Increment 2: control-plane infra + `core.connector` + `audit.audit_event` + `analytics` metric tables (Friction surface) + canonical schemas + `work.work_item` + partitioned tables + §15 schema-lint; **6/6 RLS+lint tests green**, full `./gradlew check` green. **Product-first ordering** applied (connector + Friction-metric tables first; feature-driven RAG/full-canonical/hash-chainer deferred — nothing consumes them yet). TASK-0009 Phase-0 control-plane baseline **complete**; awaiting R-CR + R-DBA review. Not pushed. Next per product-first rule: expose the persistence via the thinnest visible slice (P0-E3-S1 tenant-context filter + a read-only `/api/v1` session/connectors endpoint + committed OpenAPI contract).
 
 ## Replan log
 

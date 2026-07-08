@@ -15,6 +15,7 @@ Organizations, tenants, BusinessUnits, Teams, Members, RBAC, audit log, tenant c
 
 - `core.tenant` — tenant registry (platform-scoped, **no RLS** — enumerated exception, DatabasePlan §2).
 - `core.organization`, `core.business_unit`, `core.team`, `core.role`, `core.member`, `core.member_identity`, `core.secret` — tenant-scoped, RLS enabled+forced.
+- `audit.audit_event` — append-only, hash-chained (partition template landed; chain filler + verifier arrive with the SPRINT-02 audit subsystem, SecurityModel §11).
 
 `core.member`/`core.member_identity` carry the only PII columns (display name, email) — FR-142 erasure targets ([DatabasePlan §10.1](../../docs/engineering/DatabasePlan.md)). No topics/endpoints yet. Remaining tenancy tables and the audit hash chain land in continued TASK-0009 increments / SPRINT-02; this charter is updated in the same PR (RepositoryStructure §6 invariant 4).
 

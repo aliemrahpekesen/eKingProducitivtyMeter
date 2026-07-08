@@ -64,11 +64,14 @@ class BaselineRlsIntegrationTest {
         st.execute(
             "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA core TO " + APP_ROLE);
       }
-      // Seed two tenants + one org each as the superuser (superuser bypasses RLS — setup only).
+      // Seed two tenants + one org + one simulation connector each (superuser bypasses RLS —
+      // setup).
       tenantA = insertTenant(admin, "Tenant A", "tenant-a");
       tenantB = insertTenant(admin, "Tenant B", "tenant-b");
       insertOrg(admin, tenantA, "Org A", "org-a");
       insertOrg(admin, tenantB, "Org B", "org-b");
+      insertConnector(admin, tenantA, "jira", "Demo Jira (simulation)");
+      insertConnector(admin, tenantB, "bitbucket", "Demo Bitbucket (simulation)");
     }
   }
 
@@ -111,6 +114,57 @@ class BaselineRlsIntegrationTest {
       // No bind: app.tenant_id is unset, and current_setting has no default (DatabasePlan §5).
       assertThatThrownBy(() -> orgSlugs(c)).isInstanceOf(SQLException.class);
       c.rollback();
+    }
+  }
+
+  @Test
+  void connector_registry_is_tenant_isolated() throws SQLException {
+    try (Connection c = appConnection()) {
+      c.setAutoCommit(false);
+
+      RlsTenantBinder.bind(c, TenantContext.of(tenantA));
+      assertThat(connectorNames(c)).containsExactly("Demo Jira (simulation)"); // not tenant B's
+      c.rollback();
+
+      RlsTenantBinder.bind(c, TenantContext.of(tenantB));
+      assertThat(connectorNames(c)).containsExactly("Demo Bitbucket (simulation)");
+      c.rollback();
+    }
+  }
+
+  @Test
+  void every_tenant_owned_unique_constraint_includes_tenant_id() throws SQLException {
+    // Scale-out invariant (DatabasePlan §15 / §14): every non-primary UNIQUE index on a
+    // tenant-owned table must include tenant_id, so a tenant's rows stay portable as a unit.
+    String sql =
+        "SELECT n.nspname || '.' || t.relname AS tbl, i.relname AS idx, "
+            + "       array_agg(a.attname ORDER BY k.ord) AS cols "
+            + "FROM pg_index ix "
+            + "JOIN pg_class i ON i.oid = ix.indexrelid "
+            + "JOIN pg_class t ON t.oid = ix.indrelid "
+            + "JOIN pg_namespace n ON n.oid = t.relnamespace "
+            + "JOIN unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON true "
+            + "JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum "
+            + "WHERE ix.indisunique AND NOT ix.indisprimary "
+            + "  AND n.nspname IN ('core','work','analytics','audit') "
+            + "  AND t.relname NOT IN ('tenant','worker_heartbeat','analytics_watermark') "
+            + "GROUP BY 1, 2";
+    try (Connection admin = superuser();
+        PreparedStatement ps = admin.prepareStatement(sql);
+        ResultSet rs = ps.executeQuery()) {
+      int checked = 0;
+      while (rs.next()) {
+        String cols = rs.getString("cols");
+        assertThat(cols)
+            .as(
+                "unique index %s on %s must include tenant_id",
+                rs.getString("idx"), rs.getString("tbl"))
+            .contains("tenant_id");
+        checked++;
+      }
+      assertThat(checked)
+          .as("at least the tenancy-core natural-key uniques are checked")
+          .isGreaterThan(5);
     }
   }
 
@@ -162,6 +216,32 @@ class BaselineRlsIntegrationTest {
       ps.setString(3, name);
       ps.setString(4, slug);
       ps.executeUpdate();
+    }
+  }
+
+  private static void insertConnector(Connection c, UUID tenantId, String type, String name)
+      throws SQLException {
+    try (PreparedStatement ps =
+        c.prepareStatement(
+            "INSERT INTO core.connector (id, tenant_id, type, name, status, simulation) "
+                + "VALUES (?, ?, ?, ?, 'REGISTERED', true)")) {
+      ps.setObject(1, UUID.randomUUID());
+      ps.setObject(2, tenantId);
+      ps.setString(3, type);
+      ps.setString(4, name);
+      ps.executeUpdate();
+    }
+  }
+
+  private static List<String> connectorNames(Connection c) throws SQLException {
+    try (PreparedStatement ps =
+            c.prepareStatement("SELECT name FROM core.connector ORDER BY name");
+        ResultSet rs = ps.executeQuery()) {
+      List<String> names = new ArrayList<>();
+      while (rs.next()) {
+        names.add(rs.getString(1));
+      }
+      return names;
     }
   }
 
