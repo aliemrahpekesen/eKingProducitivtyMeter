@@ -32,16 +32,30 @@
       "get" : {
         "tags" : [ "connector-controller" ],
         "operationId" : "connectors",
+        "parameters" : [ {
+          "name" : "cursor",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "limit",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 50
+          }
+        } ],
         "responses" : {
           "200" : {
             "description" : "OK",
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "array",
-                  "items" : {
-                    "$ref" : "#/components/schemas/ConnectorView"
-                  }
+                  "$ref" : "#/components/schemas/PageViewConnectorView"
                 }
               }
             }
@@ -81,6 +95,23 @@
             "type" : "string"
           },
           "simulation" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "PageViewConnectorView" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ConnectorView"
+            }
+          },
+          "nextCursor" : {
+            "type" : "string"
+          },
+          "hasMore" : {
             "type" : "boolean"
           }
         }

@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.eip.app.tenant.HeaderTenantResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.jayway.jsonpath.JsonPath;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
@@ -78,7 +79,12 @@ class TenantApiIntegrationTest {
       st.execute(insertTenant(tenantB, "Tenant B", "tenant-b"));
       st.execute(insertOrg(tenantA, "Org A", "org-a"));
       st.execute(insertOrg(tenantB, "Org B", "org-b"));
-      st.execute(insertConnector(tenantA, "jira", "Jira A (simulation)"));
+      // Tenant A gets three connectors (deterministic name order A < B < C) to exercise paging;
+      // tenant B gets one, so cross-tenant isolation is a strong discriminator (3 vs 1, not 1 vs
+      // 1).
+      st.execute(insertConnector(tenantA, "jira", "A Jira (simulation)"));
+      st.execute(insertConnector(tenantA, "bitbucket", "B Bitbucket (simulation)"));
+      st.execute(insertConnector(tenantA, "sonarqube", "C Sonar (simulation)"));
       st.execute(insertConnector(tenantB, "bitbucket", "Bitbucket B (simulation)"));
     } catch (SQLException e) {
       throw new IllegalStateException("failed to prepare test database", e);
@@ -94,17 +100,65 @@ class TenantApiIntegrationTest {
 
   @Test
   void connectors_endpoint_returns_only_the_requesting_tenants_connectors() throws Exception {
+    // Tenant A sees exactly its three connectors, ordered by name, inside the PageView envelope.
     mvc.perform(get("/api/v1/connectors").header(HeaderTenantResolver.HEADER, tenantA.toString()))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.length()").value(1))
-        .andExpect(jsonPath("$[0].name").value("Jira A (simulation)"))
-        .andExpect(jsonPath("$[0].type").value("jira"))
-        .andExpect(jsonPath("$[0].simulation").value(true));
+        .andExpect(jsonPath("$.items.length()").value(3))
+        .andExpect(jsonPath("$.items[0].name").value("A Jira (simulation)"))
+        .andExpect(jsonPath("$.items[0].type").value("jira"))
+        .andExpect(jsonPath("$.items[0].simulation").value(true))
+        .andExpect(jsonPath("$.items[2].name").value("C Sonar (simulation)"))
+        .andExpect(jsonPath("$.hasMore").value(false))
+        .andExpect(jsonPath("$.nextCursor").doesNotExist());
 
+    // Tenant B sees only its own — RLS-off would surface all four rows.
     mvc.perform(get("/api/v1/connectors").header(HeaderTenantResolver.HEADER, tenantB.toString()))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.length()").value(1))
-        .andExpect(jsonPath("$[0].name").value("Bitbucket B (simulation)"));
+        .andExpect(jsonPath("$.items.length()").value(1))
+        .andExpect(jsonPath("$.items[0].name").value("Bitbucket B (simulation)"));
+  }
+
+  @Test
+  void connectors_endpoint_paginates_with_an_opaque_cursor() throws Exception {
+    // Page 1: the first two of tenant A's three connectors, with more to come.
+    String page1 =
+        mvc.perform(
+                get("/api/v1/connectors")
+                    .param("limit", "2")
+                    .header(HeaderTenantResolver.HEADER, tenantA.toString()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.items.length()").value(2))
+            .andExpect(jsonPath("$.items[0].name").value("A Jira (simulation)"))
+            .andExpect(jsonPath("$.items[1].name").value("B Bitbucket (simulation)"))
+            .andExpect(jsonPath("$.hasMore").value(true))
+            .andExpect(jsonPath("$.nextCursor").isNotEmpty())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+    String cursor = JsonPath.read(page1, "$.nextCursor");
+
+    // Page 2: the remaining connector, no further pages, cursor omitted.
+    mvc.perform(
+            get("/api/v1/connectors")
+                .param("limit", "2")
+                .param("cursor", cursor)
+                .header(HeaderTenantResolver.HEADER, tenantA.toString()))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items.length()").value(1))
+        .andExpect(jsonPath("$.items[0].name").value("C Sonar (simulation)"))
+        .andExpect(jsonPath("$.hasMore").value(false))
+        .andExpect(jsonPath("$.nextCursor").doesNotExist());
+  }
+
+  @Test
+  void connectors_endpoint_rejects_a_malformed_cursor() throws Exception {
+    mvc.perform(
+            get("/api/v1/connectors")
+                .param("cursor", "!!!not-base64!!!")
+                .header(HeaderTenantResolver.HEADER, tenantA.toString()))
+        .andExpect(status().isBadRequest())
+        .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+        .andExpect(jsonPath("$.title").value("Invalid cursor"));
   }
 
   @Test

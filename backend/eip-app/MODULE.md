@@ -20,9 +20,9 @@ Composition root / main API app: Spring Boot entry point, REST controllers, Open
 **Owned endpoints** (read-only; tenant-scoped under RLS — [APIDesign](../../docs/engineering/APIDesign.md), RFC 7807 errors):
 
 - `GET /api/v1/session` — the request's tenant identity (id + organization name).
-- `GET /api/v1/connectors` — the tenant's connector registry (id, type, name, status, simulation).
+- `GET /api/v1/connectors` — the tenant's connector registry (id, type, name, status, simulation), cursor-paginated in the `PageView` envelope (`items`/`nextCursor`/`hasMore`; params `cursor`, `limit` default 50/max 200) per APIDesign §1.4.
 
-The generated OpenAPI 3 contract is served at `/v3/api-docs` (springdoc) and snapshotted to [`openapi/eip-openapi-v1.json`](openapi/eip-openapi-v1.json) (regenerate with `EIP_OPENAPI_EXPORT=1`; the additive-only diff gate is wired in TASK-0011). No owned tables/topics. This charter is updated in the same PR that adds them (RepositoryStructure.md §6 invariant 4).
+Errors are RFC 7807 problem+json with `/problems/*` `type` URIs (BackendPlan §10). The generated OpenAPI 3 contract is served at `/v3/api-docs` (springdoc) and snapshotted to [`openapi/eip-openapi-v1.json`](openapi/eip-openapi-v1.json) (regenerate with `EIP_OPENAPI_EXPORT=1`; the additive-only diff gate + error-response docs are wired in TASK-0011 — [DEBT-011](../../work/debt-register.md)). Observability on these endpoints (metrics/traces/logs + problem `traceId`) lands with TASK-0012 ([DEBT-009](../../work/debt-register.md)). No owned tables/topics. This charter is updated in the same PR that adds them (RepositoryStructure.md §6 invariant 4).
 
 ## Invariants
 

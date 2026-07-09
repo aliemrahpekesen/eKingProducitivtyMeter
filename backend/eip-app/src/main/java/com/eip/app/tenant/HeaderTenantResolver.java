@@ -9,6 +9,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.util.Optional;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 /**
@@ -17,8 +18,13 @@ import org.springframework.stereotype.Component;
  * is replaced by the OIDC token→tenant resolver in SPRINT-02 (P0-E3-S3); the {@link
  * TenantContextFilter} and the RLS binding it drives are the permanent mechanism, so the swap is a
  * one-line bean change.
+ *
+ * <p>{@code @Profile("!prod")} is a structural guard: this unauthenticated resolver can never be
+ * the active {@link TenantResolver} under the {@code prod} profile, so it cannot silently become
+ * the production mechanism before the OIDC resolver replaces it.
  */
 @Component
+@Profile("!prod")
 public class HeaderTenantResolver implements TenantResolver {
 
   /** Request header carrying the tenant id (dev/demo only). */
