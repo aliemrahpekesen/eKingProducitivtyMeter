@@ -3,7 +3,7 @@
 - **Root package:** `com.eip.tenancy`
 - **Owner:** R-BA (R-PA: tenancy/quotas)
 - **Allowed dependencies:** eip-core
-- **State:** Phase-0 — tenant-context RLS mechanism (`com.eip.tenancy.context`) landed (TASK-0009); tenancy-core tables owned. RBAC/audit/secret services follow (SPRINT-02).
+- **State:** Phase-0 — tenant-context RLS mechanism (`com.eip.tenancy.context`: `TenantContext`, `RlsTenantBinder` — TASK-0009; thread-bound `TenantContextHolder` — TASK-0010) landed; tenancy-core tables owned. RBAC/audit/secret services follow (SPRINT-02).
 
 ## Purpose
 

@@ -25,6 +25,8 @@ archunit = "1.3.0"
 # AssertJ is the mandated backend assertion library (CodingStandards §5).
 jspecify = "1.0.0"
 assertj = "3.26.3"
+# springdoc — OpenAPI 3 generation for the /api/v1 surface (TASK-0010). Not managed by the Boot BOM.
+springdoc = "2.7.0"
 
 [libraries]
 spring-boot-starter = { module = "org.springframework.boot:spring-boot-starter" }
@@ -36,6 +38,7 @@ spring-modulith-starter-core = { module = "org.springframework.modulith:spring-m
 spring-modulith-bom = { module = "org.springframework.modulith:spring-modulith-bom", version.ref = "springModulith" }
 jspecify = { module = "org.jspecify:jspecify", version.ref = "jspecify" }
 assertj-core = { module = "org.assertj:assertj-core", version.ref = "assertj" }
+springdoc-openapi-webmvc = { module = "org.springdoc:springdoc-openapi-starter-webmvc-api", version.ref = "springdoc" }
 
 [plugins]
 spring-boot = { id = "org.springframework.boot", version.ref = "springBoot" }
