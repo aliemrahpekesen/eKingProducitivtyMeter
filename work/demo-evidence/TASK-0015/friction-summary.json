@@ -1,0 +1,55 @@
+{
+    "metric": {
+        "key": "engineering_friction",
+        "name": "Engineering Friction",
+        "purpose": "Where engineering time is lost: a team-level index of flow friction.",
+        "formula": "friction = round(min(100, 10*wip_limit_breaches + 6*review_queue_depth + 4*(oldest_in_progress_age_sec/86400.0))); WIP is context, not scored",
+        "inputs": {
+            "cap": 100,
+            "note": "WIP shown as context, not scored",
+            "signals": [
+                "wip_limit_breaches",
+                "review_queue_depth",
+                "oldest_in_progress_age_sec"
+            ],
+            "weights": {
+                "age_day": 4,
+                "review_queue_depth": 6,
+                "wip_limit_breaches": 10
+            }
+        },
+        "grain": "team",
+        "caveats": "v1 placeholder over current flow signals; not yet wait-time decomposition across the correlated flow graph. Team-level only \u2014 never individual.",
+        "gamingRisks": "Splitting work items to lower WIP, or closing review threads without real review, can understate friction; read alongside throughput and cycle time."
+    },
+    "teams": [
+        {
+            "teamId": "6d7fe4ef-73bd-4e05-a617-401e52a421b4",
+            "teamName": "Platform",
+            "wip": 12,
+            "wipLimitBreaches": 3,
+            "oldestInProgressAgeSec": 432000,
+            "reviewQueueDepth": 4,
+            "frictionScore": 74
+        },
+        {
+            "teamId": "33e899d5-5eb2-4290-8d21-42b216eb9bbc",
+            "teamName": "Payments",
+            "wip": 6,
+            "wipLimitBreaches": 1,
+            "oldestInProgressAgeSec": 172800,
+            "reviewQueueDepth": 2,
+            "frictionScore": 30
+        },
+        {
+            "teamId": "14878ff8-bc01-4a7d-be9d-5450cc0aa093",
+            "teamName": "Web",
+            "wip": 3,
+            "wipLimitBreaches": 0,
+            "oldestInProgressAgeSec": 86400,
+            "reviewQueueDepth": 1,
+            "frictionScore": 10
+        }
+    ],
+    "teamsReporting": 3
+}

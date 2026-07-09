@@ -1,0 +1,26 @@
+{
+    "items": [
+        {
+            "id": "98ed4c54-bff7-44ba-b0cd-586ca211846b",
+            "type": "bitbucket",
+            "name": "Demo Bitbucket (simulation)",
+            "status": "REGISTERED",
+            "simulation": true
+        },
+        {
+            "id": "13c36b1c-d528-49f5-8a7d-6e7daf9197a0",
+            "type": "jira",
+            "name": "Demo Jira (simulation)",
+            "status": "REGISTERED",
+            "simulation": true
+        },
+        {
+            "id": "92294689-2185-4b00-9bf0-8594abec86a0",
+            "type": "sonarqube",
+            "name": "Demo SonarQube (simulation)",
+            "status": "REGISTERED",
+            "simulation": true
+        }
+    ],
+    "hasMore": false
+}
