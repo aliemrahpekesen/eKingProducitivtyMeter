@@ -4,6 +4,8 @@
  */
 package com.eip.app;
 
+import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -74,11 +76,15 @@ class TenantApiIntegrationTest {
       st.execute("CREATE ROLE eip_app LOGIN PASSWORD 'eip_app_pw' NOBYPASSRLS");
       st.execute("GRANT USAGE ON SCHEMA core TO eip_app");
       st.execute("GRANT SELECT ON ALL TABLES IN SCHEMA core TO eip_app");
+      st.execute("GRANT USAGE ON SCHEMA analytics TO eip_app");
+      st.execute("GRANT SELECT ON ALL TABLES IN SCHEMA analytics TO eip_app");
       // Seed as the superuser (bypasses RLS — setup only).
       st.execute(insertTenant(tenantA, "Tenant A", "tenant-a"));
       st.execute(insertTenant(tenantB, "Tenant B", "tenant-b"));
-      st.execute(insertOrg(tenantA, "Org A", "org-a"));
-      st.execute(insertOrg(tenantB, "Org B", "org-b"));
+      UUID orgA = UUID.randomUUID();
+      UUID orgB = UUID.randomUUID();
+      st.execute(insertOrg(orgA, tenantA, "Org A", "org-a"));
+      st.execute(insertOrg(orgB, tenantB, "Org B", "org-b"));
       // Tenant A gets three connectors (deterministic name order A < B < C) to exercise paging;
       // tenant B gets one, so cross-tenant isolation is a strong discriminator (3 vs 1, not 1 vs
       // 1).
@@ -86,6 +92,19 @@ class TenantApiIntegrationTest {
       st.execute(insertConnector(tenantA, "bitbucket", "B Bitbucket (simulation)"));
       st.execute(insertConnector(tenantA, "sonarqube", "C Sonar (simulation)"));
       st.execute(insertConnector(tenantB, "bitbucket", "Bitbucket B (simulation)"));
+
+      // Engineering Friction: each tenant gets its own business unit + friction definition + teams.
+      UUID buA = UUID.randomUUID();
+      UUID buB = UUID.randomUUID();
+      st.execute(insertBusinessUnit(buA, tenantA, orgA, "Eng A"));
+      st.execute(insertBusinessUnit(buB, tenantB, orgB, "Eng B"));
+      st.execute(insertFrictionDefinition(tenantA));
+      st.execute(insertFrictionDefinition(tenantB));
+      // Tenant A worst-first: Platform(74) > Payments(30) > Web(10); tenant B has only Ops(50).
+      seedTeamFlow(st, tenantA, buA, "Platform", 12, 3, 5 * 86_400L, 4);
+      seedTeamFlow(st, tenantA, buA, "Payments", 6, 1, 2 * 86_400L, 2);
+      seedTeamFlow(st, tenantA, buA, "Web", 3, 0, 1 * 86_400L, 1);
+      seedTeamFlow(st, tenantB, buB, "Ops", 5, 2, 3 * 86_400L, 3);
     } catch (SQLException e) {
       throw new IllegalStateException("failed to prepare test database", e);
     }
@@ -178,12 +197,44 @@ class TenantApiIntegrationTest {
   }
 
   @Test
+  void friction_summary_is_tenant_isolated_and_deterministic() throws Exception {
+    // Tenant A: three teams, worst-first, with exact deterministic scores; the metric definition
+    // (caveats + gaming risks) is surfaced. RLS-off would leak tenant B's "Ops" team into this
+    // list.
+    mvc.perform(
+            get("/api/v1/friction/summary").header(HeaderTenantResolver.HEADER, tenantA.toString()))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.teamsReporting").value(3))
+        .andExpect(jsonPath("$.metric.key").value("engineering_friction"))
+        .andExpect(jsonPath("$.metric.grain").value("team"))
+        .andExpect(jsonPath("$.metric.caveats").isNotEmpty())
+        .andExpect(jsonPath("$.metric.gamingRisks").isNotEmpty())
+        .andExpect(jsonPath("$.teams[0].teamName").value("Platform"))
+        .andExpect(jsonPath("$.teams[0].frictionScore").value(74))
+        .andExpect(jsonPath("$.teams[1].teamName").value("Payments"))
+        .andExpect(jsonPath("$.teams[1].frictionScore").value(30))
+        .andExpect(jsonPath("$.teams[2].teamName").value("Web"))
+        .andExpect(jsonPath("$.teams[2].frictionScore").value(10))
+        .andExpect(jsonPath("$.teams[*].teamName", hasItem("Platform")))
+        .andExpect(jsonPath("$.teams[*].teamName", not(hasItem("Ops"))));
+
+    // Tenant B sees only its own team.
+    mvc.perform(
+            get("/api/v1/friction/summary").header(HeaderTenantResolver.HEADER, tenantB.toString()))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.teamsReporting").value(1))
+        .andExpect(jsonPath("$.teams[0].teamName").value("Ops"))
+        .andExpect(jsonPath("$.teams[0].frictionScore").value(50));
+  }
+
+  @Test
   void openapi_contract_is_generated_for_the_v1_surface() throws Exception {
     String contract =
         mvc.perform(get("/v3/api-docs"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.paths['/api/v1/connectors']").exists())
             .andExpect(jsonPath("$.paths['/api/v1/session']").exists())
+            .andExpect(jsonPath("$.paths['/api/v1/friction/summary']").exists())
             .andReturn()
             .getResponse()
             .getContentAsString();
@@ -219,9 +270,9 @@ class TenantApiIntegrationTest {
         + "')";
   }
 
-  private static String insertOrg(UUID tenantId, String name, String slug) {
+  private static String insertOrg(UUID id, UUID tenantId, String name, String slug) {
     return "INSERT INTO core.organization (id, tenant_id, name, slug) VALUES ('"
-        + UUID.randomUUID()
+        + id
         + "', '"
         + tenantId
         + "', '"
@@ -241,5 +292,69 @@ class TenantApiIntegrationTest {
         + "', '"
         + name
         + "', 'REGISTERED', true)";
+  }
+
+  private static String insertBusinessUnit(UUID id, UUID tenantId, UUID orgId, String name) {
+    return "INSERT INTO core.business_unit (id, tenant_id, organization_id, name) VALUES ('"
+        + id
+        + "', '"
+        + tenantId
+        + "', '"
+        + orgId
+        + "', '"
+        + name
+        + "')";
+  }
+
+  private static String insertFrictionDefinition(UUID tenantId) {
+    return "INSERT INTO analytics.metric_definition "
+        + "(id, tenant_id, metric_key, name, purpose, formula, grain, caveats, gaming_risks) VALUES ('"
+        + UUID.randomUUID()
+        + "', '"
+        + tenantId
+        + "', 'engineering_friction', 'Engineering Friction', 'Where engineering time is lost.', "
+        + "'friction = min(100, 10*breaches + 6*review + 4*age_days)', 'team', "
+        + "'v1 placeholder; team-level only.', 'Splitting items or closing reviews without review understates it.')";
+  }
+
+  /** Seeds a team plus its current flow signals (superuser; RLS-bypassed). */
+  private static void seedTeamFlow(
+      Statement st,
+      UUID tenantId,
+      UUID buId,
+      String name,
+      int wip,
+      int wipLimitBreaches,
+      long oldestAgeSec,
+      int reviewQueueDepth)
+      throws SQLException {
+    UUID teamId = UUID.randomUUID();
+    st.execute(
+        "INSERT INTO core.team (id, tenant_id, business_unit_id, name, type) VALUES ('"
+            + teamId
+            + "', '"
+            + tenantId
+            + "', '"
+            + buId
+            + "', '"
+            + name
+            + "', 'STREAM_ALIGNED')");
+    st.execute(
+        "INSERT INTO analytics.rm_team_flow_current "
+            + "(id, tenant_id, team_id, wip, wip_limit_breaches, oldest_in_progress_age_sec, review_queue_depth) VALUES ('"
+            + UUID.randomUUID()
+            + "', '"
+            + tenantId
+            + "', '"
+            + teamId
+            + "', "
+            + wip
+            + ", "
+            + wipLimitBreaches
+            + ", "
+            + oldestAgeSec
+            + ", "
+            + reviewQueueDepth
+            + ")");
   }
 }
