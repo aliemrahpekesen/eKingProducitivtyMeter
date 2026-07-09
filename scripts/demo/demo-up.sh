@@ -9,6 +9,12 @@ cd "$ROOT"
 
 ENV_FILE="infra/docker-compose/.env"
 [ -f "$ENV_FILE" ] || cp infra/docker-compose/.env.example "$ENV_FILE"
+# Load POSTGRES_*/ports from the SAME .env that Compose uses, so the host-run backend connects to
+# the DB Compose actually started (a customized .env must not desync the two).
+set -a
+# shellcheck disable=SC1090
+. "$ENV_FILE"
+set +a
 COMPOSE="docker compose -f infra/docker-compose/docker-compose.yml --profile core --env-file $ENV_FILE"
 
 DEMO_DIR=".demo"
