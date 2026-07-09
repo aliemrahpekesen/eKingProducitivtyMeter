@@ -17,6 +17,16 @@ make frontend-build  # pnpm --dir frontend install && build
 make dev-down        # tear down
 ```
 
+**See the product in one command** — `make demo-up` starts Postgres + the backend (`demo` profile,
+RLS enforced) + the frontend with a **fixed demo tenant preloaded**, then open
+**http://localhost:5173**. It serves clearly-labelled **simulation** data (no real connector
+ingestion). Stop with `make demo-down`.
+
+```bash
+make demo-up         # Postgres + eip-app (demo) + frontend, fixed demo tenant preloaded → http://localhost:5173
+make demo-down       # stop the demo backend + Postgres
+```
+
 Every AI engineering session starts by reading **[/CLAUDE.md](CLAUDE.md)** (the operating manual).
 
 ## Product purpose

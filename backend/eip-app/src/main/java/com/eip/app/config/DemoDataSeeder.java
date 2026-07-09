@@ -10,6 +10,8 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.UUID;
 import javax.sql.DataSource;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.context.annotation.Profile;
@@ -27,10 +29,23 @@ import org.springframework.transaction.annotation.Transactional;
  * gated to the {@code demo} profile so it never runs in production or in tests. Not real
  * Jira/Bitbucket/Sonar connectivity — just {@code core.connector} rows flagged {@code simulation =
  * true} and simulated team-level flow signals.
+ *
+ * <p>The demo tenant uses a <strong>fixed, well-known id</strong> ({@link #DEMO_TENANT_ID}) so the
+ * frontend can load it via {@code VITE_EIP_TENANT_ID} without anyone querying Postgres for a random
+ * id. This value is demo-only (never referenced by production code, which resolves tenants via
+ * OIDC) and is logged on seed for discoverability.
  */
 @Component
 @Profile("demo")
 public class DemoDataSeeder implements ApplicationRunner {
+
+  /**
+   * The fixed demo tenant id. Stable across seeds so the one-command demo ({@code make demo-up})
+   * and the frontend default work without a DB lookup. Demo-only — production never uses it.
+   */
+  public static final UUID DEMO_TENANT_ID = UUID.fromString("00000000-0000-4000-8000-0000000000de");
+
+  private static final Logger log = LoggerFactory.getLogger(DemoDataSeeder.class);
 
   private final DataSource dataSource;
   private final JdbcClient jdbc;
@@ -49,9 +64,10 @@ public class DemoDataSeeder implements ApplicationRunner {
                 .single()
             > 0;
     if (exists) {
+      log.info("demo data already present — tenant {} (slug 'demo')", DEMO_TENANT_ID);
       return;
     }
-    UUID tenantId = UUID.randomUUID();
+    UUID tenantId = DEMO_TENANT_ID;
     jdbc.sql("INSERT INTO core.tenant (id, name, slug) VALUES (?, 'Demo Tenant', 'demo')")
         .param(tenantId)
         .update();
@@ -87,6 +103,9 @@ public class DemoDataSeeder implements ApplicationRunner {
     insertTeamFlow(tenantId, buId, "Platform", 12, 3, 5 * SECONDS_PER_DAY, 4);
     insertTeamFlow(tenantId, buId, "Payments", 6, 1, 2 * SECONDS_PER_DAY, 2);
     insertTeamFlow(tenantId, buId, "Web", 3, 0, 1 * SECONDS_PER_DAY, 1);
+    log.info(
+        "seeded demo simulation data — tenant {} (slug 'demo'): 3 connectors + 3 teams + friction",
+        tenantId);
   }
 
   private static final long SECONDS_PER_DAY = 86_400L;
