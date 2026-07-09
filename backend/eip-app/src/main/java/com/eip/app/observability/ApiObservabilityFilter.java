@@ -13,6 +13,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.jspecify.annotations.Nullable;
@@ -47,6 +48,15 @@ public class ApiObservabilityFilter extends OncePerRequestFilter {
 
   /** Bucket for requests that matched no handler template, to bound {@code route} cardinality. */
   static final String ROUTE_UNMATCHED = "UNMATCHED";
+
+  /**
+   * Bucket for any non-standard HTTP method, so the client can't inflate {@code method}
+   * cardinality.
+   */
+  static final String METHOD_OTHER = "OTHER";
+
+  private static final Set<String> KNOWN_METHODS =
+      Set.of("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE");
 
   private static final Logger log = LoggerFactory.getLogger("com.eip.app.observability.access");
 
@@ -90,7 +100,7 @@ public class ApiObservabilityFilter extends OncePerRequestFilter {
       HttpServletResponse response,
       long durationNanos,
       @Nullable Throwable error) {
-    String method = request.getMethod();
+    String method = method(request);
     int status = response.getStatus();
     String route = route(request);
     boolean tenantPresent = TenantContextHolder.current().isPresent();
@@ -137,5 +147,11 @@ public class ApiObservabilityFilter extends OncePerRequestFilter {
   private static String route(HttpServletRequest request) {
     Object pattern = request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE);
     return (pattern instanceof String template) ? template : ROUTE_UNMATCHED;
+  }
+
+  /** A standard HTTP method, or {@link #METHOD_OTHER} — the raw token is client-controlled. */
+  private static String method(HttpServletRequest request) {
+    String m = request.getMethod();
+    return KNOWN_METHODS.contains(m) ? m : METHOD_OTHER;
   }
 }

@@ -13,6 +13,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.eip.app.tenant.HeaderTenantResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jayway.jsonpath.JsonPath;
@@ -27,6 +30,7 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -312,15 +316,49 @@ class TenantApiIntegrationTest {
             .getResponse()
             .getContentAsString();
 
-    assertThat(prometheus)
-        .contains("eip_api_request_duration_seconds")
-        .contains("eip_api_requests_inflight")
-        .contains("tenant_present=")
-        .contains("route=")
-        .contains("deployable=\"eip-app\"");
+    assertThat(prometheus).contains("eip_api_requests_inflight");
+    // The RED metric line for the exercised route carries the safe tag set together (bound, not
+    // just co-present anywhere in the scrape).
+    assertThat(prometheus.lines())
+        .anyMatch(
+            l ->
+                l.contains("eip_api_request_duration_seconds")
+                    && l.contains("route=\"/api/v1/session\"")
+                    && l.contains("tenant_present=\"true\"")
+                    && l.contains("method=\"GET\"")
+                    && l.contains("deployable=\"eip-app\""));
+    // Histogram buckets exist so p95/SLO can be computed (ObservabilityModel §3).
+    assertThat(prometheus).contains("eip_api_request_duration_seconds_bucket");
     // The tenant id must NEVER appear as a metric label (unbounded cardinality; ObservabilityModel
     // §3).
     assertThat(prometheus).doesNotContain(tenantA.toString());
+  }
+
+  @Test
+  void api_request_log_carries_the_correlation_and_context_fields() throws Exception {
+    Logger accessLog = (Logger) LoggerFactory.getLogger("com.eip.app.observability.access");
+    ListAppender<ILoggingEvent> appender = new ListAppender<>();
+    appender.start();
+    accessLog.addAppender(appender);
+    try {
+      mvc.perform(get("/api/v1/session").header(HeaderTenantResolver.HEADER, tenantA.toString()))
+          .andExpect(status().isOk());
+    } finally {
+      accessLog.detachAppender(appender);
+    }
+    ILoggingEvent event =
+        appender.list.stream()
+            .filter(e -> "api.request".equals(e.getMessage()))
+            .reduce((first, second) -> second)
+            .orElseThrow();
+    // The structured log line carries the correlation key (tenantId + traceId) and bounded context.
+    assertThat(event.getMDCPropertyMap())
+        .containsEntry("method", "GET")
+        .containsEntry("route", "/api/v1/session")
+        .containsEntry("status", "200")
+        .containsEntry("tenantId", tenantA.toString())
+        .containsKey("durationMs")
+        .containsKey("traceId");
   }
 
   // --- seed SQL (superuser, RLS-bypassed) ----------------------------------

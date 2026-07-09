@@ -33,6 +33,14 @@ management:
   metrics:
     tags:
       deployable: eip-app # common label on every metric (ObservabilityModel §3)
+    distribution:
+      # eip_api_request_duration_seconds is a histogram (ObservabilityModel §3): publish native
+      # buckets so Prometheus histogram_quantile() can compute p50/p95, with a bucket at the
+      # API p95 budget (300 ms, CLAUDE.md key budgets).
+      percentiles-histogram:
+        eip.api.request.duration: true
+      slo:
+        eip.api.request.duration: 300ms
   prometheus:
     metrics:
       export:
