@@ -82,8 +82,13 @@ jobs:
           curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
             | tar -xz -C /tmp gitleaks
           /tmp/gitleaks detect --source . --no-banner --redact --exit-code 1
+      # Dependency review needs the GitHub Dependency Graph API, which is not available on this repo
+      # (the compare endpoint returns 403). Keep the step so it enforces once the graph is enabled,
+      # but non-fatal for now so the `security` gate still enforces the gitleaks secret scan.
+      # Re-enable as blocking (drop continue-on-error) when the graph is on — DEBT-015.
       - name: Dependency review (PR only) — G3-auto
         if: github.event_name == 'pull_request'
+        continue-on-error: true
         uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: high
