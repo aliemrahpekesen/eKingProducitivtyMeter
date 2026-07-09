@@ -28,6 +28,24 @@
         }
       }
     },
+    "/api/v1/friction/summary" : {
+      "get" : {
+        "tags" : [ "friction-controller" ],
+        "operationId" : "summary",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/FrictionSummaryView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/connectors" : {
       "get" : {
         "tags" : [ "connector-controller" ],
@@ -75,6 +93,88 @@
           },
           "organizationName" : {
             "type" : "string"
+          }
+        }
+      },
+      "FrictionMetricView" : {
+        "type" : "object",
+        "properties" : {
+          "key" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "purpose" : {
+            "type" : "string"
+          },
+          "formula" : {
+            "type" : "string"
+          },
+          "inputs" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "grain" : {
+            "type" : "string"
+          },
+          "caveats" : {
+            "type" : "string"
+          },
+          "gamingRisks" : {
+            "type" : "string"
+          }
+        }
+      },
+      "FrictionSummaryView" : {
+        "type" : "object",
+        "properties" : {
+          "metric" : {
+            "$ref" : "#/components/schemas/FrictionMetricView"
+          },
+          "teams" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/TeamFrictionView"
+            }
+          },
+          "teamsReporting" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "JsonNode" : {
+        "type" : "object"
+      },
+      "TeamFrictionView" : {
+        "type" : "object",
+        "properties" : {
+          "teamId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "teamName" : {
+            "type" : "string"
+          },
+          "wip" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "wipLimitBreaches" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "oldestInProgressAgeSec" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "reviewQueueDepth" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "frictionScore" : {
+            "type" : "integer",
+            "format" : "int32"
           }
         }
       },
