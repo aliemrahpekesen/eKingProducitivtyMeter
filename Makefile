@@ -59,10 +59,10 @@ frontend-build: ## Build the frontend (Vite)
 	pnpm --dir frontend install && pnpm --dir frontend build
 
 .PHONY: demo-up
-demo-up: ## One-command local demo: Postgres + backend (demo) + frontend, fixed demo tenant preloaded → http://localhost:5173
+demo-up: ## One-command local demo (fixed demo tenant preloaded). Override ports: POSTGRES_PORT / EIP_BACKEND_PORT / VITE_PORT
 	@test -f $(COMPOSE_ENV) || cp infra/docker-compose/.env.example $(COMPOSE_ENV)
 	@bash scripts/demo/demo-up.sh
 
 .PHONY: demo-down
-demo-down: ## Stop the demo backend + Postgres started by `make demo-up`
+demo-down: ## Stop the demo frontend + backend + Postgres started by `make demo-up` (any ports)
 	@bash scripts/demo/demo-down.sh
