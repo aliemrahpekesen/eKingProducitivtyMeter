@@ -25,6 +25,16 @@ Composition root / main API app: Spring Boot entry point, REST controllers, Open
 
 Errors are RFC 7807 problem+json with `/problems/*` `type` URIs (BackendPlan §10). The generated OpenAPI 3 contract is served at `/v3/api-docs` (springdoc) and snapshotted to [`openapi/eip-openapi-v1.json`](openapi/eip-openapi-v1.json) (regenerate with `EIP_OPENAPI_EXPORT=1`; the additive-only diff gate + error-response docs are wired in TASK-0011 — [DEBT-011](../../work/debt-register.md)). Observability on these endpoints (metrics/traces/logs + problem `traceId`) lands with TASK-0012 ([DEBT-009](../../work/debt-register.md)). No owned tables/topics. This charter is updated in the same PR that adds them (RepositoryStructure.md §6 invariant 4).
 
+## Observability (TASK-0012)
+
+The `/api/v1` surface is instrumented per [ObservabilityModel §3–§4](../../docs/architecture/ObservabilityModel.md):
+
+- **Metrics** — `com.eip.app.observability.ApiObservabilityFilter` emits `eip_api_request_duration_seconds` (RED; tags `method, route, status, tenant_present`; `route` is the handler template, never the raw path) + `eip_api_requests_inflight`, common tag `deployable=eip-app`. **The tenant id is never a metric label** (cardinality). Scrape at `GET /actuator/prometheus`; health/info at `/actuator/health` (liveness/readiness) and `/actuator/info`.
+- **Traces** — OpenTelemetry auto-instrumentation (HTTP→JDBC), 100 % SDK export, OTLP → the Compose collector (`${EIP_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}`). View in Grafana/Tempo when deployed; without a trace backend the `traceId` still flows through logs and metrics.
+- **Logs** — structured JSON on stdout under `demo`/`prod` (`logging.structured.format.console=logstash`), human-readable locally. Every line carries `tenantId`/`traceId`/`spanId` (MDC: tenant from `TenantContextFilter`, trace ids from the OTel scope) plus bounded request fields (`method`, `route`, `status`, `durationMs`, `errorType`). No secrets/PII (ObservabilityModel §4).
+- **Errors** — every RFC 7807 problem+json carries `traceId` (`ApiExceptionHandler`), so a client error is walkable to its trace and logs.
+- **View locally:** `docker compose up` the observability stack (OTel Collector + Prometheus + Grafana, `infra/docker-compose`), run the app with `--spring.profiles.active=demo` for JSON logs, then scrape `/actuator/prometheus` (or let the collector scrape it) and open Grafana.
+
 ## Invariants
 
 - Dependency edges are exactly those listed above; any other edge fails the Spring Modulith `ModularityTests` (wired in TASK-0005) — a compile-red event, not a review comment ([BackendPlan §1](../../docs/engineering/BackendPlan.md)).

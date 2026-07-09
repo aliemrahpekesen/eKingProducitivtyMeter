@@ -19,6 +19,14 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation(libs.springdoc.openapi.webmvc)
 
+    // Observability (TASK-0012, ObservabilityModel/BackendPlan §12): actuator health/info/prometheus,
+    // Micrometer Prometheus registry for RED metrics, and Micrometer Tracing via the OpenTelemetry
+    // bridge with OTLP export to the existing Compose OTel Collector. Versions from the Boot BOM.
+    implementation("org.springframework.boot:spring-boot-starter-actuator")
+    implementation("io.micrometer:micrometer-registry-prometheus")
+    implementation("io.micrometer:micrometer-tracing-bridge-otel")
+    implementation("io.opentelemetry:opentelemetry-exporter-otlp")
+
     // Persistence: JDBC + Flyway forward-only migrations + PostgreSQL driver (DatabasePlan §3/§7).
     // Versions are managed by io.spring.dependency-management (boot-app-conventions).
     implementation("org.springframework.boot:spring-boot-starter-jdbc")

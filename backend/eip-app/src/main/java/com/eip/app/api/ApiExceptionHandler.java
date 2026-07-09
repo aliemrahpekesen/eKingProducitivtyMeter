@@ -6,8 +6,12 @@ package com.eip.app.api;
 
 import com.eip.app.api.ConnectorCursor.InvalidCursorException;
 import com.eip.tenancy.context.TenantContextHolder.NoTenantBoundException;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
 import java.net.URI;
+import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -18,11 +22,17 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
  * {@code /problems/*} taxonomy. The catalogue grows with the API surface; the full sealed {@code
  * com.eip.core.error} hierarchy (BackendPlan §10) lands with the error-taxonomy work.
  *
- * <p>{@code traceId} on the problem body (BackendPlan §10) is delivered with the observability
- * wiring that populates the OTel/{@code traceparent} MDC (DEBT-009 → TASK-0012).
+ * <p>Every problem body carries the {@code traceId} of the active OTel span (BackendPlan §10), so a
+ * client error can be walked straight to its trace and logs (TASK-0012).
  */
 @RestControllerAdvice
 public class ApiExceptionHandler {
+
+  private final Tracer tracer;
+
+  public ApiExceptionHandler(Tracer tracer) {
+    this.tracer = tracer;
+  }
 
   /**
    * No tenant could be resolved for the request (dev: missing/invalid {@code X-EIP-Tenant}; prod:
@@ -33,12 +43,11 @@ public class ApiExceptionHandler {
    */
   @ExceptionHandler(NoTenantBoundException.class)
   public ProblemDetail handleNoTenant(NoTenantBoundException e) {
-    ProblemDetail problem =
-        ProblemDetail.forStatusAndDetail(
-            HttpStatus.UNAUTHORIZED, "No tenant is bound to this request.");
-    problem.setTitle("Tenant required");
-    problem.setType(URI.create("/problems/unauthenticated"));
-    return problem;
+    return problem(
+        HttpStatus.UNAUTHORIZED,
+        "No tenant is bound to this request.",
+        "Tenant required",
+        "/problems/unauthenticated");
   }
 
   /**
@@ -49,11 +58,21 @@ public class ApiExceptionHandler {
    */
   @ExceptionHandler(InvalidCursorException.class)
   public ProblemDetail handleInvalidCursor(InvalidCursorException e) {
-    ProblemDetail problem =
-        ProblemDetail.forStatusAndDetail(
-            HttpStatus.BAD_REQUEST, "The pagination cursor is invalid; omit it to start over.");
-    problem.setTitle("Invalid cursor");
-    problem.setType(URI.create("/problems/validation"));
+    return problem(
+        HttpStatus.BAD_REQUEST,
+        "The pagination cursor is invalid; omit it to start over.",
+        "Invalid cursor",
+        "/problems/validation");
+  }
+
+  private ProblemDetail problem(HttpStatusCode status, String detail, String title, String type) {
+    ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
+    problem.setTitle(title);
+    problem.setType(URI.create(type));
+    @Nullable Span span = tracer.currentSpan();
+    if (span != null) {
+      problem.setProperty("traceId", span.context().traceId());
+    }
     return problem;
   }
 }

@@ -4,7 +4,9 @@
  */
 package com.eip.app;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.matchesPattern;
 import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -25,6 +27,7 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -257,6 +260,67 @@ class TenantApiIntegrationTest {
     Path target = Path.of("openapi", "eip-openapi-v1.json");
     Files.createDirectories(target.getParent());
     mapper.writerWithDefaultPrettyPrinter().writeValue(target.toFile(), tree);
+  }
+
+  // --- observability (TASK-0012) -------------------------------------------
+
+  @Test
+  void actuator_health_info_and_prometheus_are_exposed() throws Exception {
+    mvc.perform(get("/actuator/health"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.status").value("UP"));
+    mvc.perform(get("/actuator/info")).andExpect(status().isOk());
+    mvc.perform(get("/actuator/prometheus")).andExpect(status().isOk());
+  }
+
+  @Test
+  void every_problem_json_carries_the_trace_id() throws Exception {
+    // Missing tenant -> 401 problem+json with the active span's traceId (walkable to trace/logs).
+    mvc.perform(get("/api/v1/connectors"))
+        .andExpect(status().isUnauthorized())
+        .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+        .andExpect(jsonPath("$.traceId").value(matchesPattern("[0-9a-f]+")));
+
+    // Malformed cursor -> 400 problem+json, also carries traceId.
+    mvc.perform(
+            get("/api/v1/connectors")
+                .param("cursor", "!!!")
+                .header(HeaderTenantResolver.HEADER, tenantA.toString()))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.traceId").value(matchesPattern("[0-9a-f]+")));
+  }
+
+  @Test
+  void tenant_id_mdc_does_not_leak_after_the_request() throws Exception {
+    MDC.clear();
+    mvc.perform(get("/api/v1/session").header(HeaderTenantResolver.HEADER, tenantA.toString()))
+        .andExpect(status().isOk());
+    // The filter's finally must have removed it — a pooled thread must not carry a tenant forward.
+    assertThat(MDC.get("tenantId")).isNull();
+  }
+
+  @Test
+  void api_metrics_use_eip_naming_with_a_tenant_safe_tag_set() throws Exception {
+    // One measured request for a known tenant, then scrape.
+    mvc.perform(get("/api/v1/session").header(HeaderTenantResolver.HEADER, tenantA.toString()))
+        .andExpect(status().isOk());
+
+    String prometheus =
+        mvc.perform(get("/actuator/prometheus"))
+            .andExpect(status().isOk())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+
+    assertThat(prometheus)
+        .contains("eip_api_request_duration_seconds")
+        .contains("eip_api_requests_inflight")
+        .contains("tenant_present=")
+        .contains("route=")
+        .contains("deployable=\"eip-app\"");
+    // The tenant id must NEVER appear as a metric label (unbounded cardinality; ObservabilityModel
+    // §3).
+    assertThat(prometheus).doesNotContain(tenantA.toString());
   }
 
   // --- seed SQL (superuser, RLS-bypassed) ----------------------------------
