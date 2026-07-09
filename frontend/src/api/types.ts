@@ -1,0 +1,50 @@
+// Types mirror backend/eip-app/openapi/eip-openapi-v1.json exactly (the source of truth). No field
+// is added that the contract does not define. Nullable fields (organizationName, nextCursor, metric)
+// reflect the backend's @Nullable / @JsonInclude(NON_NULL) serialization.
+
+export interface SessionView {
+  tenantId: string;
+  organizationName: string | null;
+}
+
+export interface ConnectorView {
+  id: string;
+  type: string;
+  name: string;
+  status: string;
+  simulation: boolean;
+}
+
+export interface PageViewConnectorView {
+  items: ConnectorView[];
+  nextCursor?: string | null;
+  hasMore: boolean;
+}
+
+export interface TeamFrictionView {
+  teamId: string;
+  teamName: string;
+  wip: number;
+  wipLimitBreaches: number;
+  oldestInProgressAgeSec: number;
+  reviewQueueDepth: number;
+  frictionScore: number;
+}
+
+export interface FrictionMetricView {
+  key: string;
+  name: string;
+  purpose: string;
+  formula: string;
+  /** JsonNode in the contract — an arbitrary JSON object of the metric's inputs. */
+  inputs: unknown;
+  grain: string;
+  caveats: string;
+  gamingRisks: string;
+}
+
+export interface FrictionSummaryView {
+  metric: FrictionMetricView | null;
+  teams: TeamFrictionView[];
+  teamsReporting: number;
+}

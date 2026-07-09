@@ -60,11 +60,15 @@ jobs:
       - name: Install (frozen lockfile)
         working-directory: frontend
         run: pnpm install --frozen-lockfile
-      - name: Static analysis (ESLint, tsc) — G1
+      - name: Static analysis (Prettier, ESLint, tsc) — G1
         working-directory: frontend
         run: |
+          pnpm format:check
           pnpm lint
           pnpm typecheck
+      - name: Unit tests (Vitest) — G2
+        working-directory: frontend
+        run: pnpm test
       - name: Build — G1
         working-directory: frontend
         run: pnpm build

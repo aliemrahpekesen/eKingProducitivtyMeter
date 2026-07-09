@@ -9,7 +9,7 @@ This directory holds the EIP continuous-integration pipeline and the default-bra
 | Job | Stages | Gate |
 |---|---|---|
 | `backend` | Spotless · Checkstyle · Error Prone · NullAway · `build`/`check` (incl. Modulith `ModularityTests` + ArchUnit once TASK-0005 lands) · JaCoCo coverage ratchet | G1, G2 |
-| `frontend` | ESLint · `tsc --noEmit` · `vite build` (pnpm pinned via corepack) | G1 |
+| `frontend` | Prettier `format:check` · ESLint · `tsc --noEmit` · Vitest · `vite build` (pnpm pinned via corepack) | G1, G2 |
 | `security` | gitleaks secret scan · dependency review (PR only) | G3-automated |
 | `docs-lint` | `scripts/docs-lint/docs_lint.py` (links · id refs · counts · canonical greps) | G7 |
 

@@ -1,14 +1,16 @@
 // ESLint flat config — the G1 TypeScript static-analysis gate (CodingStandards.md §1, §4).
 // Enforces typescript-eslint recommended rules and react-hooks; runs with --max-warnings 0 in CI.
-// Expands (strict-type-checked, import boundaries per FrontendPlan §12) as the app shell lands.
+// Prettier owns formatting: eslint-config-prettier disables any stylistic rules that would conflict
+// (DEBT-004 — Prettier is wired via the `format:check` script + CI step, not ESLint).
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 import reactHooks from 'eslint-plugin-react-hooks';
 import reactRefresh from 'eslint-plugin-react-refresh';
+import prettier from 'eslint-config-prettier';
 import globals from 'globals';
 
 export default tseslint.config(
-  { ignores: ['dist', 'node_modules'] },
+  { ignores: ['dist', 'node_modules', 'coverage'] },
   {
     files: ['**/*.{ts,tsx}'],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
@@ -26,4 +28,13 @@ export default tseslint.config(
       '@typescript-eslint/no-explicit-any': 'error',
     },
   },
+  // Test files also run under Node/Vitest globals.
+  {
+    files: ['**/*.test.{ts,tsx}', 'src/test/**/*.{ts,tsx}'],
+    languageOptions: {
+      globals: { ...globals.browser, ...globals.node },
+    },
+  },
+  // Must be last: turn off ESLint rules that conflict with Prettier.
+  prettier,
 );
