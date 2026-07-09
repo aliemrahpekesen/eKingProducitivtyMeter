@@ -201,11 +201,6 @@ body {
   border-color: color-mix(in srgb, var(--demo) 35%, transparent);
 }
 
-.badge-live {
-  color: var(--ok);
-  background: color-mix(in srgb, var(--ok) 12%, transparent);
-}
-
 .badge-status {
   color: var(--muted);
   background: color-mix(in srgb, var(--muted) 12%, transparent);

@@ -57,7 +57,11 @@ export function ConnectorList(): JSX.Element {
                     {connector.simulation ? (
                       <DemoBadge />
                     ) : (
-                      <span className="badge badge-live">LIVE</span>
+                      // No real ingestion exists in this slice, so a non-simulation row asserts
+                      // nothing — a neutral marker, never a "LIVE"/"connected" claim.
+                      <span className="muted" title="Not simulation data">
+                        —
+                      </span>
                     )}
                   </td>
                 </tr>

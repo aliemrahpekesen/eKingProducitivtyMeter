@@ -26,6 +26,8 @@ export function ErrorState({
   onRetry?: () => void;
 }): JSX.Element {
   const api = error instanceof ApiError ? error : undefined;
+  // The backend returns 401 problem+json when no tenant resolves (ApiExceptionHandler); the OpenAPI
+  // snapshot only documents 200s today, so this maps the real behavior until DEBT-011 documents it.
   const isNoTenant = api?.status === 401;
   const title = isNoTenant
     ? 'No tenant resolved'
