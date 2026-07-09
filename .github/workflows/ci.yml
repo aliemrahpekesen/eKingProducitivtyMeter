@@ -1,15 +1,20 @@
-# EIP CI pipeline — enforces the QualityGatePolicy merge gates (G1/G2/G3-auto) on every PR to main.
-# Gate → stage map (CodingStandards.md §1): Spotless/Checkstyle/Error Prone/NullAway/Modulith/ArchUnit
-# = G1; JUnit + JaCoCo coverage ratchet = G2; ESLint + tsc = G1 (frontend); gitleaks + dependency
-# review = G3-automated; docs-lint (links/ids/counts/canonical greps) = G7. Branch protection making
-# these checks required is in .github/rulesets/main-protection.json (applied via .github/README.md).
+# EIP CI pipeline — enforces the QualityGatePolicy merge gates (G1/G2/G3-auto) on every PR to the
+# repository's base branch. Gate → stage map (CodingStandards.md §1): Spotless/Checkstyle/Error
+# Prone/NullAway/Modulith/ArchUnit = G1; JUnit + JaCoCo coverage ratchet = G2; ESLint + tsc = G1
+# (frontend); gitleaks + dependency review = G3-automated; docs-lint (links/ids/counts/canonical
+# greps) = G7. Branch protection making these checks required is in
+# .github/rulesets/main-protection.json (applied via .github/README.md).
+#
+# Base branch: this repo has no `main`; its default/base branch is
+# `claude/engineering-productivity-platform-04kbet` — CI triggers on PRs to it and on pushes to it
+# and to the sprint integration branches (`integration/**`).
 name: ci
 
 on:
   pull_request:
-    branches: [main]
+    branches: [claude/engineering-productivity-platform-04kbet]
   push:
-    branches: [main]
+    branches: [claude/engineering-productivity-platform-04kbet, 'integration/**']
 
 permissions:
   contents: read
