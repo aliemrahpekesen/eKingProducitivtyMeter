@@ -17,6 +17,7 @@ Single-page admin console and dashboards for EIP. Authoritative structure: [Fron
 
 ## Demo / honesty
 
+- **One-command demo:** `make demo-up` starts Postgres + backend (`demo` profile) + this frontend with the **fixed demo tenant** (`DemoDataSeeder.DEMO_TENANT_ID`) preloaded via `VITE_EIP_TENANT_ID` — no manual DB tenant lookup. Open `http://localhost:5173`. See `frontend/.env.example` for the env template (copy to `.env.development` for a manual `pnpm dev`).
 - The entire current backend serves **seeded simulation data** — a persistent `DemoBanner` says so app-wide, and each connector with `simulation = true` carries a `SIMULATION` badge. No real Jira/Bitbucket/Sonar ingestion is implied.
 - **Team-level only** (NFR-071): nothing renders or ranks individual developers.
 

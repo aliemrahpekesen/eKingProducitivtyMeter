@@ -23,3 +23,6 @@ node_modules/
 !.env.example
 *.pem
 *.key
+
+# Local demo runtime (make demo-up) — pids + logs
+.demo/
