@@ -209,6 +209,7 @@ class TenantApiIntegrationTest {
         .andExpect(jsonPath("$.metric.grain").value("team"))
         .andExpect(jsonPath("$.metric.caveats").isNotEmpty())
         .andExpect(jsonPath("$.metric.gamingRisks").isNotEmpty())
+        .andExpect(jsonPath("$.metric.inputs.signals").isArray())
         .andExpect(jsonPath("$.teams[0].teamName").value("Platform"))
         .andExpect(jsonPath("$.teams[0].frictionScore").value(74))
         .andExpect(jsonPath("$.teams[1].teamName").value("Payments"))
@@ -308,13 +309,14 @@ class TenantApiIntegrationTest {
 
   private static String insertFrictionDefinition(UUID tenantId) {
     return "INSERT INTO analytics.metric_definition "
-        + "(id, tenant_id, metric_key, name, purpose, formula, grain, caveats, gaming_risks) VALUES ('"
+        + "(id, tenant_id, metric_key, name, purpose, formula, inputs, grain, caveats, gaming_risks) VALUES ('"
         + UUID.randomUUID()
         + "', '"
         + tenantId
         + "', 'engineering_friction', 'Engineering Friction', 'Where engineering time is lost.', "
-        + "'friction = min(100, 10*breaches + 6*review + 4*age_days)', 'team', "
-        + "'v1 placeholder; team-level only.', 'Splitting items or closing reviews without review understates it.')";
+        + "'friction = round(min(100, 10*breaches + 6*review + 4*age_days))', "
+        + "'{\"signals\":[\"wip_limit_breaches\",\"review_queue_depth\",\"oldest_in_progress_age_sec\"]}'::jsonb, "
+        + "'team', 'v1 placeholder; team-level only.', 'Splitting items or closing reviews without review understates it.')";
   }
 
   /** Seeds a team plus its current flow signals (superuser; RLS-bypassed). */

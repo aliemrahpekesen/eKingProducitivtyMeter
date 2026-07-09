@@ -111,6 +111,9 @@
           "formula" : {
             "type" : "string"
           },
+          "inputs" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
           "grain" : {
             "type" : "string"
           },
@@ -139,6 +142,9 @@
             "format" : "int32"
           }
         }
+      },
+      "JsonNode" : {
+        "type" : "object"
       },
       "TeamFrictionView" : {
         "type" : "object",

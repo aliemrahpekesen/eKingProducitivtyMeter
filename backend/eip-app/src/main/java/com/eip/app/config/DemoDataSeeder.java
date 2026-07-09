@@ -93,8 +93,14 @@ public class DemoDataSeeder implements ApplicationRunner {
 
   /** Human-readable formula mirrors {@code com.eip.app.api.FrictionScore}. */
   private static final String FRICTION_FORMULA =
-      "friction = min(100, 10*wip_limit_breaches + 6*review_queue_depth "
-          + "+ 4*(oldest_in_progress_age_sec/86400)); WIP is context, not scored";
+      "friction = round(min(100, 10*wip_limit_breaches + 6*review_queue_depth "
+          + "+ 4*(oldest_in_progress_age_sec/86400.0))); WIP is context, not scored";
+
+  /** The metric's inputs, surfaced as-is (FEAT-031 / FR-056). */
+  private static final String FRICTION_INPUTS =
+      "{\"signals\":[\"wip_limit_breaches\",\"review_queue_depth\",\"oldest_in_progress_age_sec\"],"
+          + "\"weights\":{\"wip_limit_breaches\":10,\"review_queue_depth\":6,\"age_day\":4},"
+          + "\"cap\":100,\"note\":\"WIP shown as context, not scored\"}";
 
   private void insertConnector(UUID tenantId, String type, String name) {
     jdbc.sql(
@@ -107,13 +113,14 @@ public class DemoDataSeeder implements ApplicationRunner {
   private void insertFrictionDefinition(UUID tenantId) {
     jdbc.sql(
             "INSERT INTO analytics.metric_definition "
-                + "(id, tenant_id, metric_key, name, purpose, formula, grain, caveats, gaming_risks) "
-                + "VALUES (?, ?, 'engineering_friction', 'Engineering Friction', ?, ?, 'team', ?, ?)")
+                + "(id, tenant_id, metric_key, name, purpose, formula, inputs, grain, caveats, gaming_risks) "
+                + "VALUES (?, ?, 'engineering_friction', 'Engineering Friction', ?, ?, ?::jsonb, 'team', ?, ?)")
         .params(
             UUID.randomUUID(),
             tenantId,
             "Where engineering time is lost: a team-level index of flow friction.",
             FRICTION_FORMULA,
+            FRICTION_INPUTS,
             "v1 placeholder over current flow signals; not yet wait-time decomposition across the "
                 + "correlated flow graph. Team-level only — never individual.",
             "Splitting work items to lower WIP, or closing review threads without real review, can "

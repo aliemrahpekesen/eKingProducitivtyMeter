@@ -5,10 +5,14 @@
 package com.eip.app.api;
 
 import com.eip.app.tenant.TenantScopedJdbc;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 
@@ -22,6 +26,8 @@ import org.springframework.stereotype.Component;
 public class FrictionSummaryService {
 
   static final String METRIC_KEY = "engineering_friction";
+
+  private static final ObjectMapper JSON = new ObjectMapper();
 
   /** Worst-first, then a stable tie-break by name then id — a deterministic total order. */
   private static final Comparator<TeamFrictionView> WORST_FIRST =
@@ -54,7 +60,7 @@ public class FrictionSummaryService {
   private static Optional<FrictionMetricView> readDefinition(JdbcClient client) {
     return client
         .sql(
-            "SELECT metric_key, name, purpose, formula, grain, caveats, gaming_risks "
+            "SELECT metric_key, name, purpose, formula, inputs, grain, caveats, gaming_risks "
                 + "FROM analytics.metric_definition WHERE metric_key = :key "
                 + "ORDER BY active_version DESC LIMIT 1")
         .param("key", METRIC_KEY)
@@ -65,10 +71,22 @@ public class FrictionSummaryService {
                     rs.getString("name"),
                     rs.getString("purpose"),
                     rs.getString("formula"),
+                    parseInputs(rs.getString("inputs")),
                     rs.getString("grain"),
                     rs.getString("caveats"),
                     rs.getString("gaming_risks")))
         .optional();
+  }
+
+  /** Parses the {@code inputs} jsonb column (NOT NULL DEFAULT {@code '{}'}) into a JSON node. */
+  private static JsonNode parseInputs(@Nullable String inputsJson) {
+    try {
+      return JSON.readTree(inputsJson == null ? "{}" : inputsJson);
+    } catch (JsonProcessingException e) {
+      // The column is jsonb, so stored values are always valid JSON; treat a parse failure as
+      // empty.
+      return JSON.createObjectNode();
+    }
   }
 
   private static List<TeamFrictionView> readTeamFriction(JdbcClient client) {

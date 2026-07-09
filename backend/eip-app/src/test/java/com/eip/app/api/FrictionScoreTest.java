@@ -25,7 +25,7 @@ class FrictionScoreTest {
 
   @Test
   void capsAtMaxScore() {
-    assertThat(FrictionScore.of(100, 100 * DAY, 100)).isEqualTo(FrictionScore.MAX_SCORE);
+    assertThat(FrictionScore.of(100, 100 * DAY, 100)).isEqualTo(100);
   }
 
   @Test
@@ -34,7 +34,8 @@ class FrictionScoreTest {
   }
 
   @Test
-  void isDeterministicForTheSameInputs() {
-    assertThat(FrictionScore.of(1, 2 * DAY, 2)).isEqualTo(FrictionScore.of(1, 2 * DAY, 2));
+  void roundsFractionalDayAge() {
+    // half a day of age contributes 4 * 0.5 = 2.0, which rounds to 2.
+    assertThat(FrictionScore.of(0, DAY / 2, 0)).isEqualTo(2);
   }
 }
