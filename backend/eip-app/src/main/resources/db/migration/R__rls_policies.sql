@@ -30,7 +30,9 @@ DECLARE
     'work.work_item',
     'analytics.metric_definition',
     'analytics.metric_fact',   -- partitioned parent
-    'analytics.rm_team_flow_current'
+    'analytics.rm_team_flow_current',
+    'staging.raw_simulation',        -- TASK-0016 INC-1 (ingestion raw staging)
+    'staging.raw_ingest_errors'      -- TASK-0016 INC-1 (ingestion/normalization DLQ)
   ];
   -- Platform-scoped (enumerated no-RLS exceptions, DatabasePlan §2): core.tenant,
   -- core.worker_heartbeat, analytics.analytics_watermark — deliberately absent from this list.
