@@ -10,7 +10,7 @@
 CREATE TABLE staging.raw_simulation (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id       uuid NOT NULL,
-  connector_id    uuid NOT NULL REFERENCES core.connector (id),
+  connector_id    uuid NOT NULL,               -- core.connector.id; cross-schema ref kept a plain uuid (DatabasePlan §2: module extractability)
   stream          text NOT NULL,               -- 'work_item','work_item_transition','pull_request','code_review','build','quality_gate'
   natural_key     text NOT NULL,               -- source natural key, e.g. 'DEMO-101','PR-11','BUILD-31'
   source_system   text NOT NULL,               -- provenance: 'jira','bitbucket','ci','sonarqube'
