@@ -6,10 +6,13 @@ package com.eip.app;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.eip.app.api.FrictionEvidenceService;
+import com.eip.app.api.FrictionEvidenceView;
 import com.eip.app.friction.FrictionPipelineRunner;
 import com.eip.app.friction.FrictionPipelineRunner.PipelineResult;
 import com.eip.tenancy.context.RlsTenantBinder;
 import com.eip.tenancy.context.TenantContext;
+import com.eip.tenancy.context.TenantContextHolder;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -120,6 +123,7 @@ class FrictionPipelineIntegrationTest {
   }
 
   @Autowired private FrictionPipelineRunner runner;
+  @Autowired private FrictionEvidenceService evidenceService;
   @Autowired private DataSource dataSource;
 
   @Test
@@ -177,6 +181,49 @@ class FrictionPipelineIntegrationTest {
     assertThat(count(tenantB, "work.work_item")).isZero();
     assertThat(count(tenantB, "analytics.flow_correlation")).isZero();
     assertThat(count(tenantB, "analytics.rm_team_friction_current")).isZero();
+  }
+
+  @Test
+  void evidence_drilldown_exposes_correlated_artifacts_and_is_tenant_isolated()
+      throws SQLException {
+    runner.run(tenantA); // idempotent — order-independent from the other test
+    UUID platformTeam = uuidOf(tenantA, "SELECT id FROM core.team WHERE name = 'Platform'");
+
+    FrictionEvidenceView evidence =
+        withTenant(tenantA, () -> evidenceService.evidence(platformTeam));
+    assertThat(evidence.teamName()).isEqualTo("Platform");
+    assertThat(evidence.metricVersion()).isEqualTo("engineering_friction_v0.1");
+    assertThat(evidence.items()).hasSize(3);
+
+    FrictionEvidenceView.WorkItemEvidenceView plat101 =
+        evidence.items().stream()
+            .filter(i -> "PLAT-101".equals(i.workItemKey()))
+            .findFirst()
+            .orElseThrow();
+    assertThat(plat101.pullRequestKey()).isEqualTo("PR-101");
+    assertThat(plat101.buildKey()).isEqualTo("BUILD-101");
+    assertThat(plat101.qualityGateKey()).isEqualTo("QG-101");
+    assertThat(plat101.transitions()).hasSize(7); // 8 stages -> 7 transitions
+    assertThat(plat101.blockedSec()).isPositive();
+
+    // Tenant B cannot see tenant A's team or its evidence (RLS on team + flow_correlation).
+    FrictionEvidenceView crossTenant =
+        withTenant(tenantB, () -> evidenceService.evidence(platformTeam));
+    assertThat(crossTenant.teamName()).isNull();
+    assertThat(crossTenant.items()).isEmpty();
+  }
+
+  private <T> T withTenant(UUID tenant, java.util.function.Supplier<T> work) {
+    TenantContextHolder.set(TenantContext.of(tenant));
+    try {
+      return work.get();
+    } finally {
+      TenantContextHolder.clear();
+    }
+  }
+
+  private UUID uuidOf(UUID tenant, String sql) throws SQLException {
+    return scalar(tenant, sql, FrictionPipelineIntegrationTest::getUuid);
   }
 
   // --- RLS-scoped query helpers ---------------------------------------------
@@ -243,6 +290,14 @@ class FrictionPipelineIntegrationTest {
   private static String getString(ResultSet rs) {
     try {
       return rs.getString(1);
+    } catch (SQLException e) {
+      throw new IllegalStateException(e);
+    }
+  }
+
+  private static UUID getUuid(ResultSet rs) {
+    try {
+      return rs.getObject(1, UUID.class);
     } catch (SQLException e) {
       throw new IllegalStateException(e);
     }

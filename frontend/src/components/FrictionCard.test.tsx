@@ -2,11 +2,19 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { TenantContext } from '../app/tenantContext';
 import type { FrictionSummaryView, TeamFrictionView } from '../api/types';
-import { useFrictionSummary } from '../api/hooks';
+import { useFrictionEvidence, useFrictionSummary } from '../api/hooks';
 import { FrictionCard } from './FrictionCard';
 
-vi.mock('../api/hooks', () => ({ useFrictionSummary: vi.fn() }));
+vi.mock('../api/hooks', () => ({
+  useFrictionSummary: vi.fn(),
+  useFrictionEvidence: vi.fn(),
+}));
 const mockedUseFriction = vi.mocked(useFrictionSummary);
+vi.mocked(useFrictionEvidence).mockReturnValue({
+  data: undefined,
+  isLoading: false,
+  isError: false,
+} as unknown as ReturnType<typeof useFrictionEvidence>);
 
 type FrictionResult = ReturnType<typeof useFrictionSummary>;
 
@@ -78,6 +86,8 @@ describe('FrictionCard', () => {
     // Component breakdown + dominant cause are shown per team (computed, not seed).
     expect(screen.getAllByText(/active 14% · blocked 24% · review wait 57%/)).toHaveLength(3);
     expect(screen.getByText(/engineering_friction_v0.1/)).toBeInTheDocument();
+    // Each team offers a drill-to-evidence drawer.
+    expect(screen.getAllByText(/Show evidence for/)).toHaveLength(3);
     // FEAT-031: the metric's caveats + gaming risks are surfaced so the score is read honestly.
     expect(screen.getByText('EXPERIMENTAL v0.1; team-level only.')).toBeInTheDocument();
     expect(screen.getByText('Skipping reviews understates it.')).toBeInTheDocument();

@@ -81,10 +81,10 @@ class TenantApiIntegrationTest {
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
         Statement st = admin.createStatement()) {
       st.execute("CREATE ROLE eip_app LOGIN PASSWORD 'eip_app_pw' NOBYPASSRLS");
-      st.execute("GRANT USAGE ON SCHEMA core TO eip_app");
-      st.execute("GRANT SELECT ON ALL TABLES IN SCHEMA core TO eip_app");
-      st.execute("GRANT USAGE ON SCHEMA analytics TO eip_app");
-      st.execute("GRANT SELECT ON ALL TABLES IN SCHEMA analytics TO eip_app");
+      for (String schema : new String[] {"core", "analytics", "work", "scm", "cicd", "quality"}) {
+        st.execute("GRANT USAGE ON SCHEMA " + schema + " TO eip_app");
+        st.execute("GRANT SELECT ON ALL TABLES IN SCHEMA " + schema + " TO eip_app");
+      }
       // Seed as the superuser (bypasses RLS — setup only).
       st.execute(insertTenant(tenantA, "Tenant A", "tenant-a"));
       st.execute(insertTenant(tenantB, "Tenant B", "tenant-b"));
@@ -245,6 +245,20 @@ class TenantApiIntegrationTest {
   }
 
   @Test
+  void friction_evidence_endpoint_is_tenant_scoped_and_empty_without_correlation()
+      throws Exception {
+    // A team with no correlation evidence returns 200 with an empty item list + the metric version
+    // (the pipeline-backed content is proven by FrictionPipelineIntegrationTest). Exercises the
+    // controller routing + evidence service query path under RLS.
+    mvc.perform(
+            get("/api/v1/friction/teams/{teamId}/evidence", UUID.randomUUID())
+                .header(HeaderTenantResolver.HEADER, tenantA.toString()))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.metricVersion").value("engineering_friction_v0.1"))
+        .andExpect(jsonPath("$.items.length()").value(0));
+  }
+
+  @Test
   void openapi_contract_is_generated_for_the_v1_surface() throws Exception {
     String contract =
         mvc.perform(get("/v3/api-docs"))
@@ -252,6 +266,7 @@ class TenantApiIntegrationTest {
             .andExpect(jsonPath("$.paths['/api/v1/connectors']").exists())
             .andExpect(jsonPath("$.paths['/api/v1/session']").exists())
             .andExpect(jsonPath("$.paths['/api/v1/friction/summary']").exists())
+            .andExpect(jsonPath("$.paths['/api/v1/friction/teams/{teamId}/evidence']").exists())
             .andReturn()
             .getResponse()
             .getContentAsString();
