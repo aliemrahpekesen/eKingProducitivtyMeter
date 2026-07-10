@@ -1,13 +1,13 @@
 import { useFrictionSummary } from '../api/hooks';
 import type { FrictionMetricView, FrictionSummaryView } from '../api/types';
 import { useTenant } from '../app/tenantContext';
-import { ageDays } from '../lib/format';
 import { DemoBadge } from './DemoBadge';
 import { EmptyState, ErrorState, Loading } from './states';
 
 // "Where is engineering time lost?" — the hero metric from GET /api/v1/friction/summary.
-// Team-level only (no individual data, NFR-071); deterministic; the metric's own definition,
-// caveats, and gaming risks are surfaced so the number is read honestly (FEAT-031).
+// Team-level only (no individual data, NFR-071); deterministic; computed from ingested + normalized
+// + correlated flow data (not seed rows). The metric's own definition, caveats, and gaming risks are
+// surfaced so the number is read honestly (FEAT-031).
 export function FrictionCard(): JSX.Element {
   const { tenantId } = useTenant();
   const query = useFrictionSummary(tenantId);
@@ -35,6 +35,18 @@ export function FrictionCard(): JSX.Element {
   );
 }
 
+// Human label for the dominant waiting sink (team-level, never an individual attribution).
+function causeLabel(cause: string): string {
+  switch (cause) {
+    case 'BLOCKED':
+      return 'blocked time';
+    case 'REVIEW_WAIT':
+      return 'review wait';
+    default:
+      return 'none';
+  }
+}
+
 function FrictionBody({ data }: { data: FrictionSummaryView }): JSX.Element {
   const teams = data.teams; // backend-sorted worst-first
   if (teams.length === 0) {
@@ -56,7 +68,8 @@ function FrictionBody({ data }: { data: FrictionSummaryView }): JSX.Element {
         </div>
         <div className="hero-caption">
           <p className="hero-team">
-            Top bottleneck: <strong>{worst.teamName}</strong>
+            Top bottleneck: <strong>{worst.teamName}</strong> — mostly{' '}
+            {causeLabel(worst.dominantCause)}
           </p>
           <p className="muted">
             {data.teamsReporting} team{data.teamsReporting === 1 ? '' : 's'} reporting · team-level,
@@ -76,16 +89,32 @@ function FrictionBody({ data }: { data: FrictionSummaryView }): JSX.Element {
               <span className="bar-fill" style={{ width: `${team.frictionScore}%` }} />
             </div>
             <div className="team-signals muted">
-              WIP {team.wip} · breaches {team.wipLimitBreaches} · oldest{' '}
-              {ageDays(team.oldestInProgressAgeSec)} · review queue {team.reviewQueueDepth}
+              {team.workItems} items · active {team.flowEfficiencyPct}% · blocked {team.blockedPct}%
+              · review wait {team.reviewWaitPct}% · rework {team.reworkCount} ·{' '}
+              <strong>{causeLabel(team.dominantCause)}</strong>
             </div>
           </li>
         ))}
       </ol>
 
+      <p className="muted friction-meta">
+        {data.metricVersion !== null ? <>Metric {data.metricVersion}</> : null}
+        {data.computedAt !== null ? <> · computed {formatComputedAt(data.computedAt)}</> : null}
+        {data.simulation ? <> · simulation data</> : null}
+      </p>
+
       {data.metric !== null ? <MetricExplainer metric={data.metric} /> : null}
     </>
   );
+}
+
+// Renders the ISO-8601 computation instant as a stable UTC date-time (locale-independent, en-US).
+function formatComputedAt(iso: string): string {
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) {
+    return iso;
+  }
+  return parsed.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
 }
 
 function MetricExplainer({ metric }: { metric: FrictionMetricView }): JSX.Element {

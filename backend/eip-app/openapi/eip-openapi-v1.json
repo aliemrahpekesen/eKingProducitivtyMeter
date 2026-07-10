@@ -131,6 +131,15 @@
           "metric" : {
             "$ref" : "#/components/schemas/FrictionMetricView"
           },
+          "metricVersion" : {
+            "type" : "string"
+          },
+          "computedAt" : {
+            "type" : "string"
+          },
+          "simulation" : {
+            "type" : "boolean"
+          },
           "teams" : {
             "type" : "array",
             "items" : {
@@ -156,23 +165,50 @@
           "teamName" : {
             "type" : "string"
           },
-          "wip" : {
+          "frictionScore" : {
             "type" : "integer",
             "format" : "int32"
           },
-          "wipLimitBreaches" : {
+          "dominantCause" : {
+            "type" : "string"
+          },
+          "workItems" : {
             "type" : "integer",
             "format" : "int32"
           },
-          "oldestInProgressAgeSec" : {
+          "totalCycleSec" : {
             "type" : "integer",
             "format" : "int64"
           },
-          "reviewQueueDepth" : {
+          "activeSec" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "waitingSec" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "blockedSec" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "reviewWaitSec" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "reworkCount" : {
             "type" : "integer",
             "format" : "int32"
           },
-          "frictionScore" : {
+          "flowEfficiencyPct" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "blockedPct" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "reviewWaitPct" : {
             "type" : "integer",
             "format" : "int32"
           }

@@ -24,11 +24,18 @@ export interface PageViewConnectorView {
 export interface TeamFrictionView {
   teamId: string;
   teamName: string;
-  wip: number;
-  wipLimitBreaches: number;
-  oldestInProgressAgeSec: number;
-  reviewQueueDepth: number;
   frictionScore: number;
+  dominantCause: string;
+  workItems: number;
+  totalCycleSec: number;
+  activeSec: number;
+  waitingSec: number;
+  blockedSec: number;
+  reviewWaitSec: number;
+  reworkCount: number;
+  flowEfficiencyPct: number;
+  blockedPct: number;
+  reviewWaitPct: number;
 }
 
 export interface FrictionMetricView {
@@ -45,6 +52,9 @@ export interface FrictionMetricView {
 
 export interface FrictionSummaryView {
   metric: FrictionMetricView | null;
+  metricVersion: string | null;
+  computedAt: string | null;
+  simulation: boolean;
   teams: TeamFrictionView[];
   teamsReporting: number;
 }
