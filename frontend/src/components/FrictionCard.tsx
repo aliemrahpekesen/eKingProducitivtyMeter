@@ -1,13 +1,15 @@
-import { useFrictionSummary } from '../api/hooks';
-import type { FrictionMetricView, FrictionSummaryView } from '../api/types';
+import { useState } from 'react';
+import { useFrictionEvidence, useFrictionSummary } from '../api/hooks';
+import type { FrictionMetricView, FrictionSummaryView, WorkItemEvidenceView } from '../api/types';
 import { useTenant } from '../app/tenantContext';
 import { ageDays } from '../lib/format';
 import { DemoBadge } from './DemoBadge';
 import { EmptyState, ErrorState, Loading } from './states';
 
 // "Where is engineering time lost?" — the hero metric from GET /api/v1/friction/summary.
-// Team-level only (no individual data, NFR-071); deterministic; the metric's own definition,
-// caveats, and gaming risks are surfaced so the number is read honestly (FEAT-031).
+// Team-level only (no individual data, NFR-071); deterministic; computed from ingested + normalized
+// + correlated flow data (not seed rows). The metric's own definition, caveats, and gaming risks are
+// surfaced so the number is read honestly (FEAT-031). Each team drills to its correlation evidence.
 export function FrictionCard(): JSX.Element {
   const { tenantId } = useTenant();
   const query = useFrictionSummary(tenantId);
@@ -30,12 +32,30 @@ export function FrictionCard(): JSX.Element {
       {tenantId.length > 0 && query.isError ? (
         <ErrorState error={query.error} onRetry={() => void query.refetch()} />
       ) : null}
-      {query.data !== undefined ? <FrictionBody data={query.data} /> : null}
+      {query.data !== undefined ? <FrictionBody data={query.data} tenantId={tenantId} /> : null}
     </section>
   );
 }
 
-function FrictionBody({ data }: { data: FrictionSummaryView }): JSX.Element {
+// Human label for the dominant waiting sink (team-level, never an individual attribution).
+function causeLabel(cause: string): string {
+  switch (cause) {
+    case 'BLOCKED':
+      return 'blocked time';
+    case 'REVIEW_WAIT':
+      return 'review wait';
+    default:
+      return 'none';
+  }
+}
+
+function FrictionBody({
+  data,
+  tenantId,
+}: {
+  data: FrictionSummaryView;
+  tenantId: string;
+}): JSX.Element {
   const teams = data.teams; // backend-sorted worst-first
   if (teams.length === 0) {
     return (
@@ -56,7 +76,8 @@ function FrictionBody({ data }: { data: FrictionSummaryView }): JSX.Element {
         </div>
         <div className="hero-caption">
           <p className="hero-team">
-            Top bottleneck: <strong>{worst.teamName}</strong>
+            Top bottleneck: <strong>{worst.teamName}</strong> — mostly{' '}
+            {causeLabel(worst.dominantCause)}
           </p>
           <p className="muted">
             {data.teamsReporting} team{data.teamsReporting === 1 ? '' : 's'} reporting · team-level,
@@ -76,16 +97,103 @@ function FrictionBody({ data }: { data: FrictionSummaryView }): JSX.Element {
               <span className="bar-fill" style={{ width: `${team.frictionScore}%` }} />
             </div>
             <div className="team-signals muted">
-              WIP {team.wip} · breaches {team.wipLimitBreaches} · oldest{' '}
-              {ageDays(team.oldestInProgressAgeSec)} · review queue {team.reviewQueueDepth}
+              {team.workItems} items · active {team.flowEfficiencyPct}% · blocked {team.blockedPct}%
+              · review wait {team.reviewWaitPct}% · rework {team.reworkCount} ·{' '}
+              <strong>{causeLabel(team.dominantCause)}</strong>
             </div>
+            <TeamEvidenceDrawer tenantId={tenantId} teamId={team.teamId} teamName={team.teamName} />
           </li>
         ))}
       </ol>
 
+      <p className="muted friction-meta">
+        {data.metricVersion !== null ? <>Metric {data.metricVersion}</> : null}
+        {data.computedAt !== null ? <> · computed {formatComputedAt(data.computedAt)}</> : null}
+        {data.simulation ? <> · simulation data</> : null}
+      </p>
+
       {data.metric !== null ? <MetricExplainer metric={data.metric} /> : null}
     </>
   );
+}
+
+// A per-team drill-to-evidence drawer. Fetches the team's correlated artifacts only when opened.
+function TeamEvidenceDrawer({
+  tenantId,
+  teamId,
+  teamName,
+}: {
+  tenantId: string;
+  teamId: string;
+  teamName: string;
+}): JSX.Element {
+  const [open, setOpen] = useState(false);
+  return (
+    <details
+      className="evidence"
+      onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
+    >
+      <summary>Show evidence for {teamName}</summary>
+      {open ? <TeamEvidence tenantId={tenantId} teamId={teamId} /> : null}
+    </details>
+  );
+}
+
+function TeamEvidence({ tenantId, teamId }: { tenantId: string; teamId: string }): JSX.Element {
+  const query = useFrictionEvidence(tenantId, teamId, true);
+  if (query.isLoading) {
+    return <Loading label="Loading evidence…" />;
+  }
+  if (query.isError) {
+    return <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
+  }
+  const items = query.data?.items ?? [];
+  if (items.length === 0) {
+    return <EmptyState title="No evidence for this team" />;
+  }
+  return (
+    <ul className="evidence-list">
+      {items.map((item) => (
+        <EvidenceItem key={item.workItemKey ?? item.title} item={item} />
+      ))}
+    </ul>
+  );
+}
+
+function EvidenceItem({ item }: { item: WorkItemEvidenceView }): JSX.Element {
+  const artifacts = [
+    item.pullRequestKey,
+    item.buildKey !== null ? `${item.buildKey} (${item.buildStatus ?? '—'})` : null,
+    item.qualityGateKey !== null
+      ? `${item.qualityGateKey} (${item.qualityGateStatus ?? '—'})`
+      : null,
+  ].filter((a): a is string => a !== null);
+
+  return (
+    <li className="evidence-item">
+      <div className="evidence-head">
+        <span className="mono">{item.workItemKey ?? '—'}</span> {item.title}
+      </div>
+      <div className="muted">
+        cycle {ageDays(item.cycleTimeSec)} · active {ageDays(item.activeSec)} · blocked{' '}
+        {ageDays(item.blockedSec)} · review {ageDays(item.reviewWaitSec)} · rework{' '}
+        {item.reworkCount}
+      </div>
+      {artifacts.length > 0 ? <div className="muted mono">{artifacts.join(' · ')}</div> : null}
+      <div className="muted evidence-timeline">
+        {item.transitions.map((t) => `${t.fromState ?? '·'}→${t.toState}`).join('  ')}
+      </div>
+    </li>
+  );
+}
+
+// Renders the ISO-8601 computation instant as a stable UTC date-time (locale-independent, en-US).
+function formatComputedAt(iso: string): string {
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) {
+    return iso;
+  }
+  return parsed.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
 }
 
 function MetricExplainer({ metric }: { metric: FrictionMetricView }): JSX.Element {

@@ -1,12 +1,20 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { TenantContext } from '../app/tenantContext';
-import type { FrictionSummaryView } from '../api/types';
-import { useFrictionSummary } from '../api/hooks';
+import type { FrictionSummaryView, TeamFrictionView } from '../api/types';
+import { useFrictionEvidence, useFrictionSummary } from '../api/hooks';
 import { FrictionCard } from './FrictionCard';
 
-vi.mock('../api/hooks', () => ({ useFrictionSummary: vi.fn() }));
+vi.mock('../api/hooks', () => ({
+  useFrictionSummary: vi.fn(),
+  useFrictionEvidence: vi.fn(),
+}));
 const mockedUseFriction = vi.mocked(useFrictionSummary);
+vi.mocked(useFrictionEvidence).mockReturnValue({
+  data: undefined,
+  isLoading: false,
+  isError: false,
+} as unknown as ReturnType<typeof useFrictionEvidence>);
 
 type FrictionResult = ReturnType<typeof useFrictionSummary>;
 
@@ -18,51 +26,49 @@ function renderCard(): void {
   );
 }
 
+function team(name: string, score: number, cause: string): TeamFrictionView {
+  return {
+    teamId: name,
+    teamName: name,
+    frictionScore: score,
+    dominantCause: cause,
+    workItems: 3,
+    totalCycleSec: 356_400,
+    activeSec: 50_400,
+    waitingSec: 288_000,
+    blockedSec: 86_400,
+    reviewWaitSec: 201_600,
+    reworkCount: 1,
+    flowEfficiencyPct: 14,
+    blockedPct: 24,
+    reviewWaitPct: 57,
+  };
+}
+
 const summary: FrictionSummaryView = {
   teamsReporting: 3,
+  metricVersion: 'engineering_friction_v0.1',
+  computedAt: '2026-01-07T21:00:00Z',
+  simulation: true,
   metric: {
     key: 'engineering_friction',
-    name: 'Engineering Friction',
-    purpose: 'Where engineering time is lost.',
-    formula: 'friction = round(min(100, ...))',
-    inputs: { signals: ['wip_limit_breaches'] },
+    name: 'Engineering Friction (v0.1, experimental)',
+    purpose: 'Where a team’s delivery time is lost.',
+    formula: 'friction = round(min(100, 100*waitingRatio + 30*reworkPerItem))',
+    inputs: { signals: ['work_item_transitions'] },
     grain: 'team',
-    caveats: 'v1 placeholder; team-level only.',
-    gamingRisks: 'Splitting items understates it.',
+    caveats: 'EXPERIMENTAL v0.1; team-level only.',
+    gamingRisks: 'Skipping reviews understates it.',
   },
   teams: [
-    {
-      teamId: 'a',
-      teamName: 'Platform',
-      wip: 12,
-      wipLimitBreaches: 3,
-      oldestInProgressAgeSec: 432_000,
-      reviewQueueDepth: 4,
-      frictionScore: 74,
-    },
-    {
-      teamId: 'b',
-      teamName: 'Payments',
-      wip: 6,
-      wipLimitBreaches: 1,
-      oldestInProgressAgeSec: 172_800,
-      reviewQueueDepth: 2,
-      frictionScore: 30,
-    },
-    {
-      teamId: 'c',
-      teamName: 'Web',
-      wip: 3,
-      wipLimitBreaches: 0,
-      oldestInProgressAgeSec: 86_400,
-      reviewQueueDepth: 1,
-      frictionScore: 10,
-    },
+    team('Platform', 91, 'REVIEW_WAIT'),
+    team('Payments', 56, 'REVIEW_WAIT'),
+    team('Web', 50, 'BLOCKED'),
   ],
 };
 
 describe('FrictionCard', () => {
-  it('renders the worst-first headline score, breakdown and honest caveats', () => {
+  it('renders the worst-first computed headline, component breakdown, and honest caveats', () => {
     mockedUseFriction.mockReturnValue({
       data: summary,
       isLoading: false,
@@ -71,15 +77,20 @@ describe('FrictionCard', () => {
 
     renderCard();
 
-    expect(screen.getByLabelText('Top friction score')).toHaveTextContent('74');
+    expect(screen.getByLabelText('Top friction score')).toHaveTextContent('91');
     // Platform is the worst team → shown as the hero bottleneck AND first in the breakdown list.
     expect(screen.getAllByText('Platform')).toHaveLength(2);
     expect(screen.getByText('Payments')).toBeInTheDocument();
     expect(screen.getByText('Web')).toBeInTheDocument();
     expect(screen.getByText(/3 teams reporting/)).toBeInTheDocument();
+    // Component breakdown + dominant cause are shown per team (computed, not seed).
+    expect(screen.getAllByText(/active 14% · blocked 24% · review wait 57%/)).toHaveLength(3);
+    expect(screen.getByText(/engineering_friction_v0.1/)).toBeInTheDocument();
+    // Each team offers a drill-to-evidence drawer.
+    expect(screen.getAllByText(/Show evidence for/)).toHaveLength(3);
     // FEAT-031: the metric's caveats + gaming risks are surfaced so the score is read honestly.
-    expect(screen.getByText('v1 placeholder; team-level only.')).toBeInTheDocument();
-    expect(screen.getByText('Splitting items understates it.')).toBeInTheDocument();
+    expect(screen.getByText('EXPERIMENTAL v0.1; team-level only.')).toBeInTheDocument();
+    expect(screen.getByText('Skipping reviews understates it.')).toBeInTheDocument();
   });
 
   it('shows an empty state when no teams report', () => {
@@ -104,5 +115,20 @@ describe('FrictionCard', () => {
     renderCard();
 
     expect(screen.getByRole('status')).toHaveTextContent('Computing friction…');
+  });
+
+  it('shows an error state with a retry when the query fails', () => {
+    mockedUseFriction.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      error: new Error('boom'),
+      refetch: vi.fn(),
+    } as unknown as FrictionResult);
+
+    renderCard();
+
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
   });
 });

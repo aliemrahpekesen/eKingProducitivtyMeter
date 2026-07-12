@@ -2,7 +2,12 @@
 // and never retry (a 401 for a missing/invalid tenant should surface immediately, not spin).
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { apiGet } from './client';
-import type { FrictionSummaryView, PageViewConnectorView, SessionView } from './types';
+import type {
+  FrictionEvidenceView,
+  FrictionSummaryView,
+  PageViewConnectorView,
+  SessionView,
+} from './types';
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -38,6 +43,20 @@ export function useFrictionSummary(tenantId: string) {
     queryKey: ['friction', tenantId],
     queryFn: () => apiGet<FrictionSummaryView>('/api/v1/friction/summary', tenantId),
     enabled: tenantId.length > 0,
+    retry: false,
+  });
+}
+
+// Drill-to-evidence for one team; only fetched when `enabled` (i.e. the drawer is open).
+export function useFrictionEvidence(tenantId: string, teamId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['friction-evidence', tenantId, teamId],
+    queryFn: () =>
+      apiGet<FrictionEvidenceView>(
+        `/api/v1/friction/teams/${encodeURIComponent(teamId)}/evidence`,
+        tenantId,
+      ),
+    enabled: enabled && tenantId.length > 0 && teamId.length > 0,
     retry: false,
   });
 }

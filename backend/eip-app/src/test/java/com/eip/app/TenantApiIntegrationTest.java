@@ -81,10 +81,10 @@ class TenantApiIntegrationTest {
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
         Statement st = admin.createStatement()) {
       st.execute("CREATE ROLE eip_app LOGIN PASSWORD 'eip_app_pw' NOBYPASSRLS");
-      st.execute("GRANT USAGE ON SCHEMA core TO eip_app");
-      st.execute("GRANT SELECT ON ALL TABLES IN SCHEMA core TO eip_app");
-      st.execute("GRANT USAGE ON SCHEMA analytics TO eip_app");
-      st.execute("GRANT SELECT ON ALL TABLES IN SCHEMA analytics TO eip_app");
+      for (String schema : new String[] {"core", "analytics", "work", "scm", "cicd", "quality"}) {
+        st.execute("GRANT USAGE ON SCHEMA " + schema + " TO eip_app");
+        st.execute("GRANT SELECT ON ALL TABLES IN SCHEMA " + schema + " TO eip_app");
+      }
       // Seed as the superuser (bypasses RLS — setup only).
       st.execute(insertTenant(tenantA, "Tenant A", "tenant-a"));
       st.execute(insertTenant(tenantB, "Tenant B", "tenant-b"));
@@ -107,11 +107,13 @@ class TenantApiIntegrationTest {
       st.execute(insertBusinessUnit(buB, tenantB, orgB, "Eng B"));
       st.execute(insertFrictionDefinition(tenantA));
       st.execute(insertFrictionDefinition(tenantB));
-      // Tenant A worst-first: Platform(74) > Payments(30) > Web(10); tenant B has only Ops(50).
-      seedTeamFlow(st, tenantA, buA, "Platform", 12, 3, 5 * 86_400L, 4);
-      seedTeamFlow(st, tenantA, buA, "Payments", 6, 1, 2 * 86_400L, 2);
-      seedTeamFlow(st, tenantA, buA, "Web", 3, 0, 1 * 86_400L, 1);
-      seedTeamFlow(st, tenantB, buB, "Ops", 5, 2, 3 * 86_400L, 3);
+      // Computed-shape read model seeded directly (this test covers the API read path + RLS; the
+      // pipeline's compute correctness is proven by FrictionPipelineIntegrationTest). Tenant A
+      // worst-first: Platform(91) > Payments(56) > Web(50); tenant B has only Ops(42).
+      seedTeamFriction(st, tenantA, buA, "Platform", 91, "REVIEW_WAIT");
+      seedTeamFriction(st, tenantA, buA, "Payments", 56, "REVIEW_WAIT");
+      seedTeamFriction(st, tenantA, buA, "Web", 50, "REVIEW_WAIT");
+      seedTeamFriction(st, tenantB, buB, "Ops", 42, "BLOCKED");
     } catch (SQLException e) {
       throw new IllegalStateException("failed to prepare test database", e);
     }
@@ -204,25 +206,31 @@ class TenantApiIntegrationTest {
   }
 
   @Test
-  void friction_summary_is_tenant_isolated_and_deterministic() throws Exception {
-    // Tenant A: three teams, worst-first, with exact deterministic scores; the metric definition
-    // (caveats + gaming risks) is surfaced. RLS-off would leak tenant B's "Ops" team into this
-    // list.
+  void friction_summary_is_tenant_isolated_and_computed() throws Exception {
+    // Tenant A: three teams, worst-first, with computed scores + component breakdown + dominant
+    // cause + version; the metric definition (caveats + gaming risks) is surfaced. RLS-off would
+    // leak tenant B's "Ops" team into this list.
     mvc.perform(
             get("/api/v1/friction/summary").header(HeaderTenantResolver.HEADER, tenantA.toString()))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.teamsReporting").value(3))
+        .andExpect(jsonPath("$.metricVersion").value("engineering_friction_v0.1"))
+        .andExpect(jsonPath("$.simulation").value(true))
+        .andExpect(jsonPath("$.computedAt").isNotEmpty())
         .andExpect(jsonPath("$.metric.key").value("engineering_friction"))
         .andExpect(jsonPath("$.metric.grain").value("team"))
         .andExpect(jsonPath("$.metric.caveats").isNotEmpty())
         .andExpect(jsonPath("$.metric.gamingRisks").isNotEmpty())
         .andExpect(jsonPath("$.metric.inputs.signals").isArray())
         .andExpect(jsonPath("$.teams[0].teamName").value("Platform"))
-        .andExpect(jsonPath("$.teams[0].frictionScore").value(74))
+        .andExpect(jsonPath("$.teams[0].frictionScore").value(91))
+        .andExpect(jsonPath("$.teams[0].dominantCause").value("REVIEW_WAIT"))
+        .andExpect(jsonPath("$.teams[0].workItems").value(3))
+        .andExpect(jsonPath("$.teams[0].reviewWaitPct").value(57))
         .andExpect(jsonPath("$.teams[1].teamName").value("Payments"))
-        .andExpect(jsonPath("$.teams[1].frictionScore").value(30))
+        .andExpect(jsonPath("$.teams[1].frictionScore").value(56))
         .andExpect(jsonPath("$.teams[2].teamName").value("Web"))
-        .andExpect(jsonPath("$.teams[2].frictionScore").value(10))
+        .andExpect(jsonPath("$.teams[2].frictionScore").value(50))
         .andExpect(jsonPath("$.teams[*].teamName", hasItem("Platform")))
         .andExpect(jsonPath("$.teams[*].teamName", not(hasItem("Ops"))));
 
@@ -232,7 +240,22 @@ class TenantApiIntegrationTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.teamsReporting").value(1))
         .andExpect(jsonPath("$.teams[0].teamName").value("Ops"))
-        .andExpect(jsonPath("$.teams[0].frictionScore").value(50));
+        .andExpect(jsonPath("$.teams[0].frictionScore").value(42))
+        .andExpect(jsonPath("$.teams[0].dominantCause").value("BLOCKED"));
+  }
+
+  @Test
+  void friction_evidence_endpoint_is_tenant_scoped_and_empty_without_correlation()
+      throws Exception {
+    // A team with no correlation evidence returns 200 with an empty item list + the metric version
+    // (the pipeline-backed content is proven by FrictionPipelineIntegrationTest). Exercises the
+    // controller routing + evidence service query path under RLS.
+    mvc.perform(
+            get("/api/v1/friction/teams/{teamId}/evidence", UUID.randomUUID())
+                .header(HeaderTenantResolver.HEADER, tenantA.toString()))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.metricVersion").value("engineering_friction_v0.1"))
+        .andExpect(jsonPath("$.items.length()").value(0));
   }
 
   @Test
@@ -243,6 +266,7 @@ class TenantApiIntegrationTest {
             .andExpect(jsonPath("$.paths['/api/v1/connectors']").exists())
             .andExpect(jsonPath("$.paths['/api/v1/session']").exists())
             .andExpect(jsonPath("$.paths['/api/v1/friction/summary']").exists())
+            .andExpect(jsonPath("$.paths['/api/v1/friction/teams/{teamId}/evidence']").exists())
             .andReturn()
             .getResponse()
             .getContentAsString();
@@ -415,22 +439,16 @@ class TenantApiIntegrationTest {
         + UUID.randomUUID()
         + "', '"
         + tenantId
-        + "', 'engineering_friction', 'Engineering Friction', 'Where engineering time is lost.', "
-        + "'friction = round(min(100, 10*breaches + 6*review + 4*age_days))', "
-        + "'{\"signals\":[\"wip_limit_breaches\",\"review_queue_depth\",\"oldest_in_progress_age_sec\"]}'::jsonb, "
-        + "'team', 'v1 placeholder; team-level only.', 'Splitting items or closing reviews without review understates it.')";
+        + "', 'engineering_friction', 'Engineering Friction (v0.1, experimental)', "
+        + "'Where a team''s delivery time is lost.', "
+        + "'friction = round(min(100, 100*waitingRatio + 30*reworkPerItem))', "
+        + "'{\"signals\":[\"work_item_transitions\",\"blocked_time\",\"review_wait_time\",\"rework_count\"],\"grain\":\"team\"}'::jsonb, "
+        + "'team', 'EXPERIMENTAL v0.1; team-level only.', 'Skipping reviews or splitting items understates it.')";
   }
 
-  /** Seeds a team plus its current flow signals (superuser; RLS-bypassed). */
-  private static void seedTeamFlow(
-      Statement st,
-      UUID tenantId,
-      UUID buId,
-      String name,
-      int wip,
-      int wipLimitBreaches,
-      long oldestAgeSec,
-      int reviewQueueDepth)
+  /** Seeds a team plus its computed friction read-model row (superuser; RLS-bypassed). */
+  private static void seedTeamFriction(
+      Statement st, UUID tenantId, UUID buId, String name, int score, String dominantCause)
       throws SQLException {
     UUID teamId = UUID.randomUUID();
     st.execute(
@@ -443,22 +461,23 @@ class TenantApiIntegrationTest {
             + "', '"
             + name
             + "', 'STREAM_ALIGNED')");
+    // Representative component values (Platform-shaped): flow_efficiency 0.1414, blocked 0.2424,
+    // review-wait 0.5657 -> reviewWaitPct 57.
     st.execute(
-        "INSERT INTO analytics.rm_team_flow_current "
-            + "(id, tenant_id, team_id, wip, wip_limit_breaches, oldest_in_progress_age_sec, review_queue_depth) VALUES ('"
+        "INSERT INTO analytics.rm_team_friction_current "
+            + "(id, tenant_id, team_id, metric_version, work_items, total_cycle_sec, active_sec, "
+            + "waiting_sec, blocked_sec, review_wait_sec, rework_count, flow_efficiency, "
+            + "blocked_ratio, review_wait_ratio, friction_score, dominant_cause) VALUES ('"
             + UUID.randomUUID()
             + "', '"
             + tenantId
             + "', '"
             + teamId
-            + "', "
-            + wip
-            + ", "
-            + wipLimitBreaches
-            + ", "
-            + oldestAgeSec
-            + ", "
-            + reviewQueueDepth
-            + ")");
+            + "', 'engineering_friction_v0.1', 3, 356400, 50400, 288000, 86400, 201600, 1, "
+            + "0.1414, 0.2424, 0.5657, "
+            + score
+            + ", '"
+            + dominantCause
+            + "')");
   }
 }

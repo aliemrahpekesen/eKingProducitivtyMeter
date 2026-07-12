@@ -3,7 +3,9 @@
 - **Root package:** `com.eip.analytics`
 - **Owner:** R-DA (R-BA: runtime)
 - **Allowed dependencies:** eip-core, eip-tenancy
-- **State:** Phase-0 skeleton (build wiring + package root only; no domain content yet — TASK-0001).
+- **State:** Active (TASK-0016): Engineering Friction v0.1 compute + projection + read side.
+- **Layering:** `api` (ports + DTOs: `ComputeFrictionUseCase`, `GetFrictionSummaryQuery`, `GetFrictionEvidenceQuery` — Modulith named interface) → `application` (@Service) → `friction` (pure framework-free engine: `FlowTimeline`, `FrictionCalculator`, `FrictionDefinition`) → `persistence` (@Repository set-based loads + batch upserts). Canonical schemas read-only (ADR-019).
+- **Owned tables (TASK-0016):** `analytics.flow_correlation`, `analytics.rm_team_friction_current`, `analytics.metric_definition`/`metric_fact` friction rows.
 
 ## Purpose
 

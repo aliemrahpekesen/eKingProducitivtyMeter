@@ -428,3 +428,33 @@ body {
   font-size: 12px;
   text-align: center;
 }
+
+/* Friction drill-to-evidence drawer (TASK-0016) — compact, reuses the muted/mono tokens. */
+.evidence {
+  margin-top: 0.4rem;
+  font-size: 0.85rem;
+}
+.evidence > summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.evidence-list {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding-left: 0.75rem;
+  border-left: 2px solid color-mix(in srgb, var(--muted) 30%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.evidence-head {
+  font-weight: 600;
+}
+.evidence-timeline {
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.friction-meta {
+  margin-top: 0.6rem;
+  font-size: 0.8rem;
+}

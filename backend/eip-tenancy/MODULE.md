@@ -3,6 +3,7 @@
 - **Root package:** `com.eip.tenancy`
 - **Owner:** R-BA (R-PA: tenancy/quotas)
 - **Allowed dependencies:** eip-core
+- **State (TASK-0016):** owns the tenant-aware transaction boundary: `com.eip.tenancy.tx.TenantTransactionRunner` (Spring `TransactionTemplate` + RLS GUC bind on the transaction-bound connection) alongside the pure-JDBC `context` primitives. Spring Modulith OPEN module.
 - **State:** Phase-0 — tenant-context RLS mechanism (`com.eip.tenancy.context`: `TenantContext`, `RlsTenantBinder` — TASK-0009; thread-bound `TenantContextHolder` — TASK-0010) landed; tenancy-core tables owned. RBAC/audit/secret services follow (SPRINT-02).
 
 ## Purpose

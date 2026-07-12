@@ -28,6 +28,33 @@
         }
       }
     },
+    "/api/v1/friction/teams/{teamId}/evidence" : {
+      "get" : {
+        "tags" : [ "friction-controller" ],
+        "operationId" : "evidence",
+        "parameters" : [ {
+          "name" : "teamId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/FrictionEvidenceView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/friction/summary" : {
       "get" : {
         "tags" : [ "friction-controller" ],
@@ -96,6 +123,108 @@
           }
         }
       },
+      "FrictionEvidenceView" : {
+        "type" : "object",
+        "properties" : {
+          "teamId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "teamName" : {
+            "type" : "string"
+          },
+          "metricVersion" : {
+            "type" : "string"
+          },
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/WorkItemEvidenceView"
+            }
+          }
+        }
+      },
+      "TransitionEvidenceView" : {
+        "type" : "object",
+        "properties" : {
+          "seq" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "fromState" : {
+            "type" : "string"
+          },
+          "toState" : {
+            "type" : "string"
+          },
+          "atEpochSec" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "WorkItemEvidenceView" : {
+        "type" : "object",
+        "properties" : {
+          "workItemKey" : {
+            "type" : "string"
+          },
+          "title" : {
+            "type" : "string"
+          },
+          "type" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "cycleTimeSec" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "activeSec" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "blockedSec" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "reviewWaitSec" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "waitingSec" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "reworkCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "pullRequestKey" : {
+            "type" : "string"
+          },
+          "buildKey" : {
+            "type" : "string"
+          },
+          "buildStatus" : {
+            "type" : "string"
+          },
+          "qualityGateKey" : {
+            "type" : "string"
+          },
+          "qualityGateStatus" : {
+            "type" : "string"
+          },
+          "transitions" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/TransitionEvidenceView"
+            }
+          }
+        }
+      },
       "FrictionMetricView" : {
         "type" : "object",
         "properties" : {
@@ -131,6 +260,15 @@
           "metric" : {
             "$ref" : "#/components/schemas/FrictionMetricView"
           },
+          "metricVersion" : {
+            "type" : "string"
+          },
+          "computedAt" : {
+            "type" : "string"
+          },
+          "simulation" : {
+            "type" : "boolean"
+          },
           "teams" : {
             "type" : "array",
             "items" : {
@@ -156,23 +294,50 @@
           "teamName" : {
             "type" : "string"
           },
-          "wip" : {
+          "frictionScore" : {
             "type" : "integer",
             "format" : "int32"
           },
-          "wipLimitBreaches" : {
+          "dominantCause" : {
+            "type" : "string"
+          },
+          "workItems" : {
             "type" : "integer",
             "format" : "int32"
           },
-          "oldestInProgressAgeSec" : {
+          "totalCycleSec" : {
             "type" : "integer",
             "format" : "int64"
           },
-          "reviewQueueDepth" : {
+          "activeSec" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "waitingSec" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "blockedSec" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "reviewWaitSec" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "reworkCount" : {
             "type" : "integer",
             "format" : "int32"
           },
-          "frictionScore" : {
+          "flowEfficiencyPct" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "blockedPct" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "reviewWaitPct" : {
             "type" : "integer",
             "format" : "int32"
           }

@@ -4,7 +4,12 @@
  */
 package com.eip.app.api;
 
-import com.eip.app.api.ConnectorCursor.InvalidCursorException;
+import com.eip.app.persistence.ConnectorCursor.InvalidCursorException;
+import com.eip.core.error.EipException;
+import com.eip.core.error.InternalException;
+import com.eip.core.error.PermissionDeniedException;
+import com.eip.core.error.ResourceNotFoundException;
+import com.eip.core.error.ValidationException;
 import com.eip.tenancy.context.TenantContextHolder.NoTenantBoundException;
 import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
@@ -63,6 +68,37 @@ public class ApiExceptionHandler {
         "The pagination cursor is invalid; omit it to start over.",
         "Invalid cursor",
         "/problems/validation");
+  }
+
+  /**
+   * Maps the sealed {@code com.eip.core.error} taxonomy to problem+json (BackendPlan §10) with an
+   * exhaustive switch. Internal errors return a generic detail — never the exception message.
+   *
+   * @param e the failure
+   * @return the taxonomy-mapped problem+json
+   */
+  @ExceptionHandler(EipException.class)
+  public ProblemDetail handleEip(EipException e) {
+    return switch (e) {
+      case ValidationException v ->
+          problem(HttpStatus.BAD_REQUEST, message(v), "Validation failed", "/problems/validation");
+      case ResourceNotFoundException n ->
+          problem(HttpStatus.NOT_FOUND, message(n), "Not found", "/problems/not-found");
+      case PermissionDeniedException p ->
+          problem(
+              HttpStatus.FORBIDDEN, message(p), "Permission denied", "/problems/permission-denied");
+      case InternalException i ->
+          problem(
+              HttpStatus.INTERNAL_SERVER_ERROR,
+              "An internal error occurred; contact support with the traceId.",
+              "Internal error",
+              "/problems/internal");
+    };
+  }
+
+  private static String message(EipException e) {
+    @Nullable String message = e.getMessage();
+    return message == null ? "Request failed." : message;
   }
 
   private ProblemDetail problem(HttpStatusCode status, String detail, String title, String type) {

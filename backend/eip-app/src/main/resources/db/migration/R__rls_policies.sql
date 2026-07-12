@@ -30,7 +30,16 @@ DECLARE
     'work.work_item',
     'analytics.metric_definition',
     'analytics.metric_fact',   -- partitioned parent
-    'analytics.rm_team_flow_current'
+    'analytics.rm_team_flow_current',
+    'staging.raw_simulation',        -- TASK-0016 INC-1 (ingestion raw staging)
+    'staging.raw_ingest_errors',     -- TASK-0016 INC-1 (ingestion/normalization DLQ)
+    'work.work_item_transition',     -- TASK-0016 INC-2 (canonical flow)
+    'scm.pull_request',              -- TASK-0016 INC-2
+    'scm.code_review',               -- TASK-0016 INC-2
+    'cicd.build',                    -- TASK-0016 INC-2
+    'quality.quality_gate',          -- TASK-0016 INC-2
+    'analytics.flow_correlation',    -- TASK-0016 INC-2 (correlation evidence)
+    'analytics.rm_team_friction_current' -- TASK-0016 INC-2 (computed friction read model)
   ];
   -- Platform-scoped (enumerated no-RLS exceptions, DatabasePlan §2): core.tenant,
   -- core.worker_heartbeat, analytics.analytics_watermark — deliberately absent from this list.

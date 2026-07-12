@@ -24,11 +24,18 @@ export interface PageViewConnectorView {
 export interface TeamFrictionView {
   teamId: string;
   teamName: string;
-  wip: number;
-  wipLimitBreaches: number;
-  oldestInProgressAgeSec: number;
-  reviewQueueDepth: number;
   frictionScore: number;
+  dominantCause: string;
+  workItems: number;
+  totalCycleSec: number;
+  activeSec: number;
+  waitingSec: number;
+  blockedSec: number;
+  reviewWaitSec: number;
+  reworkCount: number;
+  flowEfficiencyPct: number;
+  blockedPct: number;
+  reviewWaitPct: number;
 }
 
 export interface FrictionMetricView {
@@ -43,8 +50,44 @@ export interface FrictionMetricView {
   gamingRisks: string;
 }
 
+export interface TransitionEvidenceView {
+  seq: number;
+  fromState: string | null;
+  toState: string;
+  atEpochSec: number;
+}
+
+export interface WorkItemEvidenceView {
+  workItemKey: string | null;
+  title: string;
+  type: string;
+  status: string;
+  cycleTimeSec: number;
+  activeSec: number;
+  blockedSec: number;
+  reviewWaitSec: number;
+  waitingSec: number;
+  reworkCount: number;
+  pullRequestKey: string | null;
+  buildKey: string | null;
+  buildStatus: string | null;
+  qualityGateKey: string | null;
+  qualityGateStatus: string | null;
+  transitions: TransitionEvidenceView[];
+}
+
+export interface FrictionEvidenceView {
+  teamId: string;
+  teamName: string | null;
+  metricVersion: string;
+  items: WorkItemEvidenceView[];
+}
+
 export interface FrictionSummaryView {
   metric: FrictionMetricView | null;
+  metricVersion: string | null;
+  computedAt: string | null;
+  simulation: boolean;
   teams: TeamFrictionView[];
   teamsReporting: number;
 }

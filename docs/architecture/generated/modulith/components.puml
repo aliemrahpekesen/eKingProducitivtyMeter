@@ -1,0 +1,29 @@
+@startuml
+set separator none
+title Modules
+
+top to bottom direction
+
+!include <C4/C4>
+!include <C4/C4_Context>
+!include <C4/C4_Component>
+
+Container_Boundary("Modules.Modules_boundary", "Modules", $tags="") {
+  Component(Modules.Modules.Analytics, "Analytics", $techn="Module", $descr="", $tags="", $link="")
+  Component(Modules.Modules.App, "App", $techn="Module", $descr="", $tags="", $link="")
+  Component(Modules.Modules.Connectors, "Connectors", $techn="Module", $descr="", $tags="", $link="")
+  Component(Modules.Modules.Core, "Core", $techn="Module", $descr="", $tags="", $link="")
+  Component(Modules.Modules.Ingestion, "Ingestion", $techn="Module", $descr="", $tags="", $link="")
+  Component(Modules.Modules.Tenancy, "Tenancy", $techn="Module", $descr="", $tags="", $link="")
+}
+
+Rel(Modules.Modules.Analytics, Modules.Modules.Tenancy, "uses", $techn="", $tags="", $link="")
+Rel(Modules.Modules.App, Modules.Modules.Core, "depends on", $techn="", $tags="", $link="")
+Rel(Modules.Modules.App, Modules.Modules.Analytics, "uses", $techn="", $tags="", $link="")
+Rel(Modules.Modules.App, Modules.Modules.Ingestion, "uses", $techn="", $tags="", $link="")
+Rel(Modules.Modules.App, Modules.Modules.Tenancy, "uses", $techn="", $tags="", $link="")
+Rel(Modules.Modules.Ingestion, Modules.Modules.Tenancy, "uses", $techn="", $tags="", $link="")
+Rel(Modules.Modules.Ingestion, Modules.Modules.Connectors, "uses", $techn="", $tags="", $link="")
+
+SHOW_LEGEND(true)
+@enduml

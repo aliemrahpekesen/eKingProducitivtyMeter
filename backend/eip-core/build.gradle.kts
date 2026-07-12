@@ -6,6 +6,11 @@ plugins {
 }
 
 dependencies {
+    // Spring Modulith package metadata (annotations only, compile-time; verified
+    // application-wide from eip-app's ApplicationModules test — BackendPlan §3).
+    compileOnly(platform(libs.spring.modulith.bom))
+    compileOnly("org.springframework.modulith:spring-modulith-core")
+
     // Nullness contract carried on the API surface so downstream modules inherit @NullMarked /
     // @Nullable semantics (CodingStandards §2.1). NullAway reads these; JSpecify is the only
     // third-party runtime dependency the shared kernel takes.
