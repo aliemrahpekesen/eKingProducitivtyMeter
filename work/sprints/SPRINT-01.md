@@ -20,6 +20,7 @@ Leaned per [Sprint01ExecutionPlan](../../reviews/Sprint01ExecutionPlan.md): prot
 | TASK-0013 | product-first (hero-metric slice) | L1 | M | CC-1 | MERGED | R-IE (backend) under R-BA + R-CA |
 | TASK-0014 | P0-E5-S1 (frontend shell) | L3 | M | CC-7 | MERGED | R-FA under R-BA |
 | TASK-0015 | demo hardening (fixed tenant + one-command) | L3 | S | CC-7 | MERGED | R-IE + R-FA + R-DOA |
+| TASK-0016 | product milestone (computed friction vertical slice v0.1) | L1 | L | CC-1 | MERGED | R-IE under R-CA + R-DBA + R-AE |
 
 TASK-0009 (DB baseline + RLS template) is the serial prerequisite: the tenancy-context enforcement (TASK-0010), OpenAPI (TASK-0011), and observability (TASK-0012) build on the persistence spine. Design-note spikes (outbox-relay topology, consumer idempotency, audit hash-chain approach) run ahead per SprintCatalog §3.
 
@@ -48,3 +49,4 @@ L0 (persistence + tenancy spine, `/backend/eip-core` + `/backend/eip-tenancy` + 
 ## Exit
 
 Sprint exit criteria: [SprintCatalog §3](../../program/SprintCatalog.md) — two seeded tenants, cross-tenant read provably blocked (RLS test + API probe), OTel HTTP→DB traces, OpenAPI `/api/v1` skeleton, NFR-041 isolation suite in CI. Not yet met — sprint in progress.
+- **2026-07-12** — TASK-0016 (computed friction vertical slice v0.1) closed: three product increments (deterministic simulation ingestion → normalization/correlation/computed friction v0.1 → evidence-backed API + frontend drawer), one review-remediation commit (plain-uuid cross-schema links + ADR-021), and a founder-directed architecture remediation (module ownership per ADR-019, application ports, `TenantTransactionRunner` tenant-tx/RLS boundary, set-based/batch SQL, application-wide Modulith + ArchUnit enforcement). Final independent review ([../reviews/TASK-0016-final-review.md](../reviews/TASK-0016-final-review.md)): 6 fresh-context dimensions + live gates runner, 28 agents, adversarial verification — **APPROVED (0 BLOCKER, 0 MAJOR, 13 MINOR, 7 NIT → [DEBT-020](../debt-register.md))**. Gates re-executed: `./gradlew check --rerun-tasks` 78/78 green (Testcontainers + Modulith + ArchUnit + coverage), frontend 14/14, docs-lint 146 files. Demo: Platform 91 > Payments 56 > Web 50, evidence drill-down live. DEBT-013 + DEBT-019 resolved; DEBT-017/018 remain the gate before the first real connector. Merged into `integration/SPRINT-00` (local `--no-ff`, merge `32bb423`). State → **MERGED**. Not pushed.
