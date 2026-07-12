@@ -4,6 +4,9 @@
 spring:
   application:
     name: eip-app
+  threads:
+    virtual:
+      enabled: true # Java 21 virtual threads for blocking MVC/JDBC IO (BackendPlan §4)
   datasource:
     url: ${EIP_DB_URL:jdbc:postgresql://localhost:5432/eip}
     username: ${EIP_APP_DB_USER:eip_app}
@@ -64,3 +67,9 @@ logging:
   structured:
     format:
       console: logstash
+
+# Deterministic simulation source (v0.1, TASK-0016): the only connector until real connectors land.
+# Disable to boot without any source wired.
+eip:
+  simulation:
+    enabled: true

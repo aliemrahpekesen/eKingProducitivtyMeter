@@ -6,10 +6,10 @@ package com.eip.app;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.eip.app.api.FrictionEvidenceService;
-import com.eip.app.api.FrictionEvidenceView;
-import com.eip.app.friction.FrictionPipelineRunner;
-import com.eip.app.friction.FrictionPipelineRunner.PipelineResult;
+import com.eip.analytics.api.FrictionEvidenceView;
+import com.eip.analytics.api.GetFrictionEvidenceQuery;
+import com.eip.app.application.RunFrictionPipelineUseCase;
+import com.eip.app.application.RunFrictionPipelineUseCase.PipelineResult;
 import com.eip.tenancy.context.RlsTenantBinder;
 import com.eip.tenancy.context.TenantContext;
 import com.eip.tenancy.context.TenantContextHolder;
@@ -122,8 +122,8 @@ class FrictionPipelineIntegrationTest {
     POSTGRES.stop();
   }
 
-  @Autowired private FrictionPipelineRunner runner;
-  @Autowired private FrictionEvidenceService evidenceService;
+  @Autowired private RunFrictionPipelineUseCase runner;
+  @Autowired private GetFrictionEvidenceQuery evidenceService;
   @Autowired private DataSource dataSource;
 
   @Test

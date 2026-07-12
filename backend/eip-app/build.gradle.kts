@@ -17,6 +17,13 @@ dependencies {
     // Web + OpenAPI: the first /api/v1 read surface (TASK-0010). RFC 7807 problem+json is built into
     // Spring 6 (ProblemDetail); springdoc generates the OpenAPI 3 contract at /v3/api-docs.
     implementation("org.springframework.boot:spring-boot-starter-web")
+    // Jakarta Bean Validation for @ConfigurationProperties records and API inputs (BackendPlan §11).
+    implementation("org.springframework.boot:spring-boot-starter-validation")
+    annotationProcessor("org.springframework.boot:spring-boot-configuration-processor")
+    // Modulith annotations referenced by the library modules' package metadata must resolve on
+    // this compile classpath too (annotation-only; the verification itself is a test concern).
+    compileOnly(platform(libs.spring.modulith.bom))
+    compileOnly("org.springframework.modulith:spring-modulith-core")
     implementation(libs.springdoc.openapi.webmvc)
 
     // Observability (TASK-0012, ObservabilityModel/BackendPlan §12): actuator health/info/prometheus,
@@ -39,6 +46,11 @@ dependencies {
     // spring-boot-starter-test supplies JUnit 5 + AssertJ (eip-app uses boot-app-conventions, not
     // modulith-conventions, so it needs its own test framework).
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    // Application-wide Spring Modulith verification + ArchUnit layering rules (BackendPlan §3).
+    testImplementation(platform(libs.spring.modulith.bom))
+    testImplementation(libs.spring.modulith.starter.core)
+    testImplementation("org.springframework.modulith:spring-modulith-docs")
+    testImplementation("com.tngtech.archunit:archunit-junit5:1.3.0")
     testImplementation("org.testcontainers:postgresql")
     testImplementation("org.postgresql:postgresql")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

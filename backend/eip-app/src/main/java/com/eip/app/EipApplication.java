@@ -6,13 +6,17 @@ package com.eip.app;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 
 /**
- * Composition-root entry point for the EIP API application. Scaffold stub only — controllers, the
- * OpenAPI surface, the security filter chain, and the problem+json advice are added in later
- * Phase-0 tasks (SPRINT-01+). This module contains no business logic (BackendPlan.md §1).
+ * Composition-root entry point for the EIP API application. Scans the full {@code com.eip}
+ * application (the library modules contribute their {@code @Service}/{@code @Repository}
+ * application and infrastructure beans; domain code stays framework-free) and binds validated
+ * {@code @ConfigurationProperties} records (BackendPlan §2.2). Module boundaries are enforced by
+ * the application-wide Spring Modulith verification, not by scan scope.
  */
-@SpringBootApplication
+@SpringBootApplication(scanBasePackages = "com.eip")
+@ConfigurationPropertiesScan("com.eip")
 public class EipApplication {
 
   public static void main(String[] args) {

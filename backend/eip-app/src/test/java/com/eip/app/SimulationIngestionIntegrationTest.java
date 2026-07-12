@@ -6,8 +6,8 @@ package com.eip.app;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.eip.app.ingestion.SimulationIngestionRunner;
-import com.eip.ingestion.staging.IngestionResult;
+import com.eip.ingestion.api.IngestSimulationDataUseCase;
+import com.eip.ingestion.api.IngestionResult;
 import com.eip.tenancy.context.RlsTenantBinder;
 import com.eip.tenancy.context.TenantContext;
 import java.sql.Connection;
@@ -90,14 +90,14 @@ class SimulationIngestionIntegrationTest {
     POSTGRES.stop();
   }
 
-  @Autowired private SimulationIngestionRunner runner;
+  @Autowired private IngestSimulationDataUseCase ingest;
   @Autowired private DataSource dataSource;
 
   @Test
   void ingests_via_the_real_path_idempotently_and_tenant_isolated() throws SQLException {
     // First ingest: the full dataset is staged (79 records, all new) — proves data enters via the
     // connector/ingestion path, not by seeding dashboard rows.
-    IngestionResult first = runner.ingest(tenantA);
+    IngestionResult first = ingest.ingest(TenantContext.of(tenantA));
     assertThat(first.emitted()).isEqualTo(79);
     assertThat(first.inserted()).isEqualTo(79);
     assertThat(first.updated()).isZero();
@@ -116,7 +116,7 @@ class SimulationIngestionIntegrationTest {
     long stampBefore = maxIngestedAtEpoch(tenantA);
 
     // Replay: same dataset, so nothing changes — no duplicates, no ingested_at churn.
-    IngestionResult second = runner.ingest(tenantA);
+    IngestionResult second = ingest.ingest(TenantContext.of(tenantA));
     assertThat(second.emitted()).isEqualTo(79);
     assertThat(second.inserted()).isZero();
     assertThat(second.updated()).isZero();

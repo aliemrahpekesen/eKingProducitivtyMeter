@@ -4,6 +4,11 @@ plugins {
     id("eip.modulith-conventions")
 }
 dependencies {
+    // Spring Modulith package metadata (annotations only, compile-time; verified
+    // application-wide from eip-app's ApplicationModules test — BackendPlan §3).
+    compileOnly(platform(libs.spring.modulith.bom))
+    compileOnly("org.springframework.modulith:spring-modulith-core")
+
     api(project(":eip-core"))
     implementation(project(":eip-tenancy"))
 

@@ -11,7 +11,7 @@ dependencies {
 
     // Spring transaction + JDBC support for the tenant-aware transaction runner. Versions from the
     // Boot BOM. spring-tx is `api` because the runner's constructor takes PlatformTransactionManager.
-    implementation(platform(libs.spring.boot.bom))
+    api(platform(libs.spring.boot.bom))
     api("org.springframework:spring-tx")
     implementation("org.springframework:spring-jdbc")
 
