@@ -3,7 +3,9 @@
 - **Root package:** `com.eip.ingestion`
 - **Owner:** R-CNA (R-DA: normalization)
 - **Allowed dependencies:** eip-core, eip-tenancy, eip-connectors
-- **State:** Phase-0 skeleton (build wiring + package root only; no domain content yet — TASK-0001).
+- **State:** Active (TASK-0016): raw staging + normalization + single canonical writer for the friction slice.
+- **Layering:** `api` (ports: `IngestSimulationDataUseCase`, `NormalizeStagedDataUseCase` — Modulith named interface) → `application` (@Service use cases; connector fetch outside the transaction) → `persistence` (@Repository JdbcClient/JdbcTemplate batch `ON CONFLICT` upserts). Tenant-bound transactions via eip-tenancy's `TenantTransactionRunner`.
+- **Owned tables (TASK-0016):** `staging.raw_simulation`, `staging.raw_ingest_errors`; canonical write side of `work.work_item(+_transition)`, `scm.pull_request`/`code_review`, `cicd.build`, `quality.quality_gate`, `core.external_ref` anchors (ADR-019).
 
 ## Purpose
 

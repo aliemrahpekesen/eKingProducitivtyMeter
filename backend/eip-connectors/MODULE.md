@@ -3,6 +3,7 @@
 - **Root package:** `com.eip.connectors`
 - **Owner:** R-CNA
 - **Allowed dependencies:** eip-core, eip-tenancy
+- **State (TASK-0016):** v0.1 Connector SPI (`spi`) + deterministic `SimulationConnector`/`SimulationDataset` (`simulation`) — framework-free pure Java (DEBT-018 tracks the full lifecycle SPI). Spring Modulith OPEN module; Spring wiring lives in eip-ingestion's `SimulationSourceConfiguration`.
 - **State:** Phase-0 skeleton (build wiring + package root only; no domain content yet — TASK-0001).
 
 ## Purpose

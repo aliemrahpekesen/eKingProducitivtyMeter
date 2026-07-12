@@ -3,6 +3,7 @@
 - **Root package:** `com.eip.app`
 - **Owner:** R-BA
 - **Allowed dependencies:** all modules (composition root only)
+- **State (TASK-0016):** composition root + REST/infrastructure adapter only. `api` (thin @RestController DTO adapters — no SQL/JdbcClient/pagination mechanics), `application` (ports `RunFrictionPipelineUseCase`, `ListConnectorsQuery`, `GetSessionQuery` + the pipeline orchestrator), `persistence` (control-plane query adapters), `config` (bean wiring, validated `@ConfigurationProperties`, demo seeder, prod startup guard). Boundaries enforced by `ApplicationModularityTests` (`ApplicationModules.of("com.eip").verify()`) + `ArchitectureRulesTest`.
 - **State:** Phase-0 — first visible `/api/v1` read surface landed (TASK-0010): tenant-context web filter + `session`/`connectors` endpoints served from the RLS-protected DB. OIDC security filter chain follows (SPRINT-02).
 
 ## Purpose
