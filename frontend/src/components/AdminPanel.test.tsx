@@ -9,6 +9,7 @@ import {
   useRegisterConnector,
   useSetConnectorStatus,
   useStructure,
+  useSyncConnector,
   useTenants,
   useTestConnector,
 } from '../api/hooks';
@@ -23,6 +24,7 @@ vi.mock('../api/hooks', () => ({
   useRegisterConnector: vi.fn(),
   useTestConnector: vi.fn(),
   useSetConnectorStatus: vi.fn(),
+  useSyncConnector: vi.fn(),
   useLoadSampleData: vi.fn(),
 }));
 
@@ -77,6 +79,7 @@ function arm(): void {
   vi.mocked(useRegisterConnector).mockReturnValue(idleMutation);
   vi.mocked(useTestConnector).mockReturnValue(idleMutation);
   vi.mocked(useSetConnectorStatus).mockReturnValue(idleMutation);
+  vi.mocked(useSyncConnector).mockReturnValue(idleMutation);
   vi.mocked(useLoadSampleData).mockReturnValue(idleMutation);
 }
 

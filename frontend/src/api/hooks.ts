@@ -147,6 +147,15 @@ export function useSetConnectorStatus(tenantId: string) {
   });
 }
 
+export function useSyncConnector(tenantId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (connectorId: string) =>
+      apiPost<SampleDataResult>(`/api/v1/admin/connectors/${connectorId}/sync`, tenantId),
+    onSuccess: () => void queryClient.invalidateQueries(),
+  });
+}
+
 export function useLoadSampleData(tenantId: string) {
   const queryClient = useQueryClient();
   return useMutation({

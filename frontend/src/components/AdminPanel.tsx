@@ -7,6 +7,7 @@ import {
   useRegisterConnector,
   useSetConnectorStatus,
   useStructure,
+  useSyncConnector,
   useTenants,
   useTestConnector,
 } from '../api/hooks';
@@ -136,7 +137,11 @@ function ConnectorsSection({ tenantId }: { tenantId: string }): JSX.Element {
   const connectors = useAdminConnectors(tenantId);
   const test = useTestConnector(tenantId);
   const setStatus = useSetConnectorStatus(tenantId);
+  const sync = useSyncConnector(tenantId);
   const sample = useLoadSampleData(tenantId);
+  const syncableTypes = new Set(
+    (types.data ?? []).filter((t) => t.syncAvailable).map((t) => t.type),
+  );
   const [adding, setAdding] = useState<ConnectorTypeView | null>(null);
   const [testResult, setTestResult] = useState<Record<string, TestConnectionResult>>({});
 
@@ -164,6 +169,13 @@ function ConnectorsSection({ tenantId }: { tenantId: string }): JSX.Element {
         </p>
       ) : null}
       {sample.isError ? <ErrorState error={sample.error} /> : null}
+      {sync.isSuccess ? (
+        <p className="muted">
+          Sync complete — {sync.data.ingestion.emitted} records from the source,{' '}
+          {sync.data.teamsComputed} teams computed. See the Overview tab.
+        </p>
+      ) : null}
+      {sync.isError ? <ErrorState error={sync.error} /> : null}
 
       {types.data !== undefined && adding === null ? (
         <div className="type-grid">
@@ -208,6 +220,16 @@ function ConnectorsSection({ tenantId }: { tenantId: string }): JSX.Element {
                 ) : null}
               </div>
               <div className="admin-actions">
+                {syncableTypes.has(c.type) ? (
+                  <button
+                    type="button"
+                    className="btn primary"
+                    disabled={sync.isPending}
+                    onClick={() => sync.mutate(c.id)}
+                  >
+                    {sync.isPending ? 'Syncing…' : 'Sync now'}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="btn"
