@@ -36,6 +36,9 @@ DECLARE
     'staging.raw_jira',              -- TASK-0019 M2 (real connectors)
     'staging.raw_bitbucket',         -- TASK-0019 M2
     'staging.raw_sonarqube',         -- TASK-0019 M2
+    'staging.raw_github',            -- TASK-0021 M2b Wave 2D (real connectors, second wave)
+    'staging.raw_gitlab',            -- TASK-0021 M2b Wave 2D
+    'staging.raw_jenkins',           -- TASK-0021 M2b Wave 2D
     'work.work_item_transition',     -- TASK-0016 INC-2 (canonical flow)
     'scm.pull_request',              -- TASK-0016 INC-2
     'scm.code_review',               -- TASK-0016 INC-2

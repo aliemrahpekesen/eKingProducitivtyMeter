@@ -124,7 +124,8 @@ class ConnectorAdminIntegrationTest {
 
     assertThat(service.types())
         .extracting("type")
-        .containsExactly("simulation", "jira", "bitbucket", "sonarqube");
+        .containsExactly(
+            "simulation", "jira", "bitbucket", "sonarqube", "github", "gitlab", "jenkins");
 
     ConnectorAdminView jira =
         service.register(

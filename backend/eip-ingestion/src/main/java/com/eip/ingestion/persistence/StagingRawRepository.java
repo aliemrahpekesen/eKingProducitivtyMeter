@@ -27,11 +27,14 @@ public class StagingRawRepository {
 
   /** Whitelisted raw tables by connector type — SQL is composed ONLY from these constants. */
   private static final java.util.Map<String, String> RAW_TABLES =
-      java.util.Map.of(
-          "simulation", "staging.raw_simulation",
-          "jira", "staging.raw_jira",
-          "bitbucket", "staging.raw_bitbucket",
-          "sonarqube", "staging.raw_sonarqube");
+      java.util.Map.ofEntries(
+          java.util.Map.entry("simulation", "staging.raw_simulation"),
+          java.util.Map.entry("jira", "staging.raw_jira"),
+          java.util.Map.entry("bitbucket", "staging.raw_bitbucket"),
+          java.util.Map.entry("sonarqube", "staging.raw_sonarqube"),
+          java.util.Map.entry("github", "staging.raw_github"),
+          java.util.Map.entry("gitlab", "staging.raw_gitlab"),
+          java.util.Map.entry("jenkins", "staging.raw_jenkins"));
 
   /**
    * Resolves the staging table for a connector type (whitelist — never caller-composed SQL).

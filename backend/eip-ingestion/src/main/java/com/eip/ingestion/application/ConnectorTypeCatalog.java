@@ -40,7 +40,9 @@ public final class ConnectorTypeCatalog {
                  "email":{"type":"string","title":"Service account e-mail",
                           "description":"Integration (service) account for API auth only — EIP never surfaces individual activity (NFR-071)"},
                  "projectKeys":{"type":"string","title":"Project keys",
-                                "description":"Comma-separated, e.g. PLAT,PAY"}},
+                                "description":"Comma-separated, e.g. PLAT,PAY"},
+                 "webhookToken":{"type":"string","title":"Webhook token (optional)",
+                                 "description":"Optional shared token that authorizes webhook-triggered syncs (X-EIP-Webhook-Token header)"}},
                "required":["baseUrl","email"]}
               """,
               "API token",
@@ -55,7 +57,9 @@ public final class ConnectorTypeCatalog {
                  "baseUrl":{"type":"string","format":"uri","title":"Base URL",
                             "description":"e.g. https://api.bitbucket.org"},
                  "username":{"type":"string","title":"Service account username"},
-                 "workspace":{"type":"string","title":"Workspace / project"}},
+                 "workspace":{"type":"string","title":"Workspace / project"},
+                 "webhookToken":{"type":"string","title":"Webhook token (optional)",
+                                 "description":"Optional shared token that authorizes webhook-triggered syncs (X-EIP-Webhook-Token header)"}},
                "required":["baseUrl","username","workspace"]}
               """,
               "App password / token",
@@ -67,10 +71,60 @@ public final class ConnectorTypeCatalog {
               """
               {"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object",
                "title":"SonarQube","properties":{
-                 "baseUrl":{"type":"string","format":"uri","title":"Base URL"}},
+                 "baseUrl":{"type":"string","format":"uri","title":"Base URL"},
+                 "webhookToken":{"type":"string","title":"Webhook token (optional)",
+                                 "description":"Optional shared token that authorizes webhook-triggered syncs (X-EIP-Webhook-Token header)"}},
                "required":["baseUrl"]}
               """,
               "User token",
+              false),
+          new ConnectorTypeView(
+              "github",
+              "GitHub",
+              "Repositories, pull requests, reviews, issues and Actions builds from GitHub.",
+              """
+              {"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object",
+               "title":"GitHub","properties":{
+                 "baseUrl":{"type":"string","format":"uri","title":"Base URL",
+                            "description":"e.g. https://api.github.com (GitHub Enterprise Server: your own API host)"},
+                 "org":{"type":"string","title":"Organization"},
+                 "webhookToken":{"type":"string","title":"Webhook token (optional)",
+                                 "description":"Optional shared token that authorizes webhook-triggered syncs (X-EIP-Webhook-Token header)"}},
+               "required":["org"]}
+              """,
+              "Personal access token",
+              false),
+          new ConnectorTypeView(
+              "gitlab",
+              "GitLab",
+              "Group projects, merge requests and CI pipelines from GitLab.",
+              """
+              {"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object",
+               "title":"GitLab","properties":{
+                 "baseUrl":{"type":"string","format":"uri","title":"Base URL",
+                            "description":"e.g. https://gitlab.example.com"},
+                 "group":{"type":"string","title":"Group (or subgroup) path"},
+                 "webhookToken":{"type":"string","title":"Webhook token (optional)",
+                                 "description":"Optional shared token that authorizes webhook-triggered syncs (X-EIP-Webhook-Token header)"}},
+               "required":["baseUrl","group"]}
+              """,
+              "Personal access token",
+              false),
+          new ConnectorTypeView(
+              "jenkins",
+              "Jenkins",
+              "Jobs and build results from a Jenkins controller.",
+              """
+              {"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object",
+               "title":"Jenkins","properties":{
+                 "baseUrl":{"type":"string","format":"uri","title":"Base URL",
+                            "description":"e.g. https://ci.example.com"},
+                 "username":{"type":"string","title":"Service account username"},
+                 "webhookToken":{"type":"string","title":"Webhook token (optional)",
+                                 "description":"Optional shared token that authorizes webhook-triggered syncs (X-EIP-Webhook-Token header)"}},
+               "required":["baseUrl","username"]}
+              """,
+              "API token",
               false));
 
   private ConnectorTypeCatalog() {}
