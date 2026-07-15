@@ -1,0 +1,8 @@
+# test — shared functional-test environment (ADR-022). Same functional surface as dev (header
+# tenant resolution until OIDC lands — DEBT-012; simulation source; demo dataset seeded via the
+# `demo` group member) but with production-shaped structured JSON logs so log pipelines and
+# assertions match prod tooling.
+logging:
+  structured:
+    format:
+      console: logstash

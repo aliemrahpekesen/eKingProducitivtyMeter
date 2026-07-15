@@ -21,6 +21,13 @@ node_modules/
 .env
 .env.*
 !.env.example
+# Vite MODE files are per-environment config contracts (ADR-022) holding PUBLIC values only
+# (demo tenant id, localhost proxy target) — never secrets. Real secrets stay in git-ignored
+# .env / .env.local files.
+!.env.development
+!.env.test
+!.env.preprod
+!.env.production
 *.pem
 *.key
 

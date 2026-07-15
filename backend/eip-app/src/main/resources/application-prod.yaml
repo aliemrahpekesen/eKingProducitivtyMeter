@@ -1,0 +1,15 @@
+# prod — hardened defaults (ADR-022, BackendPlan §2.3): structured JSON logs only, RLS enforced by
+# construction (eip_app NOBYPASSRLS), secrets/DB coordinates ONLY via environment (never bake real
+# values into this file — DEBT-005 CHANGE_ME convention applies to deployment env files).
+#
+# BOOT IS INTENTIONALLY BLOCKED in this release: OIDC tenant resolution is not implemented yet
+# (DEBT-012), and header/demo tenant resolution must never serve production traffic — so
+# ProductionTenantResolutionGuard fails startup with a clear message. This file is complete and
+# validated so that enabling prod later is an OIDC change, not a config scramble.
+logging:
+  structured:
+    format:
+      console: logstash
+eip:
+  simulation:
+    enabled: true # v0.1: the simulation connector is the only source; set false once real connectors land

@@ -75,11 +75,12 @@ public record ConnectorProperties(
 ```
 
    No `@Value` in production code. All properties documented via `spring-boot-configuration-processor` metadata.
-3. **Profiles.** Exactly three runtime profiles:
-   - `local` — developer laptop against the Docker Compose stack (`../infrastructure/LocalDevelopment.md`); relaxed security (local accounts), verbose logging, simulation connectors enabled.
-   - `demo` — full stack with simulated enterprise data packs (`/simulation`), Keycloak, seeded tenants; used for demos and Playwright E2E.
-   - `prod` — hardened defaults: OIDC required, TLS, secrets from KMS SPI, structured JSON logs only, RLS enforced, actuator restricted.
-   Worker role selection uses additional profiles (section 9), never a fourth environment profile.
+3. **Profiles.** Four environment profiles (ADR-022), one config file each (`application-<env>.yaml`), selected by the installer (`scripts/install/`, `config/environments/*.env`):
+   - `dev` — developer laptop against the Docker Compose stack (`../infrastructure/LocalDevelopment.md`, install runbook `../infrastructure/LocalInstall.md`); human-readable logs, dev header tenant resolution, simulation connectors enabled, demo dataset seeded.
+   - `test` — shared functional-test environment; same functional surface as `dev` but structured JSON logs; demo dataset seeded.
+   - `preprod` — production rehearsal: no seeding, structured JSON logs, full tracing; tenant resolution remains the dev header resolver only until OIDC lands (DEBT-012).
+   - `prod` — hardened defaults: OIDC required, TLS, secrets from KMS SPI, structured JSON logs only, RLS enforced, actuator restricted. Boot is refused by `ProductionTenantResolutionGuard` until OIDC exists (DEBT-012).
+   `demo` is not an environment: it is the seeding feature profile (gates `DemoDataSeeder`), activated via profile groups by `dev`/`test`. Worker role selection uses additional profiles (section 9), never a fifth environment profile.
 4. **No `@Transactional` on controllers.** Transactions live in application services; controllers translate DTO ↔ domain and nothing else. Layering inside a module is `api` (controllers, only in `eip-app`) → application service → domain → infrastructure (repositories, clients); MapStruct-free — mapping is explicit static factory methods on DTO records.
 5. **Time and IDs.** `Clock` is injected everywhere (testability); entity IDs are UUIDv7 generated in `eip-core`.
 6. **Actuator.** `health` (liveness/readiness groups), `info`, `prometheus` exposed; everything else disabled in `prod`. Worker processes expose the same actuator on a management port for K8s probes.

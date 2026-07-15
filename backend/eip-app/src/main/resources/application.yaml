@@ -4,6 +4,13 @@
 spring:
   application:
     name: eip-app
+  profiles:
+    group:
+      # Environment profiles (ADR-022): dev/test also activate the `demo` seeding feature profile,
+      # so a fresh environment comes up with the deterministic simulation dataset already computed.
+      # preprod/prod never seed.
+      dev: demo
+      test: demo
   threads:
     virtual:
       enabled: true # Java 21 virtual threads for blocking MVC/JDBC IO (BackendPlan §4)
@@ -55,21 +62,3 @@ management:
     tracing:
       # Points at the Compose OTel Collector OTLP/HTTP receiver; overridable per deployment.
       endpoint: ${EIP_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
-
----
-# demo/prod: structured JSON logs on stdout (ObservabilityModel §4). local/default stays
-# human-readable. Every line carries tenantId/traceId/spanId from MDC (filter + OTel).
-spring:
-  config:
-    activate:
-      on-profile: demo | prod
-logging:
-  structured:
-    format:
-      console: logstash
-
-# Deterministic simulation source (v0.1, TASK-0016): the only connector until real connectors land.
-# Disable to boot without any source wired.
-eip:
-  simulation:
-    enabled: true
