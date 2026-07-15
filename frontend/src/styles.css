@@ -458,3 +458,115 @@ body {
   margin-top: 0.6rem;
   font-size: 0.8rem;
 }
+
+/* M1 admin panel + tab nav (ADR-022) — reuses the card/badge/muted tokens. */
+.tabs {
+  display: flex;
+  gap: 0.5rem;
+}
+.tab {
+  border: 1px solid color-mix(in srgb, var(--muted) 35%, transparent);
+  background: transparent;
+  color: inherit;
+  padding: 0.4rem 0.9rem;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.tab.active {
+  background: color-mix(in srgb, var(--muted) 18%, transparent);
+  font-weight: 600;
+}
+.admin {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  grid-column: 1 / -1;
+}
+.admin-list {
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.admin-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--muted) 25%, transparent);
+  border-radius: 8px;
+}
+.admin-id {
+  font-size: 0.75rem;
+}
+.admin-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+.admin-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 0.6rem;
+  align-items: flex-end;
+}
+.admin-form input {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--muted) 35%, transparent);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  min-width: 14rem;
+}
+.admin-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+}
+.connector-form {
+  flex-direction: column;
+  align-items: stretch;
+  border-top: 1px dashed color-mix(in srgb, var(--muted) 30%, transparent);
+  padding-top: 0.8rem;
+}
+.type-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 0.6rem;
+  margin: 0.6rem 0;
+}
+.type-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  text-align: left;
+  padding: 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--muted) 30%, transparent);
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.type-card:hover {
+  border-color: color-mix(in srgb, var(--muted) 60%, transparent);
+}
+.badge.pending {
+  background: color-mix(in srgb, orange 20%, transparent);
+}
+.test-result.ok {
+  color: #2e7d32;
+}
+.test-result.not_available {
+  color: #b26a00;
+}
+.test-result.failed {
+  color: #c62828;
+}
+.admin-tree ul {
+  margin: 0.2rem 0 0.4rem 1rem;
+}

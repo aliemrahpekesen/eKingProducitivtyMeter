@@ -234,7 +234,8 @@ Write-Host ''
 Write-Host '  =============================================================================='
 Write-Host "   EIP is running - environment: $Env (SIMULATION data source; no real connectors yet)"
 Write-Host ''
-Write-Host "     Frontend     $FrontendUrl      <- open this"
+Write-Host "     Admin panel  $FrontendUrl/#admin   <- manage tenants & integrations"
+Write-Host "     Frontend     $FrontendUrl      (Overview: metrics)"
 Write-Host "     Backend API  $BackendUrl/api/v1        OpenAPI: $BackendUrl/v3/api-docs"
 Write-Host "     Health       $BackendUrl/actuator/health"
 if ($Seeded -eq '1') {
@@ -252,3 +253,4 @@ Write-Host ''
 Write-Host '     Stop:        .\scripts\install\stop.ps1        (keeps data)'
 Write-Host '     Uninstall:   .\scripts\install\uninstall.ps1   (DESTRUCTIVE: removes volumes)'
 Write-Host '  =============================================================================='
+Start-Process "$FrontendUrl/#admin" -ErrorAction SilentlyContinue

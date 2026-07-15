@@ -91,3 +91,60 @@ export interface FrictionSummaryView {
   teams: TeamFrictionView[];
   teamsReporting: number;
 }
+
+// ── M1 admin panel (ADR-022) ────────────────────────────────────────────────────────────────────
+
+export interface TenantView {
+  id: string;
+  name: string;
+  slug: string;
+}
+
+export interface TeamAdminView {
+  id: string;
+  name: string;
+}
+
+export interface BusinessUnitView {
+  id: string;
+  name: string;
+  teams: TeamAdminView[];
+}
+
+export interface OrganizationView {
+  id: string;
+  name: string;
+  slug: string;
+  businessUnits: BusinessUnitView[];
+}
+
+export interface ConnectorTypeView {
+  type: string;
+  displayName: string;
+  description: string;
+  /** JSON Schema (draft 2020-12) text driving the config form. */
+  configSchema: string;
+  secretLabel: string | null;
+  syncAvailable: boolean;
+}
+
+export interface ConnectorAdminView {
+  id: string;
+  type: string;
+  name: string;
+  status: string;
+  simulation: boolean;
+  config: Record<string, string>;
+  hasSecret: boolean;
+}
+
+export interface TestConnectionResult {
+  outcome: 'OK' | 'NOT_AVAILABLE' | 'FAILED';
+  message: string;
+}
+
+export interface SampleDataResult {
+  ingestion: { emitted: number; inserted: number; updated: number; unchanged: number };
+  teamsComputed: number;
+  itemsCorrelated: number;
+}

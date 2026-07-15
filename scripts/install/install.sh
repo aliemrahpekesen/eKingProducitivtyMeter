@@ -231,7 +231,8 @@ cat <<EOF
   ══════════════════════════════════════════════════════════════════════════════
    EIP is running — environment: ${EIP_ENV} (SIMULATION data source; no real connectors yet)
 
-     Frontend     ${FRONTEND_URL}      ← open this
+     Admin panel  ${FRONTEND_URL}/#admin   ← manage tenants & integrations (Jira/Bitbucket/Sonar)
+     Frontend     ${FRONTEND_URL}      (Overview: metrics)
      Backend API  ${BACKEND_URL}/api/v1        OpenAPI: ${BACKEND_URL}/v3/api-docs
      Health       ${BACKEND_URL}/actuator/health
 $( [ "$SEEDED" = "1" ] && cat <<SEEDEOF
@@ -254,3 +255,9 @@ ${GRAF}
   ══════════════════════════════════════════════════════════════════════════════
 
 EOF
+
+# Open the admin panel so onboarding starts immediately (best-effort, headless-safe).
+ADMIN_URL="${FRONTEND_URL}/#admin"
+if command -v open >/dev/null 2>&1; then open "$ADMIN_URL" 2>/dev/null || true
+elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$ADMIN_URL" >/dev/null 2>&1 || true
+fi

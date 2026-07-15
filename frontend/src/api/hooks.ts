@@ -1,12 +1,18 @@
 // TanStack Query hooks over the /api/v1 read surface. Queries are disabled until a tenant is set,
 // and never retry (a 401 for a missing/invalid tenant should surface immediately, not spin).
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import { apiGet } from './client';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { apiGet, apiPost } from './client';
 import type {
+  ConnectorAdminView,
+  ConnectorTypeView,
   FrictionEvidenceView,
   FrictionSummaryView,
+  OrganizationView,
   PageViewConnectorView,
+  SampleDataResult,
   SessionView,
+  TenantView,
+  TestConnectionResult,
 } from './types';
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -58,5 +64,93 @@ export function useFrictionEvidence(tenantId: string, teamId: string, enabled: b
       ),
     enabled: enabled && tenantId.length > 0 && teamId.length > 0,
     retry: false,
+  });
+}
+
+// ── M1 admin panel ──────────────────────────────────────────────────────────────────────────────
+
+export function useTenants() {
+  return useQuery({
+    queryKey: ['admin', 'tenants'],
+    queryFn: () => apiGet<TenantView[]>('/api/v1/admin/tenants', ''),
+    retry: false,
+  });
+}
+
+export function useStructure(tenantId: string) {
+  return useQuery({
+    queryKey: ['admin', 'structure', tenantId],
+    queryFn: () => apiGet<OrganizationView[]>('/api/v1/admin/structure', tenantId),
+    enabled: tenantId.length > 0,
+    retry: false,
+  });
+}
+
+export function useConnectorTypes() {
+  return useQuery({
+    queryKey: ['admin', 'connector-types'],
+    queryFn: () => apiGet<ConnectorTypeView[]>('/api/v1/admin/connector-types', ''),
+    retry: false,
+  });
+}
+
+export function useAdminConnectors(tenantId: string) {
+  return useQuery({
+    queryKey: ['admin', 'connectors', tenantId],
+    queryFn: () => apiGet<ConnectorAdminView[]>('/api/v1/admin/connectors', tenantId),
+    enabled: tenantId.length > 0,
+    retry: false,
+  });
+}
+
+export function useCreateTenant() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { name: string; slug: string }) =>
+      apiPost<TenantView>('/api/v1/admin/tenants', '', input),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['admin', 'tenants'] }),
+  });
+}
+
+export function useRegisterConnector(tenantId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      type: string;
+      name: string;
+      config: Record<string, string>;
+      secret?: string;
+    }) => apiPost<ConnectorAdminView>('/api/v1/admin/connectors', tenantId, input),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'connectors', tenantId] }),
+  });
+}
+
+export function useTestConnector(tenantId: string) {
+  return useMutation({
+    mutationFn: (connectorId: string) =>
+      apiPost<TestConnectionResult>(`/api/v1/admin/connectors/${connectorId}/test`, tenantId),
+  });
+}
+
+export function useSetConnectorStatus(tenantId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { connectorId: string; status: 'ACTIVE' | 'DISABLED' }) =>
+      apiPost<ConnectorAdminView>(
+        `/api/v1/admin/connectors/${input.connectorId}/status`,
+        tenantId,
+        { status: input.status },
+      ),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'connectors', tenantId] }),
+  });
+}
+
+export function useLoadSampleData(tenantId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiPost<SampleDataResult>('/api/v1/admin/sample-data', tenantId),
+    onSuccess: () => void queryClient.invalidateQueries(),
   });
 }
