@@ -7,6 +7,18 @@ export interface SessionView {
   organizationName: string | null;
 }
 
+// ── M5 OIDC login (Wave S1b) ────────────────────────────────────────────────────────────────────
+
+/**
+ * GET /api/v1/session/auth — no auth, no tenant header. Tells the SPA how to authenticate: HEADER
+ * (today's dev tenant header, zero-auth) or OIDC (Authorization Code + PKCE against `issuer`).
+ */
+export interface AuthConfigView {
+  mode: 'HEADER' | 'OIDC';
+  issuer: string | null;
+  clientId: string | null;
+}
+
 export interface ConnectorView {
   id: string;
   type: string;

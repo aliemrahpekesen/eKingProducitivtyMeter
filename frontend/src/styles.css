@@ -429,6 +429,49 @@ body {
   text-align: center;
 }
 
+/* M5 Wave S1b — OIDC login (auth boot / login screen / signed-in chip). */
+.auth-boot {
+  max-width: 960px;
+  margin: 80px auto;
+  padding: 0 20px;
+  justify-content: center;
+}
+
+.auth-login {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.auth-login-card {
+  max-width: 360px;
+  text-align: center;
+}
+
+.auth-login-card .btn-primary {
+  margin-top: 16px;
+  width: 100%;
+}
+
+.auth-dev-hint {
+  margin-top: 16px;
+  font-size: 12px;
+}
+
+.user-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.user-chip-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
 /* Friction drill-to-evidence drawer (TASK-0016) — compact, reuses the muted/mono tokens. */
 .evidence {
   margin-top: 0.4rem;
