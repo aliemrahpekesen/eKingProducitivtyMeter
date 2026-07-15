@@ -1,0 +1,41 @@
+EIP (Engineering Intelligence Platform) — {{ .Chart.Name }} chart v{{ .Chart.Version }} (app v{{ .Chart.AppVersion }})
+
+{{- if not .Values.secrets.existingSecret }}
+{{- if or (eq .Values.secrets.appDbPassword "CHANGE_ME") (eq .Values.secrets.migratorDbPassword "CHANGE_ME") (eq .Values.secrets.secretsMasterKey "CHANGE_ME") }}
+
+  ⚠ WARNING — one or more secrets.* values are still "CHANGE_ME". This is BY DESIGN: eip-app's
+    ProductionSecretsGuard (com.eip.app.config, DEBT-005) refuses to boot rather than start with a
+    placeholder database password or envelope-encryption master key. The pod(s) will crash-loop
+    until every one of the following is set to a real value:
+      - secrets.appDbPassword       (EIP_APP_DB_PASSWORD)
+      - secrets.migratorDbPassword  (EIP_MIGRATOR_DB_PASSWORD)
+      - secrets.secretsMasterKey    (EIP_SECRETS_MASTER_KEY — base64 of 32 random bytes, e.g.
+                                      `openssl rand -base64 32`)
+    Re-run with --set/--set-file/-f, or provision the Secret out-of-band and set
+    secrets.existingSecret — see docs/infrastructure/HelmDeployment.md.
+{{- end }}
+{{- end }}
+
+1. Check rollout status:
+     kubectl rollout status deployment/{{ include "eip.backend.fullname" . }} -n {{ .Release.Namespace }}
+
+2. Reach the API:
+{{- if .Values.ingress.enabled }}
+   Ingress is enabled — the API is served at:
+   {{- range .Values.ingress.hosts }}
+     http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+   {{- end }}
+{{- else }}
+   Ingress is disabled (values.yaml ingress.enabled: false) — port-forward to reach it:
+     kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "eip.backend.fullname" . }} 8080:{{ .Values.service.port }}
+     curl http://localhost:8080/actuator/health
+{{- end }}
+
+3. This chart only deploys eip-app{{ if .Values.frontend.enabled }} and the frontend{{ else }} (frontend.enabled is false — the frontend is not deployed by this release; see
+   docs/infrastructure/LocalInstall.md for running it separately){{ end }}. It bundles no data
+   services (air-gap principle) — confirm PostgreSQL 16+pgvector, Kafka, an OIDC issuer, and (once
+   used) object storage are reachable at the backend.env values you set before expecting readiness
+   to go green.
+
+4. Full deployment guide, values reference, and the air-gap image-mirror procedure:
+   docs/infrastructure/HelmDeployment.md

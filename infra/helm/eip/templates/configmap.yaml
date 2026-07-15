@@ -1,0 +1,15 @@
+# Non-secret backend runtime configuration (values.yaml backend.env + the Spring profile). Kept
+# separate from the Secret so `kubectl get configmap -o yaml` is safe to share for support/audit —
+# no secret-bearing value is ever a ConfigMap key (DEBT-005).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "eip.backend.fullname" . }}-config
+  labels:
+    {{- include "eip.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+data:
+  SPRING_PROFILES_ACTIVE: {{ .Values.backend.springProfilesActive | quote }}
+  {{- range $key, $value := .Values.backend.env }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
