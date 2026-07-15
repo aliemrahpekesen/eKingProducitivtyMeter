@@ -46,7 +46,8 @@ import org.testcontainers.utility.DockerImageName;
  * envelope-encrypted) → REAL authenticated Test Connection → "Sync now" pulls issues + changelog
  * through the same staging→normalization→correlation→friction pipeline (teams auto-created from the
  * project key) → the dashboard shows friction computed from JIRA data. Replays stay idempotent;
- * unavailable sync types fail honestly.
+ * unavailable sync types fail honestly; the webhook trigger path (debounce + brute-force guard, M2b
+ * Wave 3E) is exercised end to end.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
 @AutoConfigureMockMvc
@@ -272,6 +273,40 @@ class AdminJiraSyncIntegrationTest {
                 .header("X-EIP-Webhook-Token", "whsec-1"))
         .andExpect(status().isAccepted())
         .andExpect(jsonPath("$.status").value("debounced"));
+
+    // 13. Brute-force guard (M2b Wave 3E): a DEDICATED connector (never touched again after this
+    // block, so the assertions above are unaffected by it ending up throttled) absorbs 10
+    // wrong-token attempts -> the 11th attempt short-circuits to 429 for EVERY further attempt,
+    // even one bearing the correct token — the guard never compares tokens once over threshold
+    // (design: simpler + safer than trying to let a correct token through mid-storm; a legitimate
+    // sender just retries after the 10-minute window — see TriggerWebhookSyncUseCase's class
+    // javadoc).
+    String throttleConnectorId =
+        JsonPath.read(
+            mvc.perform(
+                    post("/api/v1/admin/connectors")
+                        .header(HeaderTenantResolver.HEADER, tenant)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(
+                            "{\"type\":\"jira\",\"name\":\"Throttle Jira\",\"config\":{\"baseUrl\":\""
+                                + JIRA.baseUrl()
+                                + "\",\"email\":\"svc3@corp.io\",\"projectKeys\":\"PLAT\","
+                                + "\"webhookToken\":\"throttle-secret\"},\"secret\":\"corp-token-3\"}"))
+                .andExpect(status().isCreated())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(),
+            "$.id");
+    for (int i = 0; i < 10; i++) {
+      mvc.perform(
+              post("/api/v1/webhooks/" + tenant + "/" + throttleConnectorId)
+                  .header("X-EIP-Webhook-Token", "wrong-token"))
+          .andExpect(status().isUnauthorized());
+    }
+    mvc.perform(
+            post("/api/v1/webhooks/" + tenant + "/" + throttleConnectorId)
+                .header("X-EIP-Webhook-Token", "throttle-secret"))
+        .andExpect(status().isTooManyRequests());
   }
 
   private static String checkpointCursorJson(UUID connectorId) throws SQLException {

@@ -33,4 +33,15 @@ public class ConnectorRegistry {
   public Optional<Connector> byType(String type) {
     return Optional.ofNullable(byType.get(type));
   }
+
+  /**
+   * Returns every installed connector implementation (unordered) — the descriptor-driven admin
+   * catalog's source of truth (DEBT-018): a type appears in the catalog if and only if it is
+   * installed here.
+   *
+   * @return the installed connectors
+   */
+  public List<Connector> all() {
+    return List.copyOf(byType.values());
+  }
 }

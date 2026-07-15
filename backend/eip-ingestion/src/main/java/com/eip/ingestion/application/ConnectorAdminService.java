@@ -6,6 +6,7 @@ package com.eip.ingestion.application;
 
 import com.eip.connectors.spi.Connector;
 import com.eip.connectors.spi.ConnectorConfig;
+import com.eip.connectors.spi.ConnectorDescriptor;
 import com.eip.connectors.spi.TestConnectionOutcome;
 import com.eip.core.error.ResourceNotFoundException;
 import com.eip.core.error.ValidationException;
@@ -15,6 +16,7 @@ import com.eip.tenancy.secrets.SecretsService;
 import com.eip.tenancy.tx.TenantTransactionRunner;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -22,13 +24,16 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 
 /**
- * Connector administration for the current tenant. Registration validates the type against the
- * catalog and the config against the schema's required keys; secrets go through the
- * envelope-encrypting {@code SecretsService} and are never readable through any admin surface.
- * {@code test} is honest: simulation, Jira, Bitbucket and SonarQube all probe the real source;
- * {@code NOT_AVAILABLE} is reported only when no connector implementation is installed for the
- * type, never a fake OK. Remaining DEBT-018 scope: a descriptor-driven catalog and additional
- * connector types.
+ * Connector administration for the current tenant. The catalog is descriptor-driven (DEBT-018):
+ * {@link #types()} asks the {@link ConnectorRegistry} for every INSTALLED connector's {@link
+ * ConnectorDescriptor}, sorted by type for a deterministic listing — seven types ship today
+ * (simulation, Jira, Bitbucket, SonarQube, GitHub, GitLab, Jenkins), and a newly installed
+ * connector appears automatically, with no separate catalog edit. Registration validates the type
+ * against that same registry and the config against the descriptor's schema-required keys; secrets
+ * go through the envelope-encrypting {@code SecretsService} and are never readable through any
+ * admin surface. {@code test} is honest: every installed type probes its real source; {@code
+ * NOT_AVAILABLE} is reported only when no connector implementation is installed for the type, never
+ * a fake OK.
  */
 @Service
 public class ConnectorAdminService implements ManageConnectorsUseCase {
@@ -56,30 +61,36 @@ public class ConnectorAdminService implements ManageConnectorsUseCase {
 
   @Override
   public List<ConnectorTypeView> types() {
-    // Catalog entries stay honest: syncAvailable reflects the INSTALLED implementation.
-    return ConnectorTypeCatalog.all().stream()
+    // Descriptor-driven (DEBT-018): every INSTALLED connector describes itself; syncAvailable
+    // reflects that same installed implementation, never a hand-maintained catalog entry.
+    return registry.all().stream()
+        .sorted(Comparator.comparing(Connector::type))
         .map(
-            t ->
-                new ConnectorTypeView(
-                    t.type(),
-                    t.displayName(),
-                    t.description(),
-                    t.configSchema(),
-                    t.secretLabel(),
-                    registry.byType(t.type()).map(Connector::syncAvailable).orElse(false)))
+            c -> {
+              ConnectorDescriptor d = c.descriptor();
+              return new ConnectorTypeView(
+                  d.type(),
+                  d.displayName(),
+                  d.description(),
+                  d.configSchema(),
+                  d.secretLabel(),
+                  c.syncAvailable());
+            })
         .toList();
   }
 
   @Override
   public ConnectorAdminView register(RegisterConnectorCommand command) {
-    ConnectorTypeView type =
-        ConnectorTypeCatalog.byType(command.type())
+    Connector connector =
+        registry
+            .byType(command.type())
             .orElseThrow(
                 () -> new ValidationException("unknown connector type: " + command.type()));
+    ConnectorDescriptor type = connector.descriptor();
     if (command.name().isBlank()) {
       throw new ValidationException("connector name must not be blank");
     }
-    requireSchemaRequiredKeys(type, command.config());
+    requireSchemaRequiredKeys(type.configSchema(), command.config());
     if (type.secretLabel() != null && (command.secret() == null || command.secret().isBlank())) {
       throw new ValidationException(
           type.displayName() + " requires a secret (" + type.secretLabel() + ")");
@@ -146,9 +157,9 @@ public class ConnectorAdminService implements ManageConnectorsUseCase {
     return new TestConnectionResult(outcome.outcome(), outcome.message());
   }
 
-  private void requireSchemaRequiredKeys(ConnectorTypeView type, Map<String, String> config) {
+  private void requireSchemaRequiredKeys(String configSchema, Map<String, String> config) {
     try {
-      JsonNode required = mapper.readTree(type.configSchema()).path("required");
+      JsonNode required = mapper.readTree(configSchema).path("required");
       for (JsonNode key : required) {
         String k = key.asText();
         if (config.get(k) == null || config.get(k).isBlank()) {
@@ -156,7 +167,7 @@ public class ConnectorAdminService implements ManageConnectorsUseCase {
         }
       }
     } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
-      throw new IllegalStateException("catalog schema is not valid JSON", e);
+      throw new IllegalStateException("descriptor schema is not valid JSON", e);
     }
   }
 }

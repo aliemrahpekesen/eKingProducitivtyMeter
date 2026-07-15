@@ -16,6 +16,8 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -36,8 +38,15 @@ import org.springframework.stereotype.Service;
  * <p>The webhook token is compared with {@link MessageDigest#isEqual} (constant-time) against the
  * connector's {@code webhookToken} config setting; it is never logged or echoed. A per-connector
  * in-memory debounce (last-accepted timestamp, {@value #DEBOUNCE_SECONDS} s window) is v0.1 storm
- * protection only — real rate limiting is Wave 3E — and is lost on restart by design (no
- * cross-instance coordination needed for this release).
+ * protection only, unrelated to the brute-force guard below — both are lost on restart by design
+ * (no cross-instance coordination needed for this release).
+ *
+ * <p><b>Brute-force guard (M2b Wave 3E):</b> a per-connector, in-memory sliding window counts
+ * rejected (missing/invalid token) attempts; once a connector accumulates {@value
+ * #REJECTION_THRESHOLD} rejections within {@value #REJECTION_WINDOW_MINUTES} minutes, {@link
+ * #trigger} short-circuits every further attempt for that connector — see {@link
+ * TriggerWebhookSyncUseCase} class javadoc — to {@link WebhookOutcome#THROTTLED} WITHOUT comparing
+ * tokens, until the window rolls off or a successful auth {@link #resetRejectionWindow resets} it.
  */
 @Service
 public class WebhookTriggerService implements TriggerWebhookSyncUseCase {
@@ -46,14 +55,19 @@ public class WebhookTriggerService implements TriggerWebhookSyncUseCase {
   private static final int DEBOUNCE_SECONDS = 30;
   private static final Duration DEBOUNCE_WINDOW = Duration.ofSeconds(DEBOUNCE_SECONDS);
   private static final String CONFIG_TOKEN_KEY = "webhookToken";
+  private static final int REJECTION_THRESHOLD = 10;
+  private static final int REJECTION_WINDOW_MINUTES = 10;
+  private static final Duration REJECTION_WINDOW = Duration.ofMinutes(REJECTION_WINDOW_MINUTES);
 
   private final ManageConnectorsUseCase connectors;
   private final SyncConnectorUseCase connectorSync;
   private final ExecutorService webhookSyncExecutor;
   private final ConcurrentMap<UUID, Instant> lastAccepted = new ConcurrentHashMap<>();
+  private final ConcurrentMap<UUID, Deque<Instant>> rejectionWindows = new ConcurrentHashMap<>();
   private final Counter accepted;
   private final Counter rejected;
   private final Counter debounced;
+  private final Counter throttled;
 
   /**
    * Creates the service.
@@ -84,6 +98,10 @@ public class WebhookTriggerService implements TriggerWebhookSyncUseCase {
         Counter.builder("eip.webhooks.debounced")
             .description("Webhook triggers skipped by the in-memory storm-protection debounce")
             .register(registry);
+    this.throttled =
+        Counter.builder("eip.webhooks.throttled")
+            .description("Webhook triggers short-circuited by the per-connector brute-force guard")
+            .register(registry);
   }
 
   @Override
@@ -91,6 +109,12 @@ public class WebhookTriggerService implements TriggerWebhookSyncUseCase {
     TenantContext tenant = TenantContext.of(tenantId);
     bindTenant(tenant);
     try {
+      if (isThrottled(connectorId)) {
+        throttled.increment();
+        log.warn("webhook throttled: too many rejected attempts for connector {}", connectorId);
+        return WebhookOutcome.THROTTLED;
+      }
+
       Optional<ConnectorAdminView> found =
           connectors.list().stream().filter(c -> c.id().equals(connectorId)).findFirst();
       if (found.isEmpty()) {
@@ -103,9 +127,11 @@ public class WebhookTriggerService implements TriggerWebhookSyncUseCase {
           || configuredToken.isBlank()
           || !constantTimeEquals(configuredToken, suppliedToken)) {
         rejected.increment();
+        recordRejection(connectorId);
         log.warn("webhook rejected: missing or invalid token for connector {}", connectorId);
         return WebhookOutcome.UNAUTHORIZED;
       }
+      resetRejectionWindow(connectorId);
 
       if (isDebounced(connectorId)) {
         debounced.increment();
@@ -138,6 +164,45 @@ public class WebhookTriggerService implements TriggerWebhookSyncUseCase {
           return now;
         });
     return debouncedFlag[0];
+  }
+
+  /**
+   * Reports whether {@code connectorId} is currently over the brute-force threshold: {@value
+   * #REJECTION_THRESHOLD} or more rejected attempts recorded within the trailing {@value
+   * #REJECTION_WINDOW_MINUTES} minutes. Prunes stale entries out of the window as a side effect.
+   */
+  private boolean isThrottled(UUID connectorId) {
+    @Nullable Deque<Instant> window = rejectionWindows.get(connectorId);
+    if (window == null) {
+      return false;
+    }
+    synchronized (window) {
+      pruneRejectionWindow(window, Instant.now());
+      return window.size() >= REJECTION_THRESHOLD;
+    }
+  }
+
+  /** Records one rejected (missing/invalid token) attempt for {@code connectorId}. */
+  private void recordRejection(UUID connectorId) {
+    Instant now = Instant.now();
+    Deque<Instant> window = rejectionWindows.computeIfAbsent(connectorId, id -> new ArrayDeque<>());
+    synchronized (window) {
+      pruneRejectionWindow(window, now);
+      window.addLast(now);
+    }
+  }
+
+  /** Clears {@code connectorId}'s rejection window — a successful auth is not an attack. */
+  private void resetRejectionWindow(UUID connectorId) {
+    rejectionWindows.remove(connectorId);
+  }
+
+  /** Drops entries older than {@value #REJECTION_WINDOW_MINUTES} minutes from the window's head. */
+  private static void pruneRejectionWindow(Deque<Instant> window, Instant now) {
+    while (!window.isEmpty()
+        && Duration.between(window.peekFirst(), now).compareTo(REJECTION_WINDOW) >= 0) {
+      window.pollFirst();
+    }
   }
 
   /** Runs on the dedicated virtual-thread executor; binds/unbinds the tenant on that thread. */

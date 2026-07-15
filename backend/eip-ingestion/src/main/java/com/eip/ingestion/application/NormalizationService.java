@@ -47,6 +47,15 @@ import org.springframework.stereotype.Service;
  * of per-record lookups. Work-item identity is anchored through {@code core.external_ref} (AD-14),
  * so re-normalizing resolves the same stable ids and changes nothing.
  *
+ * <p><strong>Delete lifecycle (DEBT-020 item 3, v0.1 — work items only):</strong> a staged {@code
+ * op='delete'} row for the work-item stream resolves its canonical id through the same external-ref
+ * identity path and sets {@code work.work_item.deleted_at} (a bookkeeping "now", since no source
+ * reports a deletion instant); a later {@code upsert} for that same identity is a REVIVAL — {@link
+ * CanonicalWriteRepository#upsertWorkItems} clears {@code deleted_at} and reports the row as
+ * changed, so it emits an {@code upserted} outbox event same as any other change. No outbox event
+ * is emitted for the deletion itself (event-type vocabulary stays {@code upserted} only; a
+ * dedicated {@code deleted} event type is v0.2 follow-up).
+ *
  * <p><strong>Outbox-emission semantics (chosen trade-off, BackendPlan §6):</strong> exactly one
  * {@code core.event_outbox} row is written per canonical work item whose row {@linkplain
  * CanonicalWriteRepository#upsertWorkItems actually changed} in this normalization run — never one
@@ -103,7 +112,13 @@ public class NormalizationService implements NormalizeStagedDataUseCase {
           // Work items: resolve stable ids through external_ref, then batch upsert. Teams named
           // by sources but missing in the control plane are auto-created under an "Imported"
           // structure so freshly connected sources chart immediately (team-level only, NFR-071).
-          List<Parsed> items = parse(readAll(STREAM_WORK_ITEM));
+          // This is the one phase that also sees op='delete' rows (DEBT-020 item 3): every other
+          // stream below reads readAll/readStream, which only ever returns op='upsert'.
+          List<StagedRow> workItemRows = readAllWithDeletes(STREAM_WORK_ITEM);
+          List<Parsed> items =
+              parse(workItemRows.stream().filter(r -> "upsert".equals(r.op())).toList());
+          List<StagedRow> deleteRows =
+              workItemRows.stream().filter(r -> "delete".equals(r.op())).toList();
           java.util.Set<String> unknownTeams = new java.util.LinkedHashSet<>();
           for (Parsed p : items) {
             String team = p.text("team");
@@ -144,6 +159,24 @@ public class NormalizationService implements NormalizeStagedDataUseCase {
           }
           List<UUID> changedWorkItemIds = canonical.upsertWorkItems(workItems);
           emitWorkItemUpsertedEvents(tenant, items, workItems, changedWorkItemIds);
+
+          // Deletes (DEBT-020 item 3, v0.1 — work items only): resolve each delete row's canonical
+          // id through the SAME external_ref identity path, but never CREATE a missing anchor — an
+          // identity never seen as an upsert has nothing to delete (documented, silently skipped).
+          // No outbox event: the vocabulary stays 'upserted' only in v0.1 (follow-up, see class
+          // javadoc). A later re-upsert of the same identity is the revival path, handled entirely
+          // by upsertWorkItems above (it clears deleted_at and reports the row as changed).
+          if (!deleteRows.isEmpty()) {
+            Map<String, UUID> existingIds = canonical.existingWorkItemIdsByExternalId();
+            List<UUID> toDelete = new ArrayList<>();
+            for (StagedRow row : deleteRows) {
+              @Nullable UUID id = existingIds.get(row.externalId());
+              if (id != null) {
+                toDelete.add(id);
+              } // else: delete for an identity never ingested as an upsert; nothing to delete
+            }
+            canonical.markWorkItemsDeleted(toDelete);
+          }
 
           // Transitions: stitch to items via the in-memory key map.
           List<TransitionRow> transitions = new ArrayList<>();
@@ -262,11 +295,23 @@ public class NormalizationService implements NormalizeStagedDataUseCase {
     }
   }
 
-  /** Reads one stream across every raw staging table (bounded by the connector-type count). */
+  /** Reads one stream's upsert rows across every raw staging table (bounded by connector count). */
   private List<StagedRow> readAll(String stream) {
     List<StagedRow> rows = new ArrayList<>();
     for (String table : StagingRawRepository.rawTables()) {
       rows.addAll(staging.readStream(table, stream));
+    }
+    return rows;
+  }
+
+  /**
+   * Reads one stream's upsert AND delete rows across every raw staging table — only the work-item
+   * phase calls this (DEBT-020 item 3); every other stream reads {@link #readAll}.
+   */
+  private List<StagedRow> readAllWithDeletes(String stream) {
+    List<StagedRow> rows = new ArrayList<>();
+    for (String table : StagingRawRepository.rawTables()) {
+      rows.addAll(staging.readStreamWithDeletes(table, stream));
     }
     return rows;
   }

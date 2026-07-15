@@ -13,12 +13,14 @@ import org.jspecify.annotations.Nullable;
  * Tenant-scoped connector administration (M1 admin panel): the connector-type catalog with
  * JSON-Schema config forms, registration with envelope-encrypted secrets (never returned by any
  * API), status management, and an HONEST connection test — types whose real implementation has not
- * landed (DEBT-018) report {@code NOT_AVAILABLE}, never a fake success.
+ * landed report {@code NOT_AVAILABLE}, never a fake success.
  */
 public interface ManageConnectorsUseCase {
 
   /**
-   * Returns the connector-type catalog (static until the full SPI descriptors land — DEBT-018).
+   * Returns the connector-type catalog: descriptor-driven from the installed connector registry
+   * (DEBT-018) — every INSTALLED connector contributes its own {@code ConnectorDescriptor}, sorted
+   * by type for a deterministic listing.
    *
    * @return the available types with their config schemas
    */

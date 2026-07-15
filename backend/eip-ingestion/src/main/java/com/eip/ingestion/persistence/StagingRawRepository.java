@@ -112,13 +112,20 @@ public class StagingRawRepository {
     }
   }
 
-  /** One staged row read back for normalization. */
+  /**
+   * One staged row read back for normalization.
+   *
+   * @param op {@code upsert} or {@code delete} (staging.raw_&lt;connector&gt;.op) — {@link
+   *     #readStream} only ever returns {@code upsert} rows; {@link #readStreamWithDeletes} returns
+   *     both, for the one phase (work-item delete lifecycle, DEBT-020 item 3) that acts on deletes
+   */
   public record StagedRow(
       String naturalKey,
       String sourceSystem,
       String sourceInstance,
       String externalId,
-      String payload) {}
+      String payload,
+      String op) {}
 
   /**
    * Loads the connector's existing content hashes, keyed {@code stream|naturalKey}.
@@ -170,14 +177,15 @@ public class StagingRawRepository {
   }
 
   /**
-   * Reads one stream's staged upsert rows in deterministic order.
+   * Reads one stream's staged upsert rows in deterministic order (excludes {@code delete} rows).
    *
    * @param stream the logical source stream
    * @return the staged rows ordered by natural key
    */
   public List<StagedRow> readStream(String table, String stream) {
     return jdbc.sql(
-            "SELECT natural_key, source_system, source_instance, external_id, payload::text FROM "
+            "SELECT natural_key, source_system, source_instance, external_id, payload::text, op"
+                + " FROM "
                 + table
                 + " WHERE stream = :stream AND op = 'upsert' ORDER BY natural_key")
         .param("stream", stream)
@@ -188,7 +196,35 @@ public class StagingRawRepository {
                     rs.getString(2),
                     rs.getString(3),
                     rs.getString(4),
-                    rs.getString(5)))
+                    rs.getString(5),
+                    rs.getString(6)))
+        .list();
+  }
+
+  /**
+   * Reads ALL of one stream's staged rows — both {@code upsert} and {@code delete} — in
+   * deterministic order. Used only by the work-item normalization phase, the one phase that acts on
+   * delete assertions (DEBT-020 item 3); every other phase reads {@link #readStream} instead.
+   *
+   * @param stream the logical source stream
+   * @return the staged rows ordered by natural key
+   */
+  public List<StagedRow> readStreamWithDeletes(String table, String stream) {
+    return jdbc.sql(
+            "SELECT natural_key, source_system, source_instance, external_id, payload::text, op"
+                + " FROM "
+                + table
+                + " WHERE stream = :stream ORDER BY natural_key")
+        .param("stream", stream)
+        .query(
+            (rs, rowNum) ->
+                new StagedRow(
+                    rs.getString(1),
+                    rs.getString(2),
+                    rs.getString(3),
+                    rs.getString(4),
+                    rs.getString(5),
+                    rs.getString(6)))
         .list();
   }
 

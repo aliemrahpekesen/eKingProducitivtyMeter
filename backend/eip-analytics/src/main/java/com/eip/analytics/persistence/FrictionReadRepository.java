@@ -160,7 +160,7 @@ public class FrictionReadRepository {
             LEFT JOIN scm.pull_request pr ON pr.id = fc.pull_request_id
             LEFT JOIN cicd.build b ON b.id = fc.build_id
             LEFT JOIN quality.quality_gate qg ON qg.id = fc.quality_gate_id
-            WHERE fc.team_id = :teamId
+            WHERE fc.team_id = :teamId AND wi.deleted_at IS NULL
             ORDER BY er.external_key
             """)
         .param("teamId", teamId)

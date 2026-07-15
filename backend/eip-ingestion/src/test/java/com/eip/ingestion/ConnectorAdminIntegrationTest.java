@@ -8,6 +8,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.eip.connectors.bitbucket.BitbucketConnector;
+import com.eip.connectors.github.GitHubConnector;
+import com.eip.connectors.gitlab.GitLabConnector;
+import com.eip.connectors.jenkins.JenkinsConnector;
 import com.eip.connectors.jira.JiraConnector;
 import com.eip.connectors.simulation.SimulationConnector;
 import com.eip.connectors.sonarqube.SonarQubeConnector;
@@ -47,9 +50,10 @@ import org.testcontainers.utility.DockerImageName;
 
 /**
  * Module-level proof of connector administration against real PostgreSQL as the NOBYPASSRLS {@code
- * eip_app} role: catalog-validated registration with envelope-encrypted secrets, admin listing
- * without secret material, status lifecycle, HONEST connection tests (simulation OK, real types
- * NOT_AVAILABLE until M2), and tenant isolation.
+ * eip_app} role: the descriptor-driven catalog (every connector installed in the registry, sorted
+ * by type — DEBT-018), catalog-validated registration with envelope-encrypted secrets, admin
+ * listing without secret material, status lifecycle, an HONEST connection test (simulation OK, Jira
+ * FAILED against an unreachable stub base URL), and tenant isolation.
  */
 @Tag("integration")
 class ConnectorAdminIntegrationTest {
@@ -104,7 +108,10 @@ class ConnectorAdminIntegrationTest {
                     new SimulationConnector(),
                     new JiraConnector(),
                     new BitbucketConnector(),
-                    new SonarQubeConnector())),
+                    new SonarQubeConnector(),
+                    new GitHubConnector(),
+                    new GitLabConnector(),
+                    new JenkinsConnector())),
             mapper);
   }
 
@@ -122,10 +129,11 @@ class ConnectorAdminIntegrationTest {
   void registers_lists_toggles_and_tests_honestly_with_tenant_isolation() {
     TenantContextHolder.set(TenantContext.of(TENANT_A));
 
+    // Descriptor-driven catalog (DEBT-018): every registry-installed connector, sorted by type.
     assertThat(service.types())
         .extracting("type")
         .containsExactly(
-            "simulation", "jira", "bitbucket", "sonarqube", "github", "gitlab", "jenkins");
+            "bitbucket", "github", "gitlab", "jenkins", "jira", "simulation", "sonarqube");
 
     ConnectorAdminView jira =
         service.register(

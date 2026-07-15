@@ -20,8 +20,10 @@ import org.springframework.context.annotation.Configuration;
  * Registers the installed connector implementations. The connectors themselves stay
  * framework-independent pure Java — only their wiring is Spring. The simulation source is toggled
  * by {@code eip.simulation.enabled} (default on); the real connectors are always installed: Jira,
- * Bitbucket, SonarQube, GitHub, GitLab and Jenkins all probe and sync for real (M2/M2b). Remaining
- * DEBT-018 scope: a descriptor-driven catalog and additional connector types.
+ * Bitbucket, SonarQube, GitHub, GitLab and Jenkins all probe and sync for real (M2/M2b). Every bean
+ * registered here is exactly the {@code ConnectorRegistry}'s catalog: {@code
+ * ManageConnectorsUseCase#types()} is descriptor-driven from this list (DEBT-018), so installing an
+ * additional connector type only requires a {@code @Bean} here.
  */
 @Configuration(proxyBeanMethods = false)
 public class SimulationSourceConfiguration {

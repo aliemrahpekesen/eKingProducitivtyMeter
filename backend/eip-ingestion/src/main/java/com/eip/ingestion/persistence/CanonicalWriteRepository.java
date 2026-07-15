@@ -189,17 +189,31 @@ public class CanonicalWriteRepository {
   }
 
   /**
+   * Looks up EXISTING canonical work-item ids by their immutable external id — never creates a
+   * missing anchor (unlike {@link #resolveWorkItemIds}): a {@code delete} for an identity never
+   * ingested as an {@code upsert} has no canonical row to mark deleted (DEBT-020 item 3).
+   *
+   * @return entity ids keyed by external id, for every WORK_ITEM anchor currently known
+   */
+  public Map<String, UUID> existingWorkItemIdsByExternalId() {
+    return workItemRefIds();
+  }
+
+  /**
    * Batch-upserts canonical work items on their stable ids. The {@code DO UPDATE ... WHERE ... IS
    * DISTINCT FROM} guard makes PostgreSQL report an affected-row count of {@code 0} for a
    * conflicting row whose tracked columns are unchanged (no update executes) and {@code 1} for a
    * fresh insert or a row that actually changed — the returned list is exactly the ids the caller
-   * should treat as "changed this run" (NormalizationService's outbox-emission trigger). Requires
-   * the PGJDBC default {@code reWriteBatchedInserts=false} — batch rewriting would report {@code
-   * Statement.SUCCESS_NO_INFO} instead of real per-row counts and silently suppress every outbox
-   * emission.
+   * should treat as "changed this run" (NormalizationService's outbox-emission trigger). The guard
+   * includes {@code deleted_at}, and the {@code SET} clause always clears it to {@code NULL}: an
+   * upsert for a previously deleted identity is a REVIVAL (DEBT-020 item 3) — it un-deletes the row
+   * and counts as changed, so the caller emits an {@code upserted} event for it same as any other
+   * change. Requires the PGJDBC default {@code reWriteBatchedInserts=false} — batch rewriting would
+   * report {@code Statement.SUCCESS_NO_INFO} instead of real per-row counts and silently suppress
+   * every outbox emission.
    *
    * @param rows the work-item rows
-   * @return the ids of rows that were newly inserted or actually changed
+   * @return the ids of rows that were newly inserted or actually changed (including revivals)
    */
   public List<UUID> upsertWorkItems(List<WorkItemRow> rows) {
     if (rows.isEmpty()) {
@@ -214,11 +228,12 @@ public class CanonicalWriteRepository {
             VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, false, ?, ?)
             ON CONFLICT (id) DO UPDATE SET
               type = EXCLUDED.type, title = EXCLUDED.title, status = EXCLUDED.status,
-              team_id = EXCLUDED.team_id, resolved_at = EXCLUDED.resolved_at, updated_at = now()
+              team_id = EXCLUDED.team_id, resolved_at = EXCLUDED.resolved_at, deleted_at = NULL,
+              updated_at = now()
             WHERE ROW(work_item.type, work_item.title, work_item.status, work_item.team_id,
-                      work_item.resolved_at)
+                      work_item.resolved_at, work_item.deleted_at)
               IS DISTINCT FROM ROW(EXCLUDED.type, EXCLUDED.title, EXCLUDED.status,
-                                   EXCLUDED.team_id, EXCLUDED.resolved_at)
+                                   EXCLUDED.team_id, EXCLUDED.resolved_at, NULL::timestamptz)
             """,
             rows,
             rows.size(),
@@ -244,6 +259,26 @@ public class CanonicalWriteRepository {
       }
     }
     return changed;
+  }
+
+  /**
+   * Marks canonical work items deleted. {@code deleted_at} is a bookkeeping timestamp — the
+   * source's {@code delete} assertion carries no deletion instant, so "now" is the sanctioned,
+   * documented approximation (DEBT-020 item 3, v0.1). No outbox event is emitted for a deletion
+   * (the event-type vocabulary stays {@code upserted} only; a dedicated {@code deleted} event is
+   * v0.2 follow-up) — that is the caller's responsibility, not this method's.
+   *
+   * @param workItemIds the canonical ids to mark deleted
+   */
+  public void markWorkItemsDeleted(List<UUID> workItemIds) {
+    if (workItemIds.isEmpty()) {
+      return;
+    }
+    jdbcTemplate.batchUpdate(
+        "UPDATE work.work_item SET deleted_at = now() WHERE id = ? AND deleted_at IS NULL",
+        workItemIds,
+        workItemIds.size(),
+        (ps, id) -> ps.setObject(1, id));
   }
 
   /**

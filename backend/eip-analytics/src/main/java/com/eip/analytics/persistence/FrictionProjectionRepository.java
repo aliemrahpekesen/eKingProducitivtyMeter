@@ -146,7 +146,9 @@ public class FrictionProjectionRepository {
    * @return the bucket timestamp, or empty when nothing is resolved yet
    */
   public Optional<Timestamp> latestResolvedAt() {
-    return jdbc.sql("SELECT max(resolved_at) FROM work.work_item WHERE resolved_at IS NOT NULL")
+    return jdbc.sql(
+            "SELECT max(resolved_at) FROM work.work_item"
+                + " WHERE resolved_at IS NOT NULL AND deleted_at IS NULL")
         .query(Timestamp.class)
         .optional();
   }

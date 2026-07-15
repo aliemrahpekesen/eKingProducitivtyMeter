@@ -24,7 +24,10 @@ import org.springframework.web.bind.annotation.RestController;
  * dispatched by {@link TriggerWebhookSyncUseCase} once the {@code X-EIP-Webhook-Token} header is
  * validated (SecurityModel — single-sourced, idempotent; freshness comes from that immediate sync,
  * not from the webhook payload). A pure DTO adapter (BackendPlan §2.4): tenant binding, token
- * comparison, debounce, and dispatch all live in {@link TriggerWebhookSyncUseCase}.
+ * comparison, debounce, brute-force throttling, and dispatch all live in {@link
+ * TriggerWebhookSyncUseCase}. A connector over its rejected-attempt threshold reports 429 for EVERY
+ * attempt — including one bearing the correct token — until its window rolls off (M2b Wave 3E; see
+ * that interface's class javadoc).
  */
 @RestController
 @RequestMapping("/api/v1/webhooks")
@@ -45,7 +48,8 @@ public class WebhookController {
    * @param connectorId the target connector
    * @param token the {@code X-EIP-Webhook-Token} header value, or absent
    * @param ignoredBody the request body, read but never parsed or forwarded (see class javadoc)
-   * @return 202 (accepted or debounced), 401 (missing/invalid token), or 404 (unknown connector)
+   * @return 202 (accepted or debounced), 401 (missing/invalid token), 404 (unknown connector), or
+   *     429 (connector currently throttled by the brute-force guard)
    */
   @PostMapping("/{tenantId}/{connectorId}")
   public ResponseEntity<Object> trigger(
@@ -64,6 +68,12 @@ public class WebhookController {
               .body(
                   ProblemDetail.forStatusAndDetail(
                       HttpStatus.UNAUTHORIZED, "missing or invalid webhook token"));
+      case THROTTLED ->
+          ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+              .body(
+                  ProblemDetail.forStatusAndDetail(
+                      HttpStatus.TOO_MANY_REQUESTS,
+                      "too many rejected webhook attempts for this connector; retry later"));
       case NOT_FOUND ->
           ResponseEntity.status(HttpStatus.NOT_FOUND)
               .body(ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, "connector not found"));
