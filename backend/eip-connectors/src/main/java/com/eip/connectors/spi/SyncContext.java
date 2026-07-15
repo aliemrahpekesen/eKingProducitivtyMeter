@@ -17,4 +17,13 @@ public interface SyncContext {
    * @return the raw sink
    */
   RawSink rawSink();
+
+  /**
+   * Returns the resolved connector configuration for this sync (empty for config-free sources).
+   *
+   * @return settings + revealed secret
+   */
+  default ConnectorConfig config() {
+    return new ConnectorConfig(java.util.Map.of(), null);
+  }
 }

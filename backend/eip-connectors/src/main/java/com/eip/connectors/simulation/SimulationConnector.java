@@ -5,8 +5,10 @@
 package com.eip.connectors.simulation;
 
 import com.eip.connectors.spi.Connector;
+import com.eip.connectors.spi.ConnectorConfig;
 import com.eip.connectors.spi.RawRecord;
 import com.eip.connectors.spi.SyncContext;
+import com.eip.connectors.spi.TestConnectionOutcome;
 
 /**
  * A production-shaped connector whose "source system" is the fixed {@link SimulationDataset}. It
@@ -38,6 +40,17 @@ public final class SimulationConnector implements Connector {
 
   @Override
   public boolean simulation() {
+    return true;
+  }
+
+  @Override
+  public TestConnectionOutcome testConnection(ConnectorConfig config) {
+    return TestConnectionOutcome.ok(
+        "Simulation source reachable — " + dataset.records().size() + " records available.");
+  }
+
+  @Override
+  public boolean syncAvailable() {
     return true;
   }
 

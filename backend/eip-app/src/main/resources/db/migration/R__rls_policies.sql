@@ -33,6 +33,9 @@ DECLARE
     'analytics.rm_team_flow_current',
     'staging.raw_simulation',        -- TASK-0016 INC-1 (ingestion raw staging)
     'staging.raw_ingest_errors',     -- TASK-0016 INC-1 (ingestion/normalization DLQ)
+    'staging.raw_jira',              -- TASK-0019 M2 (real connectors)
+    'staging.raw_bitbucket',         -- TASK-0019 M2
+    'staging.raw_sonarqube',         -- TASK-0019 M2
     'work.work_item_transition',     -- TASK-0016 INC-2 (canonical flow)
     'scm.pull_request',              -- TASK-0016 INC-2
     'scm.code_review',               -- TASK-0016 INC-2

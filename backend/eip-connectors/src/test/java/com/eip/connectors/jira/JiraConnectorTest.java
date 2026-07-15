@@ -1,0 +1,182 @@
+/*
+ * Copyright the Engineering Intelligence Platform (EIP) authors.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package com.eip.connectors.jira;
+
+import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.containing;
+import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.eip.connectors.spi.ConnectorConfig;
+import com.eip.connectors.spi.RawRecord;
+import com.eip.connectors.spi.SyncContext;
+import com.eip.connectors.spi.TestConnectionOutcome;
+import com.github.tomakehurst.wiremock.WireMockServer;
+import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+
+/**
+ * Proves the real Jira connector against a WireMock'd Jira: honest authenticated probe (OK only on
+ * 200, FAILED on 401), and a full sync that maps issues + changelog to canonical raw records —
+ * strict ISO-8601 instants, canonical workflow states (blocked/review aware), project-key team
+ * attribution, and NO person identifiers (NFR-071).
+ */
+class JiraConnectorTest {
+
+  private static final WireMockServer JIRA =
+      new WireMockServer(WireMockConfiguration.options().dynamicPort());
+
+  @BeforeAll
+  static void start() {
+    JIRA.start();
+    JIRA.stubFor(
+        get(urlPathEqualTo("/rest/api/3/myself"))
+            .withHeader("Authorization", containing("Basic "))
+            .willReturn(
+                aResponse()
+                    .withStatus(200)
+                    .withHeader("Content-Type", "application/json")
+                    .withBody("{\"accountType\":\"atlassian\"}")));
+    JIRA.stubFor(
+        get(urlPathEqualTo("/rest/api/3/search"))
+            .willReturn(
+                aResponse()
+                    .withStatus(200)
+                    .withHeader("Content-Type", "application/json")
+                    .withBody(SEARCH_BODY)));
+  }
+
+  @AfterAll
+  static void stop() {
+    JIRA.stop();
+  }
+
+  private ConnectorConfig config() {
+    return new ConnectorConfig(
+        Map.of("baseUrl", JIRA.baseUrl(), "email", "svc@acme.io", "projectKeys", "PLAT"),
+        "token-1");
+  }
+
+  @Test
+  void test_connection_is_honest() {
+    JiraConnector connector = new JiraConnector();
+    TestConnectionOutcome ok = connector.testConnection(config());
+    assertThat(ok.outcome()).isEqualTo("OK");
+
+    WireMockServer denied = new WireMockServer(WireMockConfiguration.options().dynamicPort());
+    denied.start();
+    try {
+      denied.stubFor(
+          get(urlPathEqualTo("/rest/api/3/myself")).willReturn(aResponse().withStatus(401)));
+      TestConnectionOutcome failed =
+          connector.testConnection(
+              new ConnectorConfig(
+                  Map.of("baseUrl", denied.baseUrl(), "email", "svc@acme.io"), "bad"));
+      assertThat(failed.outcome()).isEqualTo("FAILED");
+      assertThat(failed.message()).doesNotContain("bad"); // never leaks the secret
+    } finally {
+      denied.stop();
+    }
+  }
+
+  @Test
+  void sync_maps_issues_and_changelog_to_canonical_raw_records() {
+    JiraConnector connector = new JiraConnector();
+    List<RawRecord> emitted = new ArrayList<>();
+    connector.sync(
+        new SyncContext() {
+          @Override
+          public com.eip.connectors.spi.RawSink rawSink() {
+            return emitted::add;
+          }
+
+          @Override
+          public ConnectorConfig config() {
+            return JiraConnectorTest.this.config();
+          }
+        });
+
+    List<RawRecord> items = emitted.stream().filter(r -> r.stream().equals("work_item")).toList();
+    List<RawRecord> transitions =
+        emitted.stream().filter(r -> r.stream().equals("work_item_transition")).toList();
+    assertThat(items).hasSize(2);
+    assertThat(transitions).hasSize(8);
+
+    RawRecord plat1 = items.get(0);
+    assertThat(plat1.naturalKey()).isEqualTo("PLAT-1");
+    assertThat(plat1.externalId()).isEqualTo("jira:10001"); // immutable native id (AD-14)
+    assertThat(plat1.payload())
+        .containsEntry("team", "PLAT")
+        .containsEntry("status", "DONE")
+        .containsEntry("createdAt", "2026-01-05T09:00:00Z") // strict ISO-8601 from +0000 format
+        .containsEntry("resolvedAt", "2026-01-05T17:00:00Z");
+    assertThat(plat1.payload()).doesNotContainKeys("assignee", "reporter", "author");
+
+    // Canonical states incl. blocked/review mapping from Jira status names.
+    List<String> plat1States =
+        transitions.stream()
+            .filter(t -> "PLAT-1".equals(t.payload().get("workItemKey")))
+            .map(t -> t.payload().get("toState"))
+            .toList();
+    assertThat(plat1States)
+        .containsExactly("IN_PROGRESS", "BLOCKED", "IN_PROGRESS", "IN_REVIEW", "DONE");
+
+    // Unresolved issue: no resolvedAt key at all (normalization treats it as in-flight).
+    RawRecord plat2 = items.get(1);
+    assertThat(plat2.payload()).doesNotContainKey("resolvedAt");
+    assertThat(plat2.payload()).containsEntry("status", "IN_PROGRESS");
+  }
+
+  @Test
+  void state_mapping_covers_the_canonical_vocabulary() {
+    assertThat(JiraConnector.canonicalStateName("Impediment / On Hold")).isEqualTo("BLOCKED");
+    assertThat(JiraConnector.canonicalStateName("Code Review")).isEqualTo("IN_REVIEW");
+    assertThat(JiraConnector.canonicalStateName("Selected for Development"))
+        .isEqualTo("IN_PROGRESS");
+    assertThat(JiraConnector.canonicalStateName("To Do")).isEqualTo("TODO");
+    assertThat(JiraConnector.canonicalStateName("Closed")).isEqualTo("DONE");
+  }
+
+  private static final String SEARCH_BODY =
+      """
+      {"startAt":0,"maxResults":100,"total":2,"issues":[
+        {"id":"10001","key":"PLAT-1",
+         "fields":{"summary":"Checkout refactor","project":{"key":"PLAT"},
+                   "issuetype":{"name":"Story"},
+                   "status":{"name":"Done","statusCategory":{"key":"done"}},
+                   "created":"2026-01-05T09:00:00.000+0000",
+                   "resolutiondate":"2026-01-05T17:00:00.000+0000"},
+         "changelog":{"histories":[
+           {"id":"h1","created":"2026-01-05T10:00:00.000+0000","items":[
+             {"field":"status","fromString":"To Do","toString":"In Progress"}]},
+           {"id":"h2","created":"2026-01-05T11:00:00.000+0000","items":[
+             {"field":"status","fromString":"In Progress","toString":"Blocked"}]},
+           {"id":"h3","created":"2026-01-05T13:00:00.000+0000","items":[
+             {"field":"status","fromString":"Blocked","toString":"In Progress"}]},
+           {"id":"h4","created":"2026-01-05T14:00:00.000+0000","items":[
+             {"field":"status","fromString":"In Progress","toString":"In Review"}]},
+           {"id":"h5","created":"2026-01-05T17:00:00.000+0000","items":[
+             {"field":"status","fromString":"In Review","toString":"Done"}]}]}},
+        {"id":"10002","key":"PLAT-2",
+         "fields":{"summary":"Latency fix","project":{"key":"PLAT"},
+                   "issuetype":{"name":"Bug"},
+                   "status":{"name":"In Progress","statusCategory":{"key":"indeterminate"}},
+                   "created":"2026-01-05T09:00:00.000+0000","resolutiondate":null},
+         "changelog":{"histories":[
+           {"id":"h6","created":"2026-01-05T10:00:00.000+0000","items":[
+             {"field":"status","fromString":"To Do","toString":"In Progress"}]},
+           {"id":"h7","created":"2026-01-05T11:00:00.000+0000","items":[
+             {"field":"status","fromString":"In Progress","toString":"In Review"}]},
+           {"id":"h8","created":"2026-01-05T12:00:00.000+0000","items":[
+             {"field":"status","fromString":"In Review","toString":"Done"}]}]}}
+      ]}
+      """;
+}
