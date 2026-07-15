@@ -33,3 +33,4 @@ node_modules/
 
 # Local demo runtime (make demo-up) — pids + logs
 .demo/
+.install/
