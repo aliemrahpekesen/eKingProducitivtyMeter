@@ -3,8 +3,11 @@ import { AdminPanel } from '../components/AdminPanel';
 import { ConnectorList } from '../components/ConnectorList';
 import { DemoBanner } from '../components/DemoBanner';
 import { FrictionCard } from '../components/FrictionCard';
+import { InFlightCard } from '../components/InFlightCard';
+import { RecommendationsCard } from '../components/RecommendationsCard';
 import { SessionCard } from '../components/SessionCard';
 import { TenantBar } from '../components/TenantBar';
+import { TrendsBoard } from '../components/TrendsBoard';
 
 type Tab = 'overview' | 'admin';
 
@@ -51,6 +54,9 @@ export function App(): JSX.Element {
           <>
             <SessionCard />
             <FrictionCard />
+            <TrendsBoard />
+            <RecommendationsCard />
+            <InFlightCard />
             <ConnectorList />
           </>
         ) : (

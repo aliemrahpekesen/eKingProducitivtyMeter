@@ -11,8 +11,11 @@ import type {
   PageViewConnectorView,
   SampleDataResult,
   SessionView,
+  TeamInFlightView,
+  TeamRecommendationsView,
   TenantView,
   TestConnectionResult,
+  TrendsView,
 } from './types';
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -63,6 +66,35 @@ export function useFrictionEvidence(tenantId: string, teamId: string, enabled: b
         tenantId,
       ),
     enabled: enabled && tenantId.length > 0 && teamId.length > 0,
+    retry: false,
+  });
+}
+
+// ── M3 dashboard: trends, in-flight, recommendations ───────────────────────────────────────────────
+
+export function useMetricTrends(tenantId: string, weeks: number) {
+  return useQuery({
+    queryKey: ['metrics', 'trends', tenantId, weeks],
+    queryFn: () => apiGet<TrendsView>(`/api/v1/metrics/trends?weeks=${weeks}`, tenantId),
+    enabled: tenantId.length > 0,
+    retry: false,
+  });
+}
+
+export function useInFlight(tenantId: string) {
+  return useQuery({
+    queryKey: ['metrics', 'in-flight', tenantId],
+    queryFn: () => apiGet<TeamInFlightView[]>('/api/v1/metrics/in-flight', tenantId),
+    enabled: tenantId.length > 0,
+    retry: false,
+  });
+}
+
+export function useRecommendations(tenantId: string) {
+  return useQuery({
+    queryKey: ['insights', 'recommendations', tenantId],
+    queryFn: () => apiGet<TeamRecommendationsView[]>('/api/v1/insights/recommendations', tenantId),
+    enabled: tenantId.length > 0,
     retry: false,
   });
 }

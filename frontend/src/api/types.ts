@@ -148,3 +148,59 @@ export interface SampleDataResult {
   teamsComputed: number;
   itemsCorrelated: number;
 }
+
+// ── M3 dashboard: trends, in-flight, recommendations (TASK-0020) ──────────────────────────────────
+
+export interface TrendPointView {
+  /** ISO date, e.g. "2026-01-05". */
+  weekStart: string;
+  itemsResolved: number;
+  avgCycleSec: number;
+  p85CycleSec: number;
+  flowEfficiencyPct: number;
+  blockedPct: number;
+  reviewWaitPct: number;
+  frictionScore: number;
+}
+
+export interface TeamTrendView {
+  teamId: string;
+  teamName: string;
+  /** Ascending by weekStart. */
+  points: TrendPointView[];
+}
+
+export interface TrendsView {
+  rangeWeeks: number;
+  teams: TeamTrendView[];
+}
+
+export interface InFlightItemView {
+  workItemKey: string;
+  title: string;
+  state: string;
+  ageSec: number;
+  blocked: boolean;
+}
+
+export interface TeamInFlightView {
+  teamId: string;
+  teamName: string;
+  items: InFlightItemView[];
+}
+
+export interface RecommendationView {
+  code: string;
+  severity: 'INFO' | 'WARN' | 'CRITICAL';
+  title: string;
+  rationale: string;
+  actions: string[];
+  metricRefs: string[];
+}
+
+export interface TeamRecommendationsView {
+  teamId: string;
+  teamName: string;
+  frictionScore: number;
+  recommendations: RecommendationView[];
+}
