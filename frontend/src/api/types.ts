@@ -204,3 +204,64 @@ export interface TeamRecommendationsView {
   frictionScore: number;
   recommendations: RecommendationView[];
 }
+
+// ── M4 deterministic reports (TASK-0022) ───────────────────────────────────────────────────────
+
+export interface ReportView {
+  id: string;
+  type: string;
+  title: string;
+  status: string;
+  /** ISO date, e.g. "2026-01-05". */
+  periodStart: string;
+  periodEnd: string;
+  weeks: number;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+export interface PageViewReportView {
+  items: ReportView[];
+  nextCursor?: string | null;
+  hasMore: boolean;
+}
+
+export interface ReportTotals {
+  teamsReporting: number;
+  itemsResolved: number;
+  avgCycleSec: number;
+  p85CycleSec: number;
+  flowEfficiencyPct: number;
+  blockedPct: number;
+  reviewWaitPct: number;
+  avgFrictionScore: number;
+}
+
+export interface ReportTeamSection {
+  teamId: string;
+  teamName: string;
+  frictionScore: number;
+  dominantCause: string;
+  /** Ascending by weekStart. */
+  points: TrendPointView[];
+  recommendations: RecommendationView[];
+  inFlightCount: number;
+  blockedInFlightCount: number;
+}
+
+export interface ReportDocument {
+  reportVersion: number;
+  title: string;
+  periodStart: string;
+  periodEnd: string;
+  weeks: number;
+  generatedAt: string;
+  metricVersion: string;
+  totals: ReportTotals;
+  teams: ReportTeamSection[];
+}
+
+export interface ReportDocumentView {
+  report: ReportView;
+  document: ReportDocument;
+}

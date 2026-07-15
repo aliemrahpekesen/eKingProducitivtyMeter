@@ -81,7 +81,7 @@ function severityMeta(severity: RecommendationView['severity']): {
   }
 }
 
-function RecommendationItem({ rec }: { rec: RecommendationView }): JSX.Element {
+export function RecommendationItem({ rec }: { rec: RecommendationView }): JSX.Element {
   const sev = severityMeta(rec.severity);
   return (
     <li className="rec-item">

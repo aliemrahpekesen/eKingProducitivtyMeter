@@ -716,3 +716,151 @@ body {
   background: color-mix(in srgb, var(--danger) 12%, transparent);
   margin-left: 0.5rem;
 }
+
+/* M4 reports (TASK-0022) — reuses card/badge/muted/kv/table/rec-list tokens. */
+.reports-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.6rem;
+}
+
+.reports-period {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.reports-period select {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--muted) 35%, transparent);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.report-row {
+  padding: 0;
+  overflow: hidden;
+}
+
+.report-row-btn {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.55rem 0.7rem;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.report-row-btn:hover {
+  background: color-mix(in srgb, var(--muted) 8%, transparent);
+}
+
+.report-row-created {
+  display: block;
+}
+
+.report-detail-nav {
+  margin-bottom: 0.8rem;
+}
+
+.report-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.report-header h2 {
+  margin: 0 0 0.3rem;
+}
+
+.report-deterministic-note {
+  font-style: italic;
+}
+
+.report-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.report-totals {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  margin-bottom: 1.2rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.report-totals > div {
+  grid-template-columns: 1fr;
+  gap: 2px;
+}
+
+.report-teams {
+  display: flex;
+  flex-direction: column;
+  gap: 1.4rem;
+}
+
+.team-section {
+  border: 1px solid color-mix(in srgb, var(--muted) 25%, transparent);
+  border-radius: 10px;
+  padding: 0.9rem 1rem;
+}
+
+.team-section-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.6rem;
+}
+
+.team-section-head h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.mini-chart {
+  margin-bottom: 0.8rem;
+}
+
+.mini-chart-canvas {
+  height: 160px;
+}
+
+.report-inflight-line {
+  margin: 0.6rem 0;
+}
+
+.report-recommendations {
+  margin-top: 0.4rem;
+}
+
+/* Print export: hide chrome/controls, show only the open report detail. */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  .report-detail {
+    box-shadow: none;
+    border: none;
+    padding: 0;
+  }
+
+  body {
+    background: #fff;
+    color: #000;
+  }
+}

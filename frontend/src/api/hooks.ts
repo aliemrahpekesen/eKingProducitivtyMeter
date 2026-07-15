@@ -9,6 +9,9 @@ import type {
   FrictionSummaryView,
   OrganizationView,
   PageViewConnectorView,
+  PageViewReportView,
+  ReportDocumentView,
+  ReportView,
   SampleDataResult,
   SessionView,
   TeamInFlightView,
@@ -193,5 +196,47 @@ export function useLoadSampleData(tenantId: string) {
   return useMutation({
     mutationFn: () => apiPost<SampleDataResult>('/api/v1/admin/sample-data', tenantId),
     onSuccess: () => void queryClient.invalidateQueries(),
+  });
+}
+
+// ── M4 deterministic reports (TASK-0022) ───────────────────────────────────────────────────────
+
+export function useReports(tenantId: string, pageSize: number = DEFAULT_PAGE_SIZE) {
+  return useInfiniteQuery({
+    queryKey: ['reports', tenantId, pageSize],
+    queryFn: ({ pageParam }) => {
+      const params = new URLSearchParams({ limit: String(pageSize) });
+      if (pageParam) {
+        params.set('cursor', pageParam);
+      }
+      return apiGet<PageViewReportView>(`/api/v1/reports?${params.toString()}`, tenantId);
+    },
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) =>
+      lastPage.hasMore ? (lastPage.nextCursor ?? undefined) : undefined,
+    enabled: tenantId.length > 0,
+    retry: false,
+  });
+}
+
+export function useReport(tenantId: string, reportId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['reports', 'detail', tenantId, reportId],
+    queryFn: () =>
+      apiGet<ReportDocumentView>(`/api/v1/reports/${encodeURIComponent(reportId)}`, tenantId),
+    enabled: enabled && tenantId.length > 0 && reportId.length > 0,
+    retry: false,
+  });
+}
+
+export function useGenerateReport(tenantId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { weeks: number }) =>
+      apiPost<ReportView>('/api/v1/reports', tenantId, {
+        type: 'EXEC_SUMMARY',
+        weeks: input.weeks,
+      }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['reports'] }),
   });
 }

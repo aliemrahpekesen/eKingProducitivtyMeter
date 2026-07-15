@@ -1,6 +1,6 @@
 export function DemoBanner(): JSX.Element {
   return (
-    <div className="demo-banner" role="note">
+    <div className="demo-banner no-print" role="note">
       <strong>Demo / simulation data.</strong> This environment serves seeded simulation data — not
       real Jira, Bitbucket, or SonarQube ingestion.
     </div>

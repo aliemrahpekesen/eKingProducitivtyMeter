@@ -49,6 +49,31 @@ export async function apiGet<T>(path: string, tenantId: string): Promise<T> {
   return (await response.json()) as T;
 }
 
+/**
+ * GET returning raw text — used for the self-contained HTML report export (GET .../html), which is
+ * not JSON and is opened as a Blob, never parsed.
+ */
+export async function apiGetText(path: string, tenantId: string): Promise<string> {
+  const response = await fetch(`${BASE}${path}`, {
+    headers: {
+      Accept: 'text/html, application/problem+json',
+      [TENANT_HEADER]: tenantId,
+    },
+  });
+
+  if (!response.ok) {
+    let problem: ProblemDetail | undefined;
+    try {
+      problem = (await response.json()) as ProblemDetail;
+    } catch {
+      // Non-JSON error body — fall back to the status.
+    }
+    throw new ApiError(response.status, problem);
+  }
+
+  return await response.text();
+}
+
 /** POST with optional tenant header (platform endpoints pass an empty tenantId). */
 export async function apiPost<T>(path: string, tenantId: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = {
