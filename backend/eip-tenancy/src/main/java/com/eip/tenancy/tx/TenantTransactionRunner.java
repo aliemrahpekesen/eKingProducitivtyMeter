@@ -102,6 +102,17 @@ public class TenantTransactionRunner {
     return read(TenantContextHolder.require(), work);
   }
 
+  /**
+   * Runs read-write work for the current thread's tenant, failing closed if none is bound.
+   *
+   * @param work the transactional work (must not return null)
+   * @param <T> the result type
+   * @return the work's result
+   */
+  public <T> T callCurrent(Supplier<T> work) {
+    return call(TenantContextHolder.require(), work);
+  }
+
   private <T> T execute(TransactionTemplate template, TenantContext tenant, Supplier<T> work) {
     T result =
         template.execute(
