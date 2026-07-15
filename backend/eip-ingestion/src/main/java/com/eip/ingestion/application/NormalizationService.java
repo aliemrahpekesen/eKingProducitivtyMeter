@@ -4,6 +4,11 @@
  */
 package com.eip.ingestion.application;
 
+import com.eip.core.domain.EntityType;
+import com.eip.core.domain.UuidV7Generator;
+import com.eip.core.events.EventEnvelope;
+import com.eip.core.events.SchemaVersion;
+import com.eip.core.events.WorkItemUpserted;
 import com.eip.ingestion.api.IngestionException;
 import com.eip.ingestion.api.NormalizeStagedDataUseCase;
 import com.eip.ingestion.persistence.CanonicalWriteRepository;
@@ -14,6 +19,7 @@ import com.eip.ingestion.persistence.CanonicalWriteRepository.PullRequestRow;
 import com.eip.ingestion.persistence.CanonicalWriteRepository.QualityGateRow;
 import com.eip.ingestion.persistence.CanonicalWriteRepository.TransitionRow;
 import com.eip.ingestion.persistence.CanonicalWriteRepository.WorkItemRow;
+import com.eip.ingestion.persistence.OutboxRepository;
 import com.eip.ingestion.persistence.StagingRawRepository;
 import com.eip.ingestion.persistence.StagingRawRepository.StagedRow;
 import com.eip.tenancy.context.TenantContext;
@@ -26,9 +32,11 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
@@ -38,9 +46,23 @@ import org.springframework.stereotype.Service;
  * mapped in memory, and written with one batch upsert; id stitching uses bulk key→id maps instead
  * of per-record lookups. Work-item identity is anchored through {@code core.external_ref} (AD-14),
  * so re-normalizing resolves the same stable ids and changes nothing.
+ *
+ * <p><strong>Outbox-emission semantics (chosen trade-off, BackendPlan §6):</strong> exactly one
+ * {@code core.event_outbox} row is written per canonical work item whose row {@linkplain
+ * CanonicalWriteRepository#upsertWorkItems actually changed} in this normalization run — never one
+ * per staged record. A byte-identical replay (the idempotent re-run this class already guarantees
+ * for the canonical model) therefore emits zero new outbox rows, so downstream consumers never see
+ * duplicate "upserted" events for unchanged data. The outbox write lands in the same transaction as
+ * the canonical upsert (true transactional-outbox semantics: never emitted without the write, never
+ * committed without the event). The envelope's {@code occurredAt} is deterministic, taken from the
+ * item's own data ({@code resolvedAt}, falling back to {@code createdInSource}) — never wall clock;
+ * {@code ingestedAt} is the one wall-clock exception, transport metadata only (not metric data).
  */
 @Service
 public class NormalizationService implements NormalizeStagedDataUseCase {
+
+  /** Kafka topic for canonical work-item domain events (EventModel). */
+  static final String TOPIC_WORK_ITEM = "eip.domain.workitem";
 
   private static final String STREAM_WORK_ITEM = "work_item";
   private static final String STREAM_TRANSITION = "work_item_transition";
@@ -53,16 +75,22 @@ public class NormalizationService implements NormalizeStagedDataUseCase {
   private final StagingRawRepository staging;
   private final CanonicalWriteRepository canonical;
   private final ObjectMapper mapper;
+  private final OutboxRepository outbox;
+  private final UuidV7Generator uuidGenerator;
 
   public NormalizationService(
       TenantTransactionRunner tx,
       StagingRawRepository staging,
       CanonicalWriteRepository canonical,
-      ObjectMapper mapper) {
+      ObjectMapper mapper,
+      OutboxRepository outbox,
+      UuidV7Generator uuidGenerator) {
     this.tx = tx;
     this.staging = staging;
     this.canonical = canonical;
     this.mapper = mapper;
+    this.outbox = outbox;
+    this.uuidGenerator = uuidGenerator;
   }
 
   @Override
@@ -114,7 +142,8 @@ public class NormalizationService implements NormalizeStagedDataUseCase {
                     p.timestamp("createdAt"),
                     p.timestampOrNull("resolvedAt")));
           }
-          canonical.upsertWorkItems(workItems);
+          List<UUID> changedWorkItemIds = canonical.upsertWorkItems(workItems);
+          emitWorkItemUpsertedEvents(tenant, items, workItems, changedWorkItemIds);
 
           // Transitions: stitch to items via the in-memory key map.
           List<TransitionRow> transitions = new ArrayList<>();
@@ -145,7 +174,7 @@ public class NormalizationService implements NormalizeStagedDataUseCase {
                     p.text("sourceBranch"),
                     p.text("status"),
                     p.timestamp("createdAt"),
-                    p.timestamp("mergedAt")));
+                    p.timestampOrNull("mergedAt"))); // absent for a still-open pull request
           }
           canonical.upsertPullRequests(pullRequests);
           Map<String, UUID> prIds = canonical.pullRequestIdsBySourceKey();
@@ -191,6 +220,46 @@ public class NormalizationService implements NormalizeStagedDataUseCase {
           }
           canonical.upsertQualityGates(gates);
         });
+  }
+
+  /**
+   * Writes one {@code core.event_outbox} row per changed work item (see the class javadoc for the
+   * chosen emission semantics). {@code items} and {@code workItems} are index-aligned — both are
+   * built from the same {@code STREAM_WORK_ITEM} iteration with no filtering — so {@code
+   * items.get(i)} is the staged source of {@code workItems.get(i)}.
+   */
+  private void emitWorkItemUpsertedEvents(
+      TenantContext tenant,
+      List<Parsed> items,
+      List<WorkItemRow> workItems,
+      List<UUID> changedIds) {
+    if (changedIds.isEmpty()) {
+      return;
+    }
+    Set<UUID> changed = new HashSet<>(changedIds);
+    for (int i = 0; i < workItems.size(); i++) {
+      WorkItemRow row = workItems.get(i);
+      if (!changed.contains(row.id())) {
+        continue;
+      }
+      Timestamp occurred = row.resolvedAt() != null ? row.resolvedAt() : row.createdInSource();
+      String rawSource = items.get(i).row().sourceSystem();
+      String source = (rawSource == null || rawSource.isBlank()) ? "ingestion" : rawSource;
+      EventEnvelope envelope =
+          new EventEnvelope(
+              uuidGenerator.generate(),
+              tenant.tenantId(),
+              source,
+              EntityType.WORK_ITEM,
+              row.id(),
+              "upserted",
+              occurred.toInstant(),
+              Instant.now(), // transport metadata only — see class javadoc
+              SchemaVersion.of(1, 0),
+              new WorkItemUpserted(row.id(), row.status()),
+              null);
+      outbox.insert(envelope, TOPIC_WORK_ITEM, tenant.tenantId() + ":" + row.id());
+    }
   }
 
   /** Reads one stream across every raw staging table (bounded by the connector-type count). */

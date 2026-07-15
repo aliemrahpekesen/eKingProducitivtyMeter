@@ -7,22 +7,26 @@ package com.eip.ingestion;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.eip.connectors.simulation.SimulationConnector;
+import com.eip.core.domain.DefaultUuidV7Generator;
 import com.eip.ingestion.api.IngestionResult;
 import com.eip.ingestion.application.ConnectorRegistry;
 import com.eip.ingestion.application.NormalizationService;
 import com.eip.ingestion.application.SimulationIngestionService;
 import com.eip.ingestion.persistence.CanonicalWriteRepository;
 import com.eip.ingestion.persistence.ConnectorRegistryRepository;
+import com.eip.ingestion.persistence.OutboxRepository;
 import com.eip.ingestion.persistence.RawPayloadCodec;
 import com.eip.ingestion.persistence.StagingRawRepository;
 import com.eip.tenancy.context.TenantContext;
 import com.eip.tenancy.tx.TenantTransactionRunner;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Clock;
 import java.util.UUID;
 import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
@@ -125,7 +129,7 @@ class IngestionPipelineIntegrationTest {
     runner = new TenantTransactionRunner(new JdbcTransactionManager(dataSource), dataSource);
     jdbc = JdbcClient.create(dataSource);
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    ObjectMapper mapper = new ObjectMapper();
+    ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
     StagingRawRepository staging = new StagingRawRepository(jdbc, jdbcTemplate);
     ingestion =
         new SimulationIngestionService(
@@ -136,7 +140,12 @@ class IngestionPipelineIntegrationTest {
             new RawPayloadCodec(mapper));
     normalization =
         new NormalizationService(
-            runner, staging, new CanonicalWriteRepository(jdbc, jdbcTemplate), mapper);
+            runner,
+            staging,
+            new CanonicalWriteRepository(jdbc, jdbcTemplate),
+            mapper,
+            new OutboxRepository(jdbc, mapper),
+            new DefaultUuidV7Generator(Clock.systemUTC()));
   }
 
   @AfterAll
@@ -180,9 +189,14 @@ class IngestionPipelineIntegrationTest {
                         .single()))
         .isEqualTo(9L);
 
+    // Outbox: one row per work item on the first (all-new) run; the idempotent replay changed
+    // nothing, so it emits zero additional rows (NormalizationService's documented semantics).
+    assertThat(count(TENANT_A, "core.event_outbox")).isEqualTo(9L);
+
     // Tenant isolation at both tiers.
     assertThat(count(TENANT_B, "staging.raw_simulation")).isZero();
     assertThat(count(TENANT_B, "work.work_item")).isZero();
+    assertThat(count(TENANT_B, "core.event_outbox")).isZero();
   }
 
   private long count(UUID tenant, String table) {

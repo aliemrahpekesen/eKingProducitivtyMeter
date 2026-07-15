@@ -8,6 +8,7 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.sql.Types;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -55,7 +56,7 @@ public class CanonicalWriteRepository {
   public record TransitionRow(
       UUID workItemId, int seq, @Nullable String fromState, String toState, Timestamp occurredAt) {}
 
-  /** One pull-request upsert row. */
+  /** One pull-request upsert row. {@code mergedAt} is null for a still-open pull request. */
   public record PullRequestRow(
       @Nullable UUID teamId,
       @Nullable UUID workItemId,
@@ -64,7 +65,7 @@ public class CanonicalWriteRepository {
       String sourceBranch,
       String status,
       Timestamp createdInSource,
-      Timestamp mergedAt) {}
+      @Nullable Timestamp mergedAt) {}
 
   /** One code-review upsert row. */
   public record CodeReviewRow(
@@ -188,34 +189,61 @@ public class CanonicalWriteRepository {
   }
 
   /**
-   * Batch-upserts canonical work items on their stable ids.
+   * Batch-upserts canonical work items on their stable ids. The {@code DO UPDATE ... WHERE ... IS
+   * DISTINCT FROM} guard makes PostgreSQL report an affected-row count of {@code 0} for a
+   * conflicting row whose tracked columns are unchanged (no update executes) and {@code 1} for a
+   * fresh insert or a row that actually changed — the returned list is exactly the ids the caller
+   * should treat as "changed this run" (NormalizationService's outbox-emission trigger). Requires
+   * the PGJDBC default {@code reWriteBatchedInserts=false} — batch rewriting would report {@code
+   * Statement.SUCCESS_NO_INFO} instead of real per-row counts and silently suppress every outbox
+   * emission.
    *
    * @param rows the work-item rows
+   * @return the ids of rows that were newly inserted or actually changed
    */
-  public void upsertWorkItems(List<WorkItemRow> rows) {
-    jdbcTemplate.batchUpdate(
-        """
-        INSERT INTO work.work_item
-          (id, tenant_id, type, title, project_id, current_state_id, status, team_id, blocked,
-           created_in_source, resolved_at)
-        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, false, ?, ?)
-        ON CONFLICT (id) DO UPDATE SET
-          type = EXCLUDED.type, title = EXCLUDED.title, status = EXCLUDED.status,
-          team_id = EXCLUDED.team_id, resolved_at = EXCLUDED.resolved_at, updated_at = now()
-        """,
-        rows,
-        rows.size(),
-        (ps, r) -> {
-          ps.setObject(1, r.id());
-          ps.setString(2, r.type());
-          ps.setString(3, r.title());
-          ps.setObject(4, r.projectId());
-          ps.setObject(5, r.stateId());
-          ps.setString(6, r.status());
-          setUuidOrNull(ps, 7, r.teamId());
-          ps.setTimestamp(8, r.createdInSource());
-          ps.setTimestamp(9, r.resolvedAt());
-        });
+  public List<UUID> upsertWorkItems(List<WorkItemRow> rows) {
+    if (rows.isEmpty()) {
+      return List.of();
+    }
+    int[][] counts =
+        jdbcTemplate.batchUpdate(
+            """
+            INSERT INTO work.work_item
+              (id, tenant_id, type, title, project_id, current_state_id, status, team_id, blocked,
+               created_in_source, resolved_at)
+            VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, false, ?, ?)
+            ON CONFLICT (id) DO UPDATE SET
+              type = EXCLUDED.type, title = EXCLUDED.title, status = EXCLUDED.status,
+              team_id = EXCLUDED.team_id, resolved_at = EXCLUDED.resolved_at, updated_at = now()
+            WHERE ROW(work_item.type, work_item.title, work_item.status, work_item.team_id,
+                      work_item.resolved_at)
+              IS DISTINCT FROM ROW(EXCLUDED.type, EXCLUDED.title, EXCLUDED.status,
+                                   EXCLUDED.team_id, EXCLUDED.resolved_at)
+            """,
+            rows,
+            rows.size(),
+            (ps, r) -> {
+              ps.setObject(1, r.id());
+              ps.setString(2, r.type());
+              ps.setString(3, r.title());
+              ps.setObject(4, r.projectId());
+              ps.setObject(5, r.stateId());
+              ps.setString(6, r.status());
+              setUuidOrNull(ps, 7, r.teamId());
+              ps.setTimestamp(8, r.createdInSource());
+              ps.setTimestamp(9, r.resolvedAt());
+            });
+    List<UUID> changed = new ArrayList<>();
+    int i = 0;
+    for (int[] chunk : counts) {
+      for (int count : chunk) {
+        if (count > 0) {
+          changed.add(rows.get(i).id());
+        }
+        i++;
+      }
+    }
+    return changed;
   }
 
   /**

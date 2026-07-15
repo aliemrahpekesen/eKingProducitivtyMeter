@@ -24,6 +24,28 @@ spring:
     user: ${EIP_MIGRATOR_DB_USER:eip_migrator}
     password: ${EIP_MIGRATOR_DB_PASSWORD:eip_migrator}
     locations: classpath:db/migration
+  # Transactional outbox → Kafka spine (DEBT-017, BackendPlan §6). With Kafka unreachable the app
+  # still boots and serves HTTP: the producer fails fast (short send timeout below) so the outbox
+  # relay just counts the attempt and retries on its next poll, and the listener container retries
+  # its connection in the background — neither blocks startup or the API.
+  kafka:
+    bootstrap-servers: ${EIP_KAFKA_BOOTSTRAP:localhost:29092}
+    producer:
+      acks: all
+      properties:
+        # Bounds how long a send() call can block discovering cluster metadata when the broker is
+        # down — without this the default (60s) would make a single outbox row's publish attempt
+        # block far longer than the relay's own short send timeout expects.
+        max.block.ms: 5000
+    consumer:
+      auto-offset-reset: earliest
+
+# Transactional outbox → Kafka spine (DEBT-017): default ON; set eip.events.enabled=false to
+# disable the relay/publisher/consumer entirely (e.g. an environment with no Kafka at all).
+eip:
+  events:
+    enabled: true
+    relay-delay-ms: 1000
 
 springdoc:
   api-docs:

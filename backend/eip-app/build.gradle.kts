@@ -41,6 +41,10 @@ dependencies {
     implementation("org.flywaydb:flyway-database-postgresql")
     runtimeOnly("org.postgresql:postgresql")
 
+    // Transactional outbox → Kafka spine (DEBT-017, BackendPlan §6): the relay publishes and the
+    // work-item events consumer listens via spring-kafka; version managed by the Boot BOM.
+    implementation("org.springframework.kafka:spring-kafka")
+
     // Integration test: real PostgreSQL 16 + pgvector via Testcontainers proves the deployable
     // V1 baseline + R__rls_policies apply and enforce RLS end-to-end (DatabasePlan §14).
     // spring-boot-starter-test supplies JUnit 5 + AssertJ (eip-app uses boot-app-conventions, not
@@ -57,5 +61,9 @@ dependencies {
     testImplementation("org.wiremock:wiremock-standalone:3.9.1")
     testImplementation("org.testcontainers:postgresql")
     testImplementation("org.postgresql:postgresql")
+    // Real Kafka broker (KRaft) for OutboxKafkaIntegrationTest (DEBT-017); version managed by the
+    // Boot-BOM-aligned Testcontainers BOM.
+    testImplementation("org.testcontainers:kafka")
+    testImplementation("org.springframework.kafka:spring-kafka-test")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

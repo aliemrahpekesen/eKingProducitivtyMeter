@@ -33,4 +33,9 @@ dependencies {
     testImplementation("org.flywaydb:flyway-core")
     testImplementation("org.flywaydb:flyway-database-postgresql")
     testImplementation(libs.assertj.core)
+    // The event envelope carries java.time.Instant fields; production serialization uses eip-app's
+    // Boot-autoconfigured ObjectMapper (jsr310 already on its runtime classpath via
+    // spring-boot-starter-json). Module-local tests construct a plain ObjectMapper directly, so the
+    // module needs the datatype module on its own test classpath.
+    testImplementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
 }
