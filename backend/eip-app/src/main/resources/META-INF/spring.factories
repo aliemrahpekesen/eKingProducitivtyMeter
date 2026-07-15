@@ -1,1 +1,2 @@
-org.springframework.boot.env.EnvironmentPostProcessor=com.eip.app.config.ProductionTenantResolutionGuard
+org.springframework.boot.env.EnvironmentPostProcessor=com.eip.app.config.ProductionTenantResolutionGuard,\
+  com.eip.app.config.ProductionSecretsGuard

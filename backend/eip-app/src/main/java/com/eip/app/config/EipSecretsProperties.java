@@ -12,8 +12,9 @@ import org.springframework.validation.annotation.Validated;
 /**
  * Envelope-encryption settings (ADR-014). {@code masterKey} is the base64-encoded 32-byte KEK; the
  * default is a well-known DEV-ONLY key so local environments work out of the box — production
- * deployments MUST override it via {@code EIP_SECRET_MASTER_KEY} (the prod env file ships CHANGE_ME
- * per DEBT-005; prod boot is guarded until OIDC anyway, DEBT-012).
+ * deployments MUST override it via {@code EIP_SECRETS_MASTER_KEY} (the prod/preprod env files ship
+ * CHANGE_ME per DEBT-005, and {@code ProductionSecretsGuard} refuses prod/preprod boot while this
+ * or the DB-password variables remain blank/CHANGE_ME/a known dev fixture).
  *
  * @param masterKey base64 of exactly 32 key bytes
  * @param kekVersion version stamped on stored secrets (bump on rotation)
