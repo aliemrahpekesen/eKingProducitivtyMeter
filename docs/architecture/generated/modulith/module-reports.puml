@@ -1,6 +1,6 @@
 @startuml
 set separator none
-title Modules
+title Reports
 
 top to bottom direction
 
@@ -10,23 +10,12 @@ top to bottom direction
 
 Container_Boundary("Modules.Modules_boundary", "Modules", $tags="") {
   Component(Modules.Modules.Analytics, "Analytics", $techn="Module", $descr="", $tags="", $link="")
-  Component(Modules.Modules.App, "App", $techn="Module", $descr="", $tags="", $link="")
-  Component(Modules.Modules.Connectors, "Connectors", $techn="Module", $descr="", $tags="", $link="")
   Component(Modules.Modules.Core, "Core", $techn="Module", $descr="", $tags="", $link="")
-  Component(Modules.Modules.Ingestion, "Ingestion", $techn="Module", $descr="", $tags="", $link="")
   Component(Modules.Modules.Reports, "Reports", $techn="Module", $descr="", $tags="", $link="")
   Component(Modules.Modules.Tenancy, "Tenancy", $techn="Module", $descr="", $tags="", $link="")
 }
 
 Rel(Modules.Modules.Analytics, Modules.Modules.Tenancy, "uses", $techn="", $tags="", $link="")
-Rel(Modules.Modules.App, Modules.Modules.Core, "depends on", $techn="", $tags="", $link="")
-Rel(Modules.Modules.App, Modules.Modules.Ingestion, "uses", $techn="", $tags="", $link="")
-Rel(Modules.Modules.App, Modules.Modules.Tenancy, "uses", $techn="", $tags="", $link="")
-Rel(Modules.Modules.App, Modules.Modules.Analytics, "uses", $techn="", $tags="", $link="")
-Rel(Modules.Modules.App, Modules.Modules.Reports, "uses", $techn="", $tags="", $link="")
-Rel(Modules.Modules.Ingestion, Modules.Modules.Connectors, "depends on", $techn="", $tags="", $link="")
-Rel(Modules.Modules.Ingestion, Modules.Modules.Tenancy, "uses", $techn="", $tags="", $link="")
-Rel(Modules.Modules.Ingestion, Modules.Modules.Core, "uses", $techn="", $tags="", $link="")
 Rel(Modules.Modules.Reports, Modules.Modules.Analytics, "uses", $techn="", $tags="", $link="")
 Rel(Modules.Modules.Reports, Modules.Modules.Tenancy, "uses", $techn="", $tags="", $link="")
 Rel(Modules.Modules.Reports, Modules.Modules.Core, "uses", $techn="", $tags="", $link="")

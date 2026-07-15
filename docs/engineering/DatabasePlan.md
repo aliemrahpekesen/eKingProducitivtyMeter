@@ -373,6 +373,9 @@ CREATE TABLE ai.rag_chunk_embedding_bge_m3_1024 (  -- example modelKey 'bge_m3_1
   embedding  vector(1024) NOT NULL
 );
 
+-- v0.1 (ADR-023): implemented with an additional `document jsonb` column — the full deterministic
+-- ReportDocument inline; artifacts/MinIO + report_job/report_template/report_schedule tables land
+-- with AI-composed reports (DEBT-021).
 CREATE TABLE reports.generated_report (
   id                 uuid PRIMARY KEY,
   tenant_id          uuid NOT NULL,
