@@ -5,6 +5,8 @@
 package com.eip.app.api;
 
 import com.eip.app.application.ListConnectorsQuery;
+import com.eip.app.security.RequiresPermission;
+import com.eip.tenancy.rbac.Permission;
 import org.jspecify.annotations.Nullable;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -37,6 +39,7 @@ public class ConnectorController {
    * @return a page of the tenant's connectors, ordered by {@code (name, id)}
    */
   @GetMapping("/connectors")
+  @RequiresPermission(Permission.DASHBOARD_VIEW)
   public PageView<ConnectorView> connectors(
       @RequestParam(name = "cursor", required = false) @Nullable String cursor,
       @RequestParam(name = "limit", defaultValue = "" + ListConnectorsQuery.DEFAULT_LIMIT)

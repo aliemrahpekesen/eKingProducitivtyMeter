@@ -439,6 +439,24 @@
         }
       }
     },
+    "/api/v1/session/auth" : {
+      "get" : {
+        "tags" : [ "session-controller" ],
+        "operationId" : "authConfig",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AuthConfigView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/reports/{id}" : {
       "get" : {
         "tags" : [ "reports-controller" ],
@@ -920,6 +938,20 @@
             "format" : "uuid"
           },
           "organizationName" : {
+            "type" : "string"
+          }
+        }
+      },
+      "AuthConfigView" : {
+        "type" : "object",
+        "properties" : {
+          "mode" : {
+            "type" : "string"
+          },
+          "issuer" : {
+            "type" : "string"
+          },
+          "clientId" : {
             "type" : "string"
           }
         }

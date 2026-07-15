@@ -6,6 +6,8 @@ package com.eip.app.api;
 
 import com.eip.analytics.api.GetRecommendationsQuery;
 import com.eip.analytics.api.TeamRecommendationsView;
+import com.eip.app.security.RequiresPermission;
+import com.eip.tenancy.rbac.Permission;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -38,6 +40,7 @@ public class InsightsController {
    *     list
    */
   @GetMapping("/insights/recommendations")
+  @RequiresPermission(Permission.DASHBOARD_VIEW)
   public List<TeamRecommendationsView> recommendations() {
     return recommendations.recommendations();
   }

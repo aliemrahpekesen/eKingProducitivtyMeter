@@ -6,6 +6,7 @@ package com.eip.app.api;
 
 import com.eip.app.application.TriggerWebhookSyncUseCase;
 import com.eip.app.application.TriggerWebhookSyncUseCase.WebhookOutcome;
+import com.eip.app.security.PermissionExempt;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpStatus;
@@ -27,7 +28,9 @@ import org.springframework.web.bind.annotation.RestController;
  * comparison, debounce, brute-force throttling, and dispatch all live in {@link
  * TriggerWebhookSyncUseCase}. A connector over its rejected-attempt threshold reports 429 for EVERY
  * attempt — including one bearing the correct token — until its window rolls off (M2b Wave 3E; see
- * that interface's class javadoc).
+ * that interface's class javadoc). {@code @PermissionExempt}: this endpoint authenticates itself
+ * via {@code X-EIP-Webhook-Token}, not RBAC — it is on the deny-by-default whitelist (SecurityModel
+ * §4), permitAll at the security-filter layer in both {@code eip.security.mode}s.
  */
 @RestController
 @RequestMapping("/api/v1/webhooks")
@@ -52,6 +55,7 @@ public class WebhookController {
    *     429 (connector currently throttled by the brute-force guard)
    */
   @PostMapping("/{tenantId}/{connectorId}")
+  @PermissionExempt
   public ResponseEntity<Object> trigger(
       @PathVariable UUID tenantId,
       @PathVariable UUID connectorId,

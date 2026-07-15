@@ -6,8 +6,10 @@
 #
 #   ./scripts/install/install.sh [--env dev|test|preprod|prod] [--core-only]
 #
-# Environments (ADR-022): config/environments/<env>.env — dev/test seed the demo dataset,
-# preprod does not, prod refuses to boot until OIDC lands (DEBT-012). Every port is overridable:
+# Environments (ADR-022): config/environments/<env>.env — dev/test seed the demo dataset and use
+# header tenant resolution; preprod/prod now REQUIRE real OIDC config (EIP_SECURITY_MODE=oidc +
+# a non-CHANGE_ME EIP_OIDC_ISSUER, DEBT-012) — prod also stays refused by this script outright
+# (see below). Every port is overridable:
 # shell env > config/environments/<env>.env > infra/docker-compose/.env > compose defaults.
 # Stop with scripts/install/stop.sh · wipe with scripts/install/uninstall.sh (destructive).
 set -euo pipefail
@@ -32,10 +34,11 @@ ENV_CONF="config/environments/${EIP_ENV}.env"
 
 if [ "$EIP_ENV" = "prod" ]; then
   cat <<'MSG'
-  ✗ prod is configuration-complete but INTENTIONALLY not bootable in this release.
-    OIDC tenant resolution is not implemented yet (DEBT-012); ProductionTenantResolutionGuard
-    refuses startup so the dev header tenant resolver can never serve production traffic.
-    Use --env preprod for a production rehearsal, or dev/test for seeded environments.
+  ✗ prod is configuration-complete (OIDC + RBAC have landed, DEBT-012) but this one-command LOCAL
+    installer intentionally refuses --env prod outright — a real prod deployment replaces every
+    CHANGE_ME (DB credentials, EIP_OIDC_ISSUER) via its secret manager and enterprise IdP, which is
+    not this script's job. Use --env preprod for a production rehearsal (also requires a real
+    EIP_OIDC_ISSUER — see config/environments/preprod.env), or dev/test for seeded environments.
 MSG
   exit 2
 fi
@@ -246,6 +249,11 @@ SEEDEOF
      Kafka        localhost:${KAFKA_PORT}
      MinIO        http://localhost:${MINIO_CONSOLE_PORT}   (eip_minio / eip_minio_dev_pw)
      Keycloak     http://localhost:${KEYCLOAK_PORT}   (admin / admin_dev_pw)
+                  demo SSO users (realm 'eip', tenant ${DEMO_TENANT_ID}):
+                    admin.demo / admin_demo_pw     (TENANT_ADMIN)
+                    analyst.demo / analyst_demo_pw (ANALYST)
+                    viewer.demo / viewer_demo_pw   (VIEWER)
+                  dev API auth: header mode (X-EIP-Tenant); switch EIP_SECURITY_MODE=oidc to exercise SSO
 ${OTELL}
 ${PROM}
 ${GRAF}

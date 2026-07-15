@@ -8,6 +8,8 @@ import com.eip.analytics.api.FrictionEvidenceView;
 import com.eip.analytics.api.FrictionSummaryView;
 import com.eip.analytics.api.GetFrictionEvidenceQuery;
 import com.eip.analytics.api.GetFrictionSummaryQuery;
+import com.eip.app.security.RequiresPermission;
+import com.eip.tenancy.rbac.Permission;
 import java.util.UUID;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -38,6 +40,7 @@ public class FrictionController {
    * @return the metric definition + worst-first per-team computed friction breakdown
    */
   @GetMapping("/friction/summary")
+  @RequiresPermission(Permission.DASHBOARD_VIEW)
   public FrictionSummaryView summary() {
     return summary.summary();
   }
@@ -49,6 +52,7 @@ public class FrictionController {
    * @return the team's friction evidence
    */
   @GetMapping("/friction/teams/{teamId}/evidence")
+  @RequiresPermission(Permission.DASHBOARD_VIEW)
   public FrictionEvidenceView evidence(@PathVariable UUID teamId) {
     return evidence.evidence(teamId);
   }

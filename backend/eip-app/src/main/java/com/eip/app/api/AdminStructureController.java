@@ -4,8 +4,10 @@
  */
 package com.eip.app.api;
 
+import com.eip.app.security.RequiresPermission;
 import com.eip.tenancy.api.ManageOrgStructureUseCase;
 import com.eip.tenancy.api.ManageOrgStructureUseCase.OrganizationView;
+import com.eip.tenancy.rbac.Permission;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -23,6 +25,13 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * Tenant-scoped organisation-structure administration (M1 admin panel): organisation → business
  * unit → team. Pure DTO adapter; RLS scopes everything to the requesting tenant.
+ *
+ * <p>RBAC (SecurityModel §4): every endpoint here is {@link Permission#TENANT_MANAGE}. The doc
+ * matrix names {@code tenant.manage} for tenant/structure administration as a whole; it does not
+ * carve out a separate permission for organisation/business-unit/team CRUD, so this controller's
+ * mutating endpoints (not explicitly enumerated in the M5 Wave S1a brief, which named only the
+ * {@code GET /structure} read) use the same permission as the read for consistency — creating
+ * structure is tenant administration, not a distinct capability in v0.1.
  */
 @RestController
 @RequestMapping("/api/v1/admin")
@@ -40,6 +49,7 @@ public class AdminStructureController {
    * @return organisations with nested business units and teams
    */
   @GetMapping("/structure")
+  @RequiresPermission(Permission.TENANT_MANAGE)
   public List<OrganizationView> structure() {
     return structure.structure();
   }
@@ -52,6 +62,7 @@ public class AdminStructureController {
    */
   @PostMapping("/organizations")
   @ResponseStatus(HttpStatus.CREATED)
+  @RequiresPermission(Permission.TENANT_MANAGE)
   public Map<String, UUID> createOrganization(
       @Valid @RequestBody CreateOrganizationRequest request) {
     return Map.of("id", structure.createOrganization(request.name(), request.slug()));
@@ -65,6 +76,7 @@ public class AdminStructureController {
    */
   @PostMapping("/business-units")
   @ResponseStatus(HttpStatus.CREATED)
+  @RequiresPermission(Permission.TENANT_MANAGE)
   public Map<String, UUID> createBusinessUnit(
       @Valid @RequestBody CreateBusinessUnitRequest request) {
     return Map.of("id", structure.createBusinessUnit(request.organizationId(), request.name()));
@@ -78,6 +90,7 @@ public class AdminStructureController {
    */
   @PostMapping("/teams")
   @ResponseStatus(HttpStatus.CREATED)
+  @RequiresPermission(Permission.TENANT_MANAGE)
   public Map<String, UUID> createTeam(@Valid @RequestBody CreateTeamRequest request) {
     return Map.of("id", structure.createTeam(request.businessUnitId(), request.name()));
   }

@@ -1,0 +1,60 @@
+/*
+ * Copyright the Engineering Intelligence Platform (EIP) authors.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package com.eip.app.security;
+
+import com.eip.core.error.PermissionDeniedException;
+import com.eip.tenancy.rbac.Permission;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import java.util.Set;
+import java.util.stream.Collectors;
+import org.springframework.stereotype.Component;
+import org.springframework.web.method.HandlerMethod;
+import org.springframework.web.servlet.HandlerInterceptor;
+
+/**
+ * Deny-by-default RBAC enforcement (SecurityModel §4, FR-122) over the {@code /api/v1} handler
+ * mapping (registered for that path pattern only — see {@code WebMvcSecurityConfig}). Runs the same
+ * check regardless of {@code eip.security.mode}: header mode's implicit {@code TENANT_ADMIN}
+ * principal (see {@link EipPrincipalFilter}) means RBAC is genuinely exercised in every mode, not
+ * bypassed in the dev/demo one.
+ *
+ * <p>Throws {@link PermissionDeniedException} (the existing sealed {@code EipException} leaf,
+ * already mapped to a 403 {@code /problems/permission-denied} body by {@code ApiExceptionHandler})
+ * rather than writing a response directly — thrown from {@link HandlerInterceptor#preHandle}, this
+ * propagates through Spring MVC's normal exception resolution exactly like a controller-thrown
+ * exception, so no new problem+json wiring is needed.
+ */
+@Component
+public class PermissionEnforcementInterceptor implements HandlerInterceptor {
+
+  @Override
+  public boolean preHandle(
+      HttpServletRequest request, HttpServletResponse response, Object handler) {
+    if (!(handler instanceof HandlerMethod handlerMethod)) {
+      // Not a controller method (e.g. an unmatched/static handler) — nothing to enforce.
+      return true;
+    }
+    if (handlerMethod.hasMethodAnnotation(PermissionExempt.class)) {
+      return true;
+    }
+    RequiresPermission requires = handlerMethod.getMethodAnnotation(RequiresPermission.class);
+    if (requires == null) {
+      throw new PermissionDeniedException(
+          "endpoint declares no permission (deny-by-default, FR-122): "
+              + handlerMethod.getBeanType().getSimpleName()
+              + "#"
+              + handlerMethod.getMethod().getName()
+              + " must add @RequiresPermission or @PermissionExempt");
+    }
+    Set<Permission> required = Set.of(requires.value());
+    EipPrincipal principal = EipPrincipalHolder.current().orElseGet(EipPrincipal::anonymous);
+    if (!principal.hasAnyOf(required)) {
+      String missing = required.stream().map(Permission::wireId).collect(Collectors.joining(", "));
+      throw new PermissionDeniedException("missing permission: " + missing);
+    }
+    return true;
+  }
+}

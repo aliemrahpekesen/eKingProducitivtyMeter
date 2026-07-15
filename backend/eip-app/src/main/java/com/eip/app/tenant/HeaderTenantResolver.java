@@ -9,22 +9,30 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.util.Optional;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 /**
  * Dev/demo tenant resolver: reads the tenant id from the {@code X-EIP-Tenant} header. This is a
  * deliberate placeholder — it carries no authentication and MUST NOT be trusted in production. It
- * is replaced by the OIDC token→tenant resolver in SPRINT-02 (P0-E3-S3); the {@link
- * TenantContextFilter} and the RLS binding it drives are the permanent mechanism, so the swap is a
- * one-line bean change.
+ * is replaced by {@link OidcTenantResolver} whenever {@code eip.security.mode=oidc} (M5 Wave S1a,
+ * DEBT-012); the {@link TenantContextFilter} and the RLS binding it drives are the permanent
+ * mechanism, so the swap is a one-line bean change.
  *
- * <p>{@code @Profile("!prod")} is a structural guard: this unauthenticated resolver can never be
- * the active {@link TenantResolver} under the {@code prod} profile, so it cannot silently become
- * the production mechanism before the OIDC resolver replaces it.
+ * <p>Two independent structural guards keep this unauthenticated resolver out of production, so
+ * neither one alone is load-bearing: {@code @Profile("!prod")} excludes the {@code prod} profile
+ * outright, and {@code @ConditionalOnProperty(..., havingValue = "header")} excludes it whenever
+ * {@code eip.security.mode=oidc} — which {@code com.eip.app.config.ProductionTenantResolutionGuard}
+ * requires for {@code prod}/{@code preprod} to boot at all.
  */
 @Component
 @Profile("!prod")
+@ConditionalOnProperty(
+    prefix = "eip.security",
+    name = "mode",
+    havingValue = "header",
+    matchIfMissing = true)
 public class HeaderTenantResolver implements TenantResolver {
 
   /** Request header carrying the tenant id (dev/demo only). */

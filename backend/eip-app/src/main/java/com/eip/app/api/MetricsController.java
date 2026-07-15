@@ -8,6 +8,8 @@ import com.eip.analytics.api.GetInFlightWorkQuery;
 import com.eip.analytics.api.GetMetricTrendsQuery;
 import com.eip.analytics.api.TeamInFlightView;
 import com.eip.analytics.api.TrendsView;
+import com.eip.app.security.RequiresPermission;
+import com.eip.tenancy.rbac.Permission;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -44,6 +46,7 @@ public class MetricsController {
    * @return the trends payload
    */
   @GetMapping("/metrics/trends")
+  @RequiresPermission(Permission.DASHBOARD_VIEW)
   public TrendsView trends(@RequestParam(defaultValue = "12") int weeks) {
     return trends.trends(weeks);
   }
@@ -54,6 +57,7 @@ public class MetricsController {
    * @return one entry per team with at least one unresolved work item
    */
   @GetMapping("/metrics/in-flight")
+  @RequiresPermission(Permission.DASHBOARD_VIEW)
   public List<TeamInFlightView> inFlight() {
     return inFlight.inFlight();
   }

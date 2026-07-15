@@ -26,6 +26,12 @@ dependencies {
     compileOnly("org.springframework.modulith:spring-modulith-core")
     implementation(libs.springdoc.openapi.webmvc)
 
+    // OIDC resource server + deny-by-default RBAC (SecurityModel §3/§4, M5 Wave S1a). Versions
+    // managed by the Boot BOM (io.spring.dependency-management, boot-app-conventions).
+    implementation("org.springframework.boot:spring-boot-starter-security")
+    implementation("org.springframework.boot:spring-boot-starter-oauth2-resource-server")
+    testImplementation("org.springframework.security:spring-security-test")
+
     // Observability (TASK-0012, ObservabilityModel/BackendPlan §12): actuator health/info/prometheus,
     // Micrometer Prometheus registry for RED metrics, and Micrometer Tracing via the OpenTelemetry
     // bridge with OTLP export to the existing Compose OTel Collector. Versions from the Boot BOM.

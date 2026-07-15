@@ -4,8 +4,10 @@
  */
 package com.eip.app.api;
 
+import com.eip.app.security.RequiresPermission;
 import com.eip.tenancy.api.ManageTenantsUseCase;
 import com.eip.tenancy.api.ManageTenantsUseCase.TenantView;
+import com.eip.tenancy.rbac.Permission;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import java.util.List;
@@ -19,8 +21,11 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * Platform-level tenant administration (M1 admin panel). Pure DTO adapter over the tenancy port.
- * Unauthenticated until OIDC/RBAC lands (DEBT-012) — prod refuses to boot until then; the RBAC
- * permission catalog attaches to these endpoints in SPRINT-02.
+ * RBAC (SecurityModel §4, DEBT-012 M5 Wave S1a): both endpoints require {@link
+ * Permission#TENANT_MANAGE} — header mode's implicit {@code TENANT_ADMIN} principal holds it
+ * regardless of whether a tenant is yet named (tenant creation is platform-scoped and precedes any
+ * tenant existing at all), so the dev/demo convenience is unchanged; {@code oidc} mode requires a
+ * caller whose JWT roles include one that grants {@code tenant.manage}.
  */
 @RestController
 @RequestMapping("/api/v1/admin")
@@ -38,6 +43,7 @@ public class AdminTenantController {
    * @return tenants, newest first
    */
   @GetMapping("/tenants")
+  @RequiresPermission(Permission.TENANT_MANAGE)
   public List<TenantView> tenants() {
     return tenants.list();
   }
@@ -50,6 +56,7 @@ public class AdminTenantController {
    */
   @PostMapping("/tenants")
   @ResponseStatus(HttpStatus.CREATED)
+  @RequiresPermission(Permission.TENANT_MANAGE)
   public TenantView create(@Valid @RequestBody CreateTenantRequest request) {
     return tenants.create(request.name(), request.slug());
   }

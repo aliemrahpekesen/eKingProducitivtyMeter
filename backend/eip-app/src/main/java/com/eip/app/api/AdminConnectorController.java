@@ -7,11 +7,13 @@ package com.eip.app.api;
 import com.eip.app.application.LoadSampleDataUseCase;
 import com.eip.app.application.RunFrictionPipelineUseCase.PipelineResult;
 import com.eip.app.application.SyncConnectorUseCase;
+import com.eip.app.security.RequiresPermission;
 import com.eip.ingestion.api.ManageConnectorsUseCase;
 import com.eip.ingestion.api.ManageConnectorsUseCase.ConnectorAdminView;
 import com.eip.ingestion.api.ManageConnectorsUseCase.ConnectorTypeView;
 import com.eip.ingestion.api.ManageConnectorsUseCase.RegisterConnectorCommand;
 import com.eip.ingestion.api.ManageConnectorsUseCase.TestConnectionResult;
+import com.eip.tenancy.rbac.Permission;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import java.util.List;
@@ -32,6 +34,15 @@ import org.springframework.web.bind.annotation.RestController;
  * forms, registration (secrets envelope-encrypted, never returned), status management, an HONEST
  * connection test, and the one-click sample-data loader. Pure DTO adapter over the ingestion/app
  * ports.
+ *
+ * <p>RBAC (SecurityModel §4): every connector-administration endpoint here — including {@link
+ * #register}, which accepts a write-only secret — requires only {@link
+ * Permission#CONNECTOR_CONFIGURE} in v0.1. The doc matrix separately lists {@code
+ * connector.secret.write}; this collapses the two into one check for now (both are TENANT_ADMIN-
+ * only permissions with an identical effective grant in the current role set, so splitting them
+ * changes no caller's outcome yet) rather than declaring a second permission with no behavioral
+ * difference — revisit when a role exists that holds one but not the other. {@link #loadSampleData}
+ * is TENANT_MANAGE (tenant bootstrap/demo-data, not connector config).
  */
 @RestController
 @RequestMapping("/api/v1/admin")
@@ -56,6 +67,7 @@ public class AdminConnectorController {
    * @return available types with config schemas and honest availability flags
    */
   @GetMapping("/connector-types")
+  @RequiresPermission(Permission.CONNECTOR_CONFIGURE)
   public List<ConnectorTypeView> types() {
     return connectors.types();
   }
@@ -66,6 +78,7 @@ public class AdminConnectorController {
    * @return connectors, newest first (no secret material)
    */
   @GetMapping("/connectors")
+  @RequiresPermission(Permission.CONNECTOR_CONFIGURE)
   public List<ConnectorAdminView> list() {
     return connectors.list();
   }
@@ -78,6 +91,7 @@ public class AdminConnectorController {
    */
   @PostMapping("/connectors")
   @ResponseStatus(HttpStatus.CREATED)
+  @RequiresPermission(Permission.CONNECTOR_CONFIGURE)
   public ConnectorAdminView register(@Valid @RequestBody RegisterConnectorRequest request) {
     return connectors.register(
         new RegisterConnectorCommand(
@@ -95,6 +109,7 @@ public class AdminConnectorController {
    * @return the updated connector
    */
   @PostMapping("/connectors/{connectorId}/status")
+  @RequiresPermission(Permission.CONNECTOR_CONFIGURE)
   public ConnectorAdminView setStatus(
       @PathVariable UUID connectorId, @Valid @RequestBody SetStatusRequest request) {
     return connectors.setStatus(connectorId, request.status());
@@ -107,6 +122,7 @@ public class AdminConnectorController {
    * @return the outcome
    */
   @PostMapping("/connectors/{connectorId}/test")
+  @RequiresPermission(Permission.CONNECTOR_CONFIGURE)
   public TestConnectionResult test(@PathVariable UUID connectorId) {
     return connectors.test(connectorId);
   }
@@ -119,6 +135,7 @@ public class AdminConnectorController {
    * @return staging + computation outcome
    */
   @PostMapping("/connectors/{connectorId}/sync")
+  @RequiresPermission(Permission.CONNECTOR_CONFIGURE)
   public PipelineResult sync(@PathVariable UUID connectorId) {
     return syncConnector.sync(connectorId);
   }
@@ -129,6 +146,7 @@ public class AdminConnectorController {
    * @return the pipeline outcome
    */
   @PostMapping("/sample-data")
+  @RequiresPermission(Permission.TENANT_MANAGE)
   public PipelineResult loadSampleData() {
     return sampleData.load();
   }

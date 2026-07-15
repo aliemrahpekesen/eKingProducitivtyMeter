@@ -6,11 +6,36 @@
   "registrationAllowed": false,
   "roles": {
     "realm": [
-      { "name": "PLATFORM_ADMIN" },
-      { "name": "TENANT_ADMIN" },
-      { "name": "ANALYST" },
-      { "name": "VIEWER" },
-      { "name": "MEMBER" }
+      {
+        "name": "PLATFORM_ADMIN"
+      },
+      {
+        "name": "TENANT_ADMIN"
+      },
+      {
+        "name": "ANALYST"
+      },
+      {
+        "name": "VIEWER"
+      },
+      {
+        "name": "MEMBER"
+      },
+      {
+        "name": "ENGINEERING_MANAGER"
+      },
+      {
+        "name": "TEAM_LEAD"
+      },
+      {
+        "name": "RELEASE_MANAGER"
+      },
+      {
+        "name": "EXECUTIVE_VIEWER"
+      },
+      {
+        "name": "SECURITY_AUDITOR"
+      }
     ]
   },
   "clients": [
@@ -19,9 +44,104 @@
       "enabled": true,
       "publicClient": true,
       "standardFlowEnabled": true,
-      "redirectUris": ["http://localhost:5173/*"],
-      "webOrigins": ["http://localhost:5173"],
-      "protocol": "openid-connect"
+      "redirectUris": [
+        "http://localhost:5173/*"
+      ],
+      "webOrigins": [
+        "http://localhost:5173"
+      ],
+      "protocol": "openid-connect",
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "protocolMappers": [
+        {
+          "name": "eip_tenant",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "eip_tenant",
+            "claim.name": "eip_tenant",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ],
+      "directAccessGrantsEnabled": true
+    }
+  ],
+  "users": [
+    {
+      "username": "admin.demo",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin_demo_pw",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "TENANT_ADMIN"
+      ],
+      "attributes": {
+        "eip_tenant": [
+          "00000000-0000-4000-8000-0000000000de"
+        ]
+      },
+      "email": "admin+demo@demo.local",
+      "firstName": "Demo",
+      "lastName": "Admin"
+    },
+    {
+      "username": "analyst.demo",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "analyst_demo_pw",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "ANALYST"
+      ],
+      "attributes": {
+        "eip_tenant": [
+          "00000000-0000-4000-8000-0000000000de"
+        ]
+      },
+      "email": "analyst+demo@demo.local",
+      "firstName": "Demo",
+      "lastName": "Analyst"
+    },
+    {
+      "username": "viewer.demo",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "viewer_demo_pw",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "VIEWER"
+      ],
+      "attributes": {
+        "eip_tenant": [
+          "00000000-0000-4000-8000-0000000000de"
+        ]
+      },
+      "email": "viewer+demo@demo.local",
+      "firstName": "Demo",
+      "lastName": "Viewer"
     }
   ]
 }

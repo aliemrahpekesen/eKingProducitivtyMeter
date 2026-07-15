@@ -4,6 +4,7 @@
  */
 package com.eip.app.api;
 
+import com.eip.app.security.RequiresPermission;
 import com.eip.reports.api.GenerateReportUseCase;
 import com.eip.reports.api.GenerateReportUseCase.GenerateReportCommand;
 import com.eip.reports.api.GetReportQuery;
@@ -11,6 +12,7 @@ import com.eip.reports.api.ListReportsQuery;
 import com.eip.reports.api.ReportDocumentView;
 import com.eip.reports.api.ReportPageView;
 import com.eip.reports.api.ReportView;
+import com.eip.tenancy.rbac.Permission;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -68,6 +70,7 @@ public class ReportsController {
    */
   @PostMapping("/reports")
   @ResponseStatus(HttpStatus.CREATED)
+  @RequiresPermission(Permission.REPORT_GENERATE)
   public ReportView generate(
       @Valid @RequestBody GenerateReportRequest request, HttpServletResponse response) {
     ReportView view = generate.generate(new GenerateReportCommand(request.type(), request.weeks()));
@@ -85,6 +88,7 @@ public class ReportsController {
    * @return a page of the tenant's reports
    */
   @GetMapping("/reports")
+  @RequiresPermission(Permission.DASHBOARD_VIEW)
   public ReportPageView listReports(
       @RequestParam(name = "cursor", required = false) @Nullable String cursor,
       @RequestParam(name = "limit", defaultValue = "" + ListReportsQuery.DEFAULT_LIMIT) int limit) {
@@ -98,6 +102,7 @@ public class ReportsController {
    * @return the report and its document
    */
   @GetMapping("/reports/{id}")
+  @RequiresPermission(Permission.DASHBOARD_VIEW)
   public ReportDocumentView get(@PathVariable UUID id) {
     return report.get(id);
   }
@@ -109,6 +114,7 @@ public class ReportsController {
    * @return the rendered HTML page, {@code Content-Disposition: inline}
    */
   @GetMapping("/reports/{id}/html")
+  @RequiresPermission(Permission.REPORT_EXPORT)
   public ResponseEntity<String> html(@PathVariable UUID id) {
     String html = report.html(id);
     return ResponseEntity.ok()

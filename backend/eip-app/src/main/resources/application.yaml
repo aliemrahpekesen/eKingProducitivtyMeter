@@ -39,10 +39,26 @@ spring:
         max.block.ms: 5000
     consumer:
       auto-offset-reset: earliest
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # OIDC issuer (SecurityModel §3), consulted only when eip.security.mode=oidc below (the
+          # oidc-conditional JwtDecoder bean reads this property directly; Boot's own resource-server
+          # auto-configuration is not otherwise engaged). Compose's dev Keycloak serves the realm
+          # under the /auth relative path (infra/docker-compose/docker-compose.yml KC_HTTP_RELATIVE_PATH).
+          issuer-uri: ${EIP_OIDC_ISSUER:http://localhost:8180/auth/realms/eip}
 
 # Transactional outbox → Kafka spine (DEBT-017): default ON; set eip.events.enabled=false to
 # disable the relay/publisher/consumer entirely (e.g. an environment with no Kafka at all).
 eip:
+  security:
+    # header (default) | oidc (SecurityModel §3, M5 Wave S1a). header preserves the dev/demo
+    # X-EIP-Tenant convenience with an implicit TENANT_ADMIN principal; oidc requires a valid JWT
+    # (issuer above) and derives tenant (eip_tenant claim) + roles (realm_access.roles) from it.
+    # config/environments/{dev,test}.env set header explicitly; {preprod,prod}.env set oidc — and
+    # ProductionTenantResolutionGuard (DEBT-012) refuses prod/preprod boot without it.
+    mode: ${EIP_SECURITY_MODE:header}
   events:
     enabled: true
     relay-delay-ms: 1000

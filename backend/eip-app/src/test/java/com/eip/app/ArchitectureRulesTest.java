@@ -55,7 +55,12 @@ class ArchitectureRulesTest {
             "com.eip.analytics.api..",
             "com.eip.ingestion.api..",
             "com.eip.tenancy.api..",
-            "com.eip.reports.api..")
+            "com.eip.reports.api..",
+            // M5 Wave S1a (SecurityModel §4): the deny-by-default RBAC declaration surface —
+            // @RequiresPermission/@PermissionExempt (annotations, not logic) and the pure
+            // Permission enum they reference — is a controller-layer concern like any other DTO.
+            "com.eip.app.security..",
+            "com.eip.tenancy.rbac..")
         .because("controllers call application/query ports and return API DTOs, nothing else")
         .check(CLASSES);
   }
