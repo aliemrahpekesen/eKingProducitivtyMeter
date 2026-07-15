@@ -8,6 +8,7 @@ import com.eip.connectors.http.SourceHttp;
 import com.eip.connectors.http.SourceHttp.JsonResponse;
 import com.eip.connectors.spi.Connector;
 import com.eip.connectors.spi.ConnectorConfig;
+import com.eip.connectors.spi.ConnectorDescriptor;
 import com.eip.connectors.spi.FetchKind;
 import com.eip.connectors.spi.Op;
 import com.eip.connectors.spi.RawRecord;
@@ -58,6 +59,26 @@ public final class JiraConnector implements Connector {
   private static final DateTimeFormatter JIRA_JQL_MINUTE =
       DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm", Locale.ROOT).withZone(ZoneOffset.UTC);
 
+  private static final ConnectorDescriptor DESCRIPTOR =
+      new ConnectorDescriptor(
+          TYPE,
+          "Atlassian Jira",
+          "Work items, sprints and workflow transitions from Jira Cloud/Data Center.",
+          """
+          {"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object",
+           "title":"Jira","properties":{
+             "baseUrl":{"type":"string","format":"uri","title":"Base URL",
+                        "description":"e.g. https://your-org.atlassian.net"},
+             "email":{"type":"string","title":"Service account e-mail",
+                      "description":"Integration (service) account for API auth only — EIP never surfaces individual activity (NFR-071)"},
+             "projectKeys":{"type":"string","title":"Project keys",
+                            "description":"Comma-separated, e.g. PLAT,PAY"},
+             "webhookToken":{"type":"string","title":"Webhook token (optional)",
+                             "description":"Optional shared token that authorizes webhook-triggered syncs (X-EIP-Webhook-Token header)"}},
+           "required":["baseUrl","email"]}
+          """,
+          "API token");
+
   private final SourceHttp http;
 
   /** Creates the connector with its own HTTP client. */
@@ -72,6 +93,11 @@ public final class JiraConnector implements Connector {
   @Override
   public String type() {
     return TYPE;
+  }
+
+  @Override
+  public ConnectorDescriptor descriptor() {
+    return DESCRIPTOR;
   }
 
   @Override

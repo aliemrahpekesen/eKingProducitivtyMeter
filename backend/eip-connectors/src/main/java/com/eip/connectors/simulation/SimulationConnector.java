@@ -6,6 +6,7 @@ package com.eip.connectors.simulation;
 
 import com.eip.connectors.spi.Connector;
 import com.eip.connectors.spi.ConnectorConfig;
+import com.eip.connectors.spi.ConnectorDescriptor;
 import com.eip.connectors.spi.RawRecord;
 import com.eip.connectors.spi.SyncContext;
 import com.eip.connectors.spi.TestConnectionOutcome;
@@ -22,6 +23,18 @@ public final class SimulationConnector implements Connector {
   /** The {@code core.connector.type} discriminator for this connector. */
   public static final String TYPE = "simulation";
 
+  private static final ConnectorDescriptor DESCRIPTOR =
+      new ConnectorDescriptor(
+          TYPE,
+          "Simulation Source",
+          "Deterministic built-in dataset (3 teams, work items, PRs, builds, quality gates)"
+              + " — demos and pipeline verification without external systems.",
+          """
+          {"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object",
+           "title":"Simulation","properties":{},"required":[]}
+          """,
+          null);
+
   private final SimulationDataset dataset;
 
   /** Creates a connector over the fixed deterministic dataset. */
@@ -36,6 +49,11 @@ public final class SimulationConnector implements Connector {
   @Override
   public String type() {
     return TYPE;
+  }
+
+  @Override
+  public ConnectorDescriptor descriptor() {
+    return DESCRIPTOR;
   }
 
   @Override

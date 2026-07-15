@@ -10,6 +10,7 @@ import com.eip.connectors.http.SourceHttp;
 import com.eip.connectors.http.SourceHttp.JsonResponse;
 import com.eip.connectors.spi.Connector;
 import com.eip.connectors.spi.ConnectorConfig;
+import com.eip.connectors.spi.ConnectorDescriptor;
 import com.eip.connectors.spi.FetchKind;
 import com.eip.connectors.spi.Op;
 import com.eip.connectors.spi.RawRecord;
@@ -43,6 +44,23 @@ public final class GitHubConnector implements Connector {
   private static final int MAX_PR_PAGES_PER_REPO = 20; // v0.1 bound: 2000 PRs per repository
   private static final int MAX_ISSUE_PAGES_PER_REPO = 10; // v0.1 bound: 1000 issues per repository
 
+  private static final ConnectorDescriptor DESCRIPTOR =
+      new ConnectorDescriptor(
+          TYPE,
+          "GitHub",
+          "Repositories, pull requests, reviews, issues and Actions builds from GitHub.",
+          """
+          {"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object",
+           "title":"GitHub","properties":{
+             "baseUrl":{"type":"string","format":"uri","title":"Base URL",
+                        "description":"e.g. https://api.github.com (GitHub Enterprise Server: your own API host)"},
+             "org":{"type":"string","title":"Organization"},
+             "webhookToken":{"type":"string","title":"Webhook token (optional)",
+                             "description":"Optional shared token that authorizes webhook-triggered syncs (X-EIP-Webhook-Token header)"}},
+           "required":["org"]}
+          """,
+          "Personal access token");
+
   private final SourceHttp http;
 
   /** Creates the connector with its own HTTP client. */
@@ -57,6 +75,11 @@ public final class GitHubConnector implements Connector {
   @Override
   public String type() {
     return TYPE;
+  }
+
+  @Override
+  public ConnectorDescriptor descriptor() {
+    return DESCRIPTOR;
   }
 
   @Override

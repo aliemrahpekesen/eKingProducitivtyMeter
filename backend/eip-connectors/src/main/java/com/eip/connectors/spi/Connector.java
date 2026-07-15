@@ -9,6 +9,10 @@ package com.eip.connectors.spi;
  * (Jira, a Git host, a CI server, SonarQube, …) and emit {@link RawRecord}s via {@link
  * SyncContext#rawSink()}. They hold no persistence or tenant concerns — the caller runs each {@code
  * sync} inside a tenant-bound transaction and supplies the sink.
+ *
+ * <p><b>SPI 0.2:</b> {@link #descriptor()} added (DEBT-018) — a sanctioned pre-1.0 SPI break so the
+ * admin connector-type catalog is descriptor-driven from the installed registry instead of a
+ * hand-maintained static list.
  */
 public interface Connector {
 
@@ -18,6 +22,14 @@ public interface Connector {
    * @return the connector type, e.g. {@code simulation}
    */
   String type();
+
+  /**
+   * Returns this connector's admin-panel descriptor (display name, description, config-form JSON
+   * Schema, secret label). {@link ConnectorDescriptor#type()} must equal {@link #type()}.
+   *
+   * @return the descriptor
+   */
+  ConnectorDescriptor descriptor();
 
   /**
    * Reports whether this connector produces simulated (non-real-source) data, so the UI can label

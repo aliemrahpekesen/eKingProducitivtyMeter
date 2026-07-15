@@ -8,6 +8,7 @@ import com.eip.connectors.http.SourceHttp;
 import com.eip.connectors.http.SourceHttp.JsonResponse;
 import com.eip.connectors.spi.Connector;
 import com.eip.connectors.spi.ConnectorConfig;
+import com.eip.connectors.spi.ConnectorDescriptor;
 import com.eip.connectors.spi.FetchKind;
 import com.eip.connectors.spi.Op;
 import com.eip.connectors.spi.RawRecord;
@@ -39,6 +40,23 @@ public final class JenkinsConnector implements Connector {
   private static final int MAX_JOBS = 50; // v0.1 bound: top-level jobs only
   private static final int MAX_BUILDS_PER_JOB = 50;
 
+  private static final ConnectorDescriptor DESCRIPTOR =
+      new ConnectorDescriptor(
+          TYPE,
+          "Jenkins",
+          "Jobs and build results from a Jenkins controller.",
+          """
+          {"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object",
+           "title":"Jenkins","properties":{
+             "baseUrl":{"type":"string","format":"uri","title":"Base URL",
+                        "description":"e.g. https://ci.example.com"},
+             "username":{"type":"string","title":"Service account username"},
+             "webhookToken":{"type":"string","title":"Webhook token (optional)",
+                             "description":"Optional shared token that authorizes webhook-triggered syncs (X-EIP-Webhook-Token header)"}},
+           "required":["baseUrl","username"]}
+          """,
+          "API token");
+
   private final SourceHttp http;
 
   /** Creates the connector with its own HTTP client. */
@@ -53,6 +71,11 @@ public final class JenkinsConnector implements Connector {
   @Override
   public String type() {
     return TYPE;
+  }
+
+  @Override
+  public ConnectorDescriptor descriptor() {
+    return DESCRIPTOR;
   }
 
   @Override

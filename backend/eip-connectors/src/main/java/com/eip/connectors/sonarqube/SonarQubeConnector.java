@@ -9,6 +9,7 @@ import com.eip.connectors.http.SourceHttp;
 import com.eip.connectors.http.SourceHttp.JsonResponse;
 import com.eip.connectors.spi.Connector;
 import com.eip.connectors.spi.ConnectorConfig;
+import com.eip.connectors.spi.ConnectorDescriptor;
 import com.eip.connectors.spi.FetchKind;
 import com.eip.connectors.spi.Op;
 import com.eip.connectors.spi.RawRecord;
@@ -38,6 +39,21 @@ public final class SonarQubeConnector implements Connector {
   private static final int PROJECT_PAGE_SIZE = 100;
   private static final int MAX_PROJECT_PAGES = 10; // v0.1 bound: 1000 projects per sync
 
+  private static final ConnectorDescriptor DESCRIPTOR =
+      new ConnectorDescriptor(
+          TYPE,
+          "SonarQube",
+          "Quality gates, issues and coverage metrics from SonarQube.",
+          """
+          {"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object",
+           "title":"SonarQube","properties":{
+             "baseUrl":{"type":"string","format":"uri","title":"Base URL"},
+             "webhookToken":{"type":"string","title":"Webhook token (optional)",
+                             "description":"Optional shared token that authorizes webhook-triggered syncs (X-EIP-Webhook-Token header)"}},
+           "required":["baseUrl"]}
+          """,
+          "User token");
+
   private final SourceHttp http;
 
   /** Creates the connector with its own HTTP client. */
@@ -52,6 +68,11 @@ public final class SonarQubeConnector implements Connector {
   @Override
   public String type() {
     return TYPE;
+  }
+
+  @Override
+  public ConnectorDescriptor descriptor() {
+    return DESCRIPTOR;
   }
 
   @Override

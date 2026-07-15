@@ -10,6 +10,7 @@ import com.eip.connectors.http.SourceHttp;
 import com.eip.connectors.http.SourceHttp.JsonResponse;
 import com.eip.connectors.spi.Connector;
 import com.eip.connectors.spi.ConnectorConfig;
+import com.eip.connectors.spi.ConnectorDescriptor;
 import com.eip.connectors.spi.FetchKind;
 import com.eip.connectors.spi.Op;
 import com.eip.connectors.spi.RawRecord;
@@ -44,6 +45,23 @@ public final class GitLabConnector implements Connector {
   private static final Set<String> TERMINAL_PIPELINE_STATUSES =
       Set.of("success", "failed", "canceled", "skipped");
 
+  private static final ConnectorDescriptor DESCRIPTOR =
+      new ConnectorDescriptor(
+          TYPE,
+          "GitLab",
+          "Group projects, merge requests and CI pipelines from GitLab.",
+          """
+          {"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object",
+           "title":"GitLab","properties":{
+             "baseUrl":{"type":"string","format":"uri","title":"Base URL",
+                        "description":"e.g. https://gitlab.example.com"},
+             "group":{"type":"string","title":"Group (or subgroup) path"},
+             "webhookToken":{"type":"string","title":"Webhook token (optional)",
+                             "description":"Optional shared token that authorizes webhook-triggered syncs (X-EIP-Webhook-Token header)"}},
+           "required":["baseUrl","group"]}
+          """,
+          "Personal access token");
+
   private final SourceHttp http;
 
   /** Creates the connector with its own HTTP client. */
@@ -58,6 +76,11 @@ public final class GitLabConnector implements Connector {
   @Override
   public String type() {
     return TYPE;
+  }
+
+  @Override
+  public ConnectorDescriptor descriptor() {
+    return DESCRIPTOR;
   }
 
   @Override

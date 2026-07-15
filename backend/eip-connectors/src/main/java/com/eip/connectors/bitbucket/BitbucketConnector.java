@@ -10,6 +10,7 @@ import com.eip.connectors.http.SourceHttp;
 import com.eip.connectors.http.SourceHttp.JsonResponse;
 import com.eip.connectors.spi.Connector;
 import com.eip.connectors.spi.ConnectorConfig;
+import com.eip.connectors.spi.ConnectorDescriptor;
 import com.eip.connectors.spi.FetchKind;
 import com.eip.connectors.spi.Op;
 import com.eip.connectors.spi.RawRecord;
@@ -42,6 +43,24 @@ public final class BitbucketConnector implements Connector {
   private static final int MAX_PR_PAGES_PER_REPO = 40; // v0.1 bound: 2000 PRs per repository
   private static final int ACTIVITY_PAGE_SIZE = 50; // v0.1: first page only, per fetched PR
 
+  private static final ConnectorDescriptor DESCRIPTOR =
+      new ConnectorDescriptor(
+          TYPE,
+          "Bitbucket",
+          "Repositories, pull requests, reviews and commits from Bitbucket Cloud/Server.",
+          """
+          {"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object",
+           "title":"Bitbucket","properties":{
+             "baseUrl":{"type":"string","format":"uri","title":"Base URL",
+                        "description":"e.g. https://api.bitbucket.org"},
+             "username":{"type":"string","title":"Service account username"},
+             "workspace":{"type":"string","title":"Workspace / project"},
+             "webhookToken":{"type":"string","title":"Webhook token (optional)",
+                             "description":"Optional shared token that authorizes webhook-triggered syncs (X-EIP-Webhook-Token header)"}},
+           "required":["baseUrl","username","workspace"]}
+          """,
+          "App password / token");
+
   private final SourceHttp http;
 
   /** Creates the connector with its own HTTP client. */
@@ -56,6 +75,11 @@ public final class BitbucketConnector implements Connector {
   @Override
   public String type() {
     return TYPE;
+  }
+
+  @Override
+  public ConnectorDescriptor descriptor() {
+    return DESCRIPTOR;
   }
 
   @Override
