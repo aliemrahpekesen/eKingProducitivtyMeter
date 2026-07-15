@@ -9,6 +9,7 @@ import com.eip.analytics.api.ComputeFrictionUseCase.FrictionComputation;
 import com.eip.ingestion.api.IngestionResult;
 import com.eip.ingestion.api.NormalizeStagedDataUseCase;
 import com.eip.ingestion.api.RunConnectorSyncUseCase;
+import com.eip.ingestion.api.SyncMode;
 import com.eip.tenancy.context.TenantContext;
 import com.eip.tenancy.context.TenantContextHolder;
 import java.util.UUID;
@@ -35,9 +36,9 @@ public class ConnectorSyncService implements SyncConnectorUseCase {
   }
 
   @Override
-  public RunFrictionPipelineUseCase.PipelineResult sync(UUID connectorId) {
+  public RunFrictionPipelineUseCase.PipelineResult sync(UUID connectorId, SyncMode mode) {
     TenantContext tenant = TenantContextHolder.require();
-    IngestionResult staged = connectorSync.sync(connectorId);
+    IngestionResult staged = connectorSync.sync(connectorId, mode);
     normalize.normalize(tenant);
     FrictionComputation computation = compute.compute(tenant);
     return new RunFrictionPipelineUseCase.PipelineResult(

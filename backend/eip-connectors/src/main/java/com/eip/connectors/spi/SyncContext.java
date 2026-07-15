@@ -26,4 +26,17 @@ public interface SyncContext {
   default ConnectorConfig config() {
     return new ConnectorConfig(java.util.Map.of(), null);
   }
+
+  /**
+   * Returns the connector-level checkpoint cursor for this sync: empty on a full/first sync, or the
+   * previously advanced cursor for an incremental sync (ConnectorFramework §3). Cursor ADVANCEMENT
+   * is owned by the calling service, never by the connector — a connector only reads the cursor it
+   * is handed and emits records accordingly (e.g. narrowing its source query).
+   *
+   * @return the cursor as a flat string map (connector-defined keys, e.g. {@code updatedSince}), or
+   *     empty for a full sync
+   */
+  default java.util.Map<String, String> cursor() {
+    return java.util.Map.of();
+  }
 }

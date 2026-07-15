@@ -5,8 +5,12 @@
 package com.eip.app;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.containing;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -17,8 +21,11 @@ import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import com.jayway.jsonpath.JsonPath;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Duration;
+import java.util.UUID;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Tag;
@@ -191,6 +198,95 @@ class AdminJiraSyncIntegrationTest {
                 .header(HeaderTenantResolver.HEADER, tenant))
         .andExpect(status().isBadGateway())
         .andExpect(jsonPath("$.detail", org.hamcrest.Matchers.containsString("bitbucket")));
+
+    // 8. TASK-0021 Wave 2C: the full sync in step 4 advanced the Jira connector's checkpoint —
+    // core.connector_checkpoint now carries an updatedSince cursor.
+    assertThat(checkpointCursorJson(UUID.fromString(connectorId))).contains("\"updatedSince\"");
+
+    // 9. Config updates aren't exposed through any admin endpoint (register only inserts; setStatus
+    // only touches status) — register a second Jira connector carrying a webhookToken, and sync it
+    // once so IT also has a checkpoint to narrow an incremental fetch against.
+    String webhookConnectorId =
+        JsonPath.read(
+            mvc.perform(
+                    post("/api/v1/admin/connectors")
+                        .header(HeaderTenantResolver.HEADER, tenant)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(
+                            "{\"type\":\"jira\",\"name\":\"Webhook Jira\",\"config\":{\"baseUrl\":\""
+                                + JIRA.baseUrl()
+                                + "\",\"email\":\"svc2@corp.io\",\"projectKeys\":\"PLAT\","
+                                + "\"webhookToken\":\"whsec-1\"},\"secret\":\"corp-token-2\"}"))
+                .andExpect(status().isCreated())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(),
+            "$.id");
+    mvc.perform(
+            post("/api/v1/admin/connectors/" + webhookConnectorId + "/sync")
+                .header(HeaderTenantResolver.HEADER, tenant))
+        .andExpect(status().isOk());
+
+    // 10. Wrong token -> 401, never dispatches a sync.
+    mvc.perform(
+            post("/api/v1/webhooks/" + tenant + "/" + webhookConnectorId)
+                .header("X-EIP-Webhook-Token", "wrong-token"))
+        .andExpect(status().isUnauthorized());
+
+    // 11. Right token -> 202 accepted, dispatches an asynchronous incremental sync; poll (bounded)
+    // until it hits WireMock with the updated-clause JQL (the overlap window subtracted from the
+    // checkpoint set in step 9).
+    mvc.perform(
+            post("/api/v1/webhooks/" + tenant + "/" + webhookConnectorId)
+                .header("X-EIP-Webhook-Token", "whsec-1"))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.status").value("accepted"));
+    await()
+        .atMost(Duration.ofSeconds(10))
+        .untilAsserted(
+            () ->
+                assertThat(
+                        JIRA.findAll(
+                            getRequestedFor(urlPathEqualTo("/rest/api/3/search"))
+                                .withQueryParam("jql", containing("updated >="))))
+                    .isNotEmpty());
+
+    // 11b. The webhook-triggered sync runs through the full pipeline, not just staging: friction
+    // is recomputed asynchronously too, so poll (bounded) until it has run at least once more.
+    await()
+        .atMost(Duration.ofSeconds(10))
+        .untilAsserted(
+            () ->
+                mvc.perform(
+                        org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(
+                                "/api/v1/friction/summary")
+                            .header(HeaderTenantResolver.HEADER, tenant))
+                    .andExpect(status().isOk())
+                    .andExpect(
+                        jsonPath("$.teamsReporting")
+                            .value(org.hamcrest.Matchers.greaterThanOrEqualTo(1))));
+
+    // 12. A second immediate webhook -> debounced (within the 30s storm-protection window).
+    mvc.perform(
+            post("/api/v1/webhooks/" + tenant + "/" + webhookConnectorId)
+                .header("X-EIP-Webhook-Token", "whsec-1"))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.status").value("debounced"));
+  }
+
+  private static String checkpointCursorJson(UUID connectorId) throws SQLException {
+    try (Connection su =
+            DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+        Statement st = su.createStatement();
+        ResultSet rs =
+            st.executeQuery(
+                "SELECT cursor::text FROM core.connector_checkpoint WHERE connector_id = '"
+                    + connectorId
+                    + "'")) {
+      assertThat(rs.next()).isTrue();
+      return rs.getString(1);
+    }
   }
 
   private static void stubJira() {

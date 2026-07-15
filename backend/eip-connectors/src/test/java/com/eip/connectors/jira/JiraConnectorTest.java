@@ -6,11 +6,14 @@ package com.eip.connectors.jira;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.containing;
+import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.eip.connectors.spi.ConnectorConfig;
+import com.eip.connectors.spi.FetchKind;
 import com.eip.connectors.spi.RawRecord;
 import com.eip.connectors.spi.SyncContext;
 import com.eip.connectors.spi.TestConnectionOutcome;
@@ -133,6 +136,68 @@ class JiraConnectorTest {
     RawRecord plat2 = items.get(1);
     assertThat(plat2.payload()).doesNotContainKey("resolvedAt");
     assertThat(plat2.payload()).containsEntry("status", "IN_PROGRESS");
+  }
+
+  @Test
+  void sync_without_a_cursor_sends_no_updated_clause_and_emits_full_records() {
+    JIRA.resetRequests();
+    JiraConnector connector = new JiraConnector();
+    List<RawRecord> emitted = new ArrayList<>();
+    connector.sync(
+        new SyncContext() {
+          @Override
+          public com.eip.connectors.spi.RawSink rawSink() {
+            return emitted::add;
+          }
+
+          @Override
+          public ConnectorConfig config() {
+            return JiraConnectorTest.this.config();
+          }
+        });
+
+    assertThat(emitted).isNotEmpty();
+    assertThat(emitted).allMatch(r -> r.fetchKind() == FetchKind.FULL);
+    JIRA.verify(
+        getRequestedFor(urlPathEqualTo("/rest/api/3/search"))
+            .withQueryParam("jql", equalTo("project in (PLAT) order by created asc")));
+  }
+
+  @Test
+  void sync_with_a_cursor_narrows_the_jql_and_emits_incremental_records() {
+    JIRA.resetRequests();
+    JiraConnector connector = new JiraConnector();
+    List<RawRecord> emitted = new ArrayList<>();
+    Map<String, String> cursor = Map.of("updatedSince", "2026-01-05T12:00:00Z");
+    connector.sync(
+        new SyncContext() {
+          @Override
+          public com.eip.connectors.spi.RawSink rawSink() {
+            return emitted::add;
+          }
+
+          @Override
+          public ConnectorConfig config() {
+            return JiraConnectorTest.this.config();
+          }
+
+          @Override
+          public Map<String, String> cursor() {
+            return cursor;
+          }
+        });
+
+    assertThat(emitted).isNotEmpty();
+    assertThat(emitted).allMatch(r -> r.fetchKind() == FetchKind.INCREMENTAL);
+    // 10-minute overlap window subtracted from the cursor (class javadoc): 2026-01-05T12:00:00Z ->
+    // 2026/01/05 11:50, minute precision, UTC-labeled.
+    JIRA.verify(
+        getRequestedFor(urlPathEqualTo("/rest/api/3/search"))
+            .withQueryParam(
+                "jql",
+                equalTo(
+                    "project in (PLAT) AND updated >= \"2026/01/05 11:50\" order by created"
+                        + " asc")));
   }
 
   @Test

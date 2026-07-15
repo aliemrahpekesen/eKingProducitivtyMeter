@@ -46,6 +46,12 @@ eip:
   events:
     enabled: true
     relay-delay-ms: 1000
+  # Incremental sync + auto-sync (TASK-0021 Wave 2C). scheduled-enabled defaults ON; set to false
+  # to disable ScheduledSyncRunner entirely (e.g. a test that drives sync explicitly and would
+  # otherwise race the scheduled pass). auto-delay-ms is the fixed delay between passes.
+  sync:
+    scheduled-enabled: true
+    auto-delay-ms: 300000
 
 springdoc:
   api-docs:

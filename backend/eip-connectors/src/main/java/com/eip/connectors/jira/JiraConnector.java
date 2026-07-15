@@ -16,8 +16,10 @@ import com.eip.connectors.spi.TestConnectionOutcome;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
@@ -32,6 +34,16 @@ import org.jspecify.annotations.Nullable;
  * work_item_transition} raw records with canonical workflow states and strict ISO-8601 instants, so
  * the existing normalization/correlation/friction pipeline consumes Jira data unchanged. Team
  * attribution = the Jira project key (never a person — NFR-071).
+ *
+ * <p><b>Incremental sync (TASK-0021 Wave 2C):</b> when {@link SyncContext#cursor()} carries an
+ * {@code updatedSince} instant, {@code sync} narrows its JQL with {@code updated >= "..."} and
+ * emits every record as {@link FetchKind#INCREMENTAL} instead of {@link FetchKind#FULL}. Jira's
+ * bare JQL datetime literals (minute precision, no offset) are interpreted in the searching user's
+ * Jira <em>profile</em> timezone, not UTC — a v0.1 approximation, since the service account's
+ * profile timezone is not modeled here. A fixed {@value #OVERLAP_MINUTES}-minute overlap is
+ * subtracted from the cursor before formatting, which absorbs both that timezone skew and any clock
+ * drift between this service and Jira: the re-fetched overlap tail is free because staging is
+ * content-hash idempotent (unchanged issues upsert as no-ops).
  */
 public final class JiraConnector implements Connector {
 
@@ -40,8 +52,11 @@ public final class JiraConnector implements Connector {
 
   private static final int PAGE_SIZE = 100;
   private static final int MAX_PAGES = 50; // v0.1 bound: 5000 issues per sync
+  private static final int OVERLAP_MINUTES = 10;
   private static final DateTimeFormatter JIRA_TS =
       DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.ROOT);
+  private static final DateTimeFormatter JIRA_JQL_MINUTE =
+      DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm", Locale.ROOT).withZone(ZoneOffset.UTC);
 
   private final SourceHttp http;
 
@@ -96,9 +111,11 @@ public final class JiraConnector implements Connector {
   @Override
   public void sync(SyncContext context) {
     ConnectorConfig config = context.config();
+    Map<String, String> cursor = context.cursor();
     String auth = authorization(config);
     String base = baseUrl(config);
-    String jql = jql(config);
+    String jql = jql(config, cursor);
+    FetchKind kind = cursor.containsKey("updatedSince") ? FetchKind.INCREMENTAL : FetchKind.FULL;
 
     int startAt = 0;
     for (int page = 0; page < MAX_PAGES; page++) {
@@ -119,7 +136,7 @@ public final class JiraConnector implements Connector {
       }
       JsonNode issues = response.body().path("issues");
       for (JsonNode issue : issues) {
-        emitIssue(context, issue);
+        emitIssue(context, issue, kind);
       }
       int total = response.body().path("total").asInt(0);
       startAt += issues.size();
@@ -129,7 +146,7 @@ public final class JiraConnector implements Connector {
     }
   }
 
-  private void emitIssue(SyncContext context, JsonNode issue) {
+  private void emitIssue(SyncContext context, JsonNode issue, FetchKind kind) {
     String key = issue.path("key").asText();
     String id = issue.path("id").asText();
     JsonNode fields = issue.path("fields");
@@ -150,14 +167,7 @@ public final class JiraConnector implements Connector {
         .rawSink()
         .emit(
             new RawRecord(
-                "work_item",
-                key,
-                "jira",
-                instance(context),
-                "jira:" + id,
-                Op.UPSERT,
-                FetchKind.FULL,
-                item));
+                "work_item", key, "jira", instance(context), "jira:" + id, Op.UPSERT, kind, item));
 
     // Changelog → canonical transitions, chronological. First changelog page per issue (v0.1).
     List<JsonNode> histories = new ArrayList<>();
@@ -186,7 +196,7 @@ public final class JiraConnector implements Connector {
                     instance(context),
                     "jira:" + id + "#" + history.path("id").asText(seq + ""),
                     Op.UPSERT,
-                    FetchKind.FULL,
+                    kind,
                     transition));
       }
     }
@@ -248,15 +258,38 @@ public final class JiraConnector implements Connector {
     return SourceHttp.basic(config.require("email"), secret);
   }
 
-  private static String jql(ConnectorConfig config) {
+  /**
+   * Builds the JQL for one sync. A {@code project in (...)} clause when project keys are
+   * configured, an {@code updated >= "..."} clause when the cursor carries {@code updatedSince}
+   * (see the class javadoc for the overlap-window rationale), joined with {@code AND} — {@code
+   * order by created asc} is always last (Jira JQL requires it trailing).
+   */
+  private static String jql(ConnectorConfig config, Map<String, String> cursor) {
+    List<String> clauses = new ArrayList<>();
     String keys = config.settings().getOrDefault("projectKeys", "").trim();
-    if (keys.isEmpty()) {
-      return "order by created asc";
+    if (!keys.isEmpty()) {
+      String in =
+          String.join(
+              ",",
+              java.util.Arrays.stream(keys.split(",")).map(String::trim).toArray(String[]::new));
+      clauses.add("project in (" + in + ")");
     }
-    String in =
-        String.join(
-            ",", java.util.Arrays.stream(keys.split(",")).map(String::trim).toArray(String[]::new));
-    return "project in (" + in + ") order by created asc";
+    @Nullable String updatedSince = cursor.get("updatedSince");
+    if (updatedSince != null) {
+      clauses.add("updated >= \"" + overlapWindowStart(updatedSince) + "\"");
+    }
+    String prefix = clauses.isEmpty() ? "" : String.join(" AND ", clauses) + " ";
+    return prefix + "order by created asc";
+  }
+
+  /**
+   * Formats the incremental cursor as a Jira JQL minute-precision, UTC-labeled datetime literal,
+   * subtracting the {@value #OVERLAP_MINUTES}-minute overlap window (class javadoc).
+   */
+  private static String overlapWindowStart(String updatedSinceIso) {
+    Instant cursorInstant =
+        Instant.parse(updatedSinceIso).minus(Duration.ofMinutes(OVERLAP_MINUTES));
+    return JIRA_JQL_MINUTE.format(cursorInstant);
   }
 
   private static String instance(SyncContext context) {

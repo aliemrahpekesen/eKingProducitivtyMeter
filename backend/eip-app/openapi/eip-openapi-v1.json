@@ -10,6 +10,57 @@
     "description" : "Generated server url"
   } ],
   "paths" : {
+    "/api/v1/webhooks/{tenantId}/{connectorId}" : {
+      "post" : {
+        "tags" : [ "webhook-controller" ],
+        "operationId" : "trigger",
+        "parameters" : [ {
+          "name" : "tenantId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "connectorId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "X-EIP-Webhook-Token",
+          "in" : "header",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "type" : "string"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/tenants" : {
       "get" : {
         "tags" : [ "admin-tenant-controller" ],
