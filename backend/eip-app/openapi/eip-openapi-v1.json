@@ -10,6 +10,278 @@
     "description" : "Generated server url"
   } ],
   "paths" : {
+    "/api/v1/admin/tenants" : {
+      "get" : {
+        "tags" : [ "admin-tenant-controller" ],
+        "operationId" : "tenants",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/TenantView"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post" : {
+        "tags" : [ "admin-tenant-controller" ],
+        "operationId" : "create",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateTenantRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "description" : "Created",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TenantView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/teams" : {
+      "post" : {
+        "tags" : [ "admin-structure-controller" ],
+        "operationId" : "createTeam",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateTeamRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "description" : "Created",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : {
+                    "type" : "string",
+                    "format" : "uuid"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/sample-data" : {
+      "post" : {
+        "tags" : [ "admin-connector-controller" ],
+        "operationId" : "loadSampleData",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PipelineResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/organizations" : {
+      "post" : {
+        "tags" : [ "admin-structure-controller" ],
+        "operationId" : "createOrganization",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateOrganizationRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "description" : "Created",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : {
+                    "type" : "string",
+                    "format" : "uuid"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/connectors" : {
+      "get" : {
+        "tags" : [ "admin-connector-controller" ],
+        "operationId" : "list",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/ConnectorAdminView"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post" : {
+        "tags" : [ "admin-connector-controller" ],
+        "operationId" : "register",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RegisterConnectorRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "description" : "Created",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ConnectorAdminView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/connectors/{connectorId}/test" : {
+      "post" : {
+        "tags" : [ "admin-connector-controller" ],
+        "operationId" : "test",
+        "parameters" : [ {
+          "name" : "connectorId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TestConnectionResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/connectors/{connectorId}/status" : {
+      "post" : {
+        "tags" : [ "admin-connector-controller" ],
+        "operationId" : "setStatus",
+        "parameters" : [ {
+          "name" : "connectorId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SetStatusRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ConnectorAdminView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/business-units" : {
+      "post" : {
+        "tags" : [ "admin-structure-controller" ],
+        "operationId" : "createBusinessUnit",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateBusinessUnitRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "description" : "Created",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : {
+                    "type" : "string",
+                    "format" : "uuid"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/session" : {
       "get" : {
         "tags" : [ "session-controller" ],
@@ -107,10 +379,225 @@
           }
         }
       }
+    },
+    "/api/v1/admin/structure" : {
+      "get" : {
+        "tags" : [ "admin-structure-controller" ],
+        "operationId" : "structure",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/OrganizationView"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/connector-types" : {
+      "get" : {
+        "tags" : [ "admin-connector-controller" ],
+        "operationId" : "types",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/ConnectorTypeView"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components" : {
     "schemas" : {
+      "CreateTenantRequest" : {
+        "required" : [ "name", "slug" ],
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "slug" : {
+            "type" : "string"
+          }
+        }
+      },
+      "TenantView" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "slug" : {
+            "type" : "string"
+          }
+        }
+      },
+      "CreateTeamRequest" : {
+        "required" : [ "businessUnitId", "name" ],
+        "type" : "object",
+        "properties" : {
+          "businessUnitId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "name" : {
+            "type" : "string"
+          }
+        }
+      },
+      "IngestionResult" : {
+        "type" : "object",
+        "properties" : {
+          "emitted" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "inserted" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "updated" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "unchanged" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "PipelineResult" : {
+        "type" : "object",
+        "properties" : {
+          "ingestion" : {
+            "$ref" : "#/components/schemas/IngestionResult"
+          },
+          "teamsComputed" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "itemsCorrelated" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "CreateOrganizationRequest" : {
+        "required" : [ "name", "slug" ],
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "slug" : {
+            "type" : "string"
+          }
+        }
+      },
+      "RegisterConnectorRequest" : {
+        "required" : [ "name", "type" ],
+        "type" : "object",
+        "properties" : {
+          "type" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "config" : {
+            "type" : "object",
+            "additionalProperties" : {
+              "type" : "string"
+            }
+          },
+          "secret" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ConnectorAdminView" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "type" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "simulation" : {
+            "type" : "boolean"
+          },
+          "config" : {
+            "type" : "object",
+            "additionalProperties" : {
+              "type" : "string"
+            }
+          },
+          "hasSecret" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "TestConnectionResult" : {
+        "type" : "object",
+        "properties" : {
+          "outcome" : {
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          }
+        }
+      },
+      "SetStatusRequest" : {
+        "required" : [ "status" ],
+        "type" : "object",
+        "properties" : {
+          "status" : {
+            "type" : "string"
+          }
+        }
+      },
+      "CreateBusinessUnitRequest" : {
+        "required" : [ "name", "organizationId" ],
+        "type" : "object",
+        "properties" : {
+          "organizationId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "name" : {
+            "type" : "string"
+          }
+        }
+      },
       "SessionView" : {
         "type" : "object",
         "properties" : {
@@ -377,6 +864,80 @@
             "type" : "string"
           },
           "hasMore" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "BusinessUnitView" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "teams" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/TeamView"
+            }
+          }
+        }
+      },
+      "OrganizationView" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "slug" : {
+            "type" : "string"
+          },
+          "businessUnits" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/BusinessUnitView"
+            }
+          }
+        }
+      },
+      "TeamView" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "name" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ConnectorTypeView" : {
+        "type" : "object",
+        "properties" : {
+          "type" : {
+            "type" : "string"
+          },
+          "displayName" : {
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "configSchema" : {
+            "type" : "string"
+          },
+          "secretLabel" : {
+            "type" : "string"
+          },
+          "syncAvailable" : {
             "type" : "boolean"
           }
         }

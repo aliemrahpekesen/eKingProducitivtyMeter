@@ -71,6 +71,23 @@ public class ApiExceptionHandler {
   }
 
   /**
+   * Maps Jakarta Bean Validation failures on request bodies to 400 problem+json (BackendPlan §11).
+   *
+   * @param e the failure
+   * @return a 400 problem+json listing the first offending field
+   */
+  @ExceptionHandler(org.springframework.web.bind.MethodArgumentNotValidException.class)
+  public ProblemDetail handleBeanValidation(
+      org.springframework.web.bind.MethodArgumentNotValidException e) {
+    String detail =
+        e.getBindingResult().getFieldErrors().stream()
+            .findFirst()
+            .map(f -> f.getField() + " " + f.getDefaultMessage())
+            .orElse("request validation failed");
+    return problem(HttpStatus.BAD_REQUEST, detail, "Validation failed", "/problems/validation");
+  }
+
+  /**
    * Maps the sealed {@code com.eip.core.error} taxonomy to problem+json (BackendPlan §10) with an
    * exhaustive switch. Internal errors return a generic detail — never the exception message.
    *

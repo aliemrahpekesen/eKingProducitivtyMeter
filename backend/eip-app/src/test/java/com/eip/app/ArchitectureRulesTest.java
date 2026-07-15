@@ -47,11 +47,14 @@ class ArchitectureRulesTest {
         .onlyDependOnClassesThat()
         .resideInAnyPackage(
             "java..",
+            "jakarta..",
             "org.jspecify..",
             "org.springframework..",
             "com.eip.app.api..",
             "com.eip.app.application..",
-            "com.eip.analytics.api..")
+            "com.eip.analytics.api..",
+            "com.eip.ingestion.api..",
+            "com.eip.tenancy.api..")
         .because("controllers call application/query ports and return API DTOs, nothing else")
         .check(CLASSES);
   }
