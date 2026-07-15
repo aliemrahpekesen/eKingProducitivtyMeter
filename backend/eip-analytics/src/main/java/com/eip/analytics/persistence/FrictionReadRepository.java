@@ -89,9 +89,12 @@ public class FrictionReadRepository {
   }
 
   /**
-   * Reads every team's computed friction row.
+   * Reads every team's computed friction row for the current engine version only. {@code
+   * rm_team_friction_current} is keyed {@code (tenant, team, metric_version)} — a version bump
+   * upserts alongside, never over, surviving rows from the prior version, so every read must pin
+   * {@link FrictionDefinition#VERSION} or a team would report twice (DEBT-020 item 1).
    *
-   * @return the unsorted summary rows
+   * @return the unsorted summary rows, current version only
    */
   public List<SummaryRow> summaryRows() {
     return jdbc.sql(
@@ -102,7 +105,9 @@ public class FrictionReadRepository {
                    f.blocked_ratio, f.review_wait_ratio, f.computed_at
             FROM analytics.rm_team_friction_current f
             JOIN core.team t ON t.id = f.team_id AND t.deleted_at IS NULL
+            WHERE f.metric_version = :version
             """)
+        .param("version", FrictionDefinition.VERSION)
         .query(
             (rs, rowNum) ->
                 new SummaryRow(
@@ -142,6 +147,15 @@ public class FrictionReadRepository {
   /**
    * Reads a team's evidence items with their correlated artifacts in one query.
    *
+   * <p>{@code core.external_ref} is unique on {@code (source_system, source_instance, external_id)}
+   * per entity, not on {@code entity_id} alone (AD-14) — a second identity source anchored to the
+   * same work item is schema-legal and would otherwise fan this row out to one per anchor. The
+   * {@code er} join target is deliberately pre-deduplicated with {@code DISTINCT ON (entity_id)},
+   * deterministically ordered ({@code source_system, source_instance, external_id}), rather than
+   * pinned to "the staged origin's source": {@code work.work_item} carries no source-system column
+   * to pin against, so a stable dedup is the only well-defined minimal fix at this join site
+   * (DEBT-020 item 2).
+   *
    * @param teamId the team
    * @return the items ordered by work-item key
    */
@@ -155,8 +169,12 @@ public class FrictionReadRepository {
                    qg.status AS gate_status
             FROM analytics.flow_correlation fc
             JOIN work.work_item wi ON wi.id = fc.work_item_id
-            LEFT JOIN core.external_ref er
-              ON er.entity_type = 'WORK_ITEM' AND er.entity_id = fc.work_item_id
+            LEFT JOIN (
+              SELECT DISTINCT ON (entity_id) entity_id, external_key
+              FROM core.external_ref
+              WHERE entity_type = 'WORK_ITEM'
+              ORDER BY entity_id, source_system, source_instance, external_id
+            ) er ON er.entity_id = fc.work_item_id
             LEFT JOIN scm.pull_request pr ON pr.id = fc.pull_request_id
             LEFT JOIN cicd.build b ON b.id = fc.build_id
             LEFT JOIN quality.quality_gate qg ON qg.id = fc.quality_gate_id

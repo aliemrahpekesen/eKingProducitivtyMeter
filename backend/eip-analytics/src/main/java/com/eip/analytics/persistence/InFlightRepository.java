@@ -45,6 +45,10 @@ public class InFlightRepository {
   /**
    * Reads every unresolved, team-assigned item with its live age, in one bounded join.
    *
+   * <p>See {@link com.eip.analytics.persistence.FrictionReadRepository#evidenceItems} for why the
+   * {@code core.external_ref} join target is pre-deduplicated with {@code DISTINCT ON (entity_id)}
+   * (DEBT-020 item 2): the same fan-out risk applies to any join on {@code entity_id} alone.
+   *
    * @return the rows, ordered by team then age descending
    */
   public List<ItemRow> items() {
@@ -57,8 +61,12 @@ public class InFlightRepository {
                    (wi.status = 'BLOCKED') AS blocked
             FROM work.work_item wi
             JOIN core.team t ON t.id = wi.team_id AND t.deleted_at IS NULL
-            LEFT JOIN core.external_ref er
-              ON er.entity_type = 'WORK_ITEM' AND er.entity_id = wi.id
+            LEFT JOIN (
+              SELECT DISTINCT ON (entity_id) entity_id, external_key
+              FROM core.external_ref
+              WHERE entity_type = 'WORK_ITEM'
+              ORDER BY entity_id, source_system, source_instance, external_id
+            ) er ON er.entity_id = wi.id
             WHERE wi.resolved_at IS NULL AND wi.deleted_at IS NULL AND wi.team_id IS NOT NULL
             ORDER BY wi.team_id, age_sec DESC, wi.id
             """)

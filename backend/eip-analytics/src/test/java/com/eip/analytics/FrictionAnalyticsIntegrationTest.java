@@ -12,6 +12,7 @@ import com.eip.analytics.api.FrictionSummaryView;
 import com.eip.analytics.application.FrictionComputationService;
 import com.eip.analytics.application.FrictionEvidenceService;
 import com.eip.analytics.application.FrictionSummaryService;
+import com.eip.analytics.friction.FrictionDefinition;
 import com.eip.analytics.persistence.FrictionProjectionRepository;
 import com.eip.analytics.persistence.FrictionReadRepository;
 import com.eip.tenancy.context.TenantContext;
@@ -294,5 +295,76 @@ class FrictionAnalyticsIntegrationTest {
     FrictionEvidenceView crossTenant = evidence.evidence(TEAM);
     assertThat(crossTenant.teamName()).isNull();
     assertThat(crossTenant.items()).isEmpty();
+  }
+
+  /**
+   * DEBT-020 item 1 regression: {@code rm_team_friction_current} is keyed {@code (tenant, team,
+   * metric_version)}, so a stale row from a prior engine version surviving alongside the current
+   * one must never surface in the summary — the read must pin {@link FrictionDefinition#VERSION}.
+   */
+  @Test
+  void summary_reads_only_the_current_metric_version() throws SQLException {
+    TenantContext tenantA = TenantContext.of(TENANT_A);
+    compute.compute(tenantA);
+
+    // Simulate a pre-upgrade row left behind by a superseded engine version for the SAME team.
+    try (Connection admin =
+            DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+        Statement st = admin.createStatement()) {
+      st.execute(
+          "INSERT INTO analytics.rm_team_friction_current (tenant_id, team_id, metric_version,"
+              + " work_items, total_cycle_sec, active_sec, waiting_sec, blocked_sec,"
+              + " review_wait_sec, rework_count, flow_efficiency, blocked_ratio,"
+              + " review_wait_ratio, friction_score, dominant_cause, computed_at) VALUES ('"
+              + TENANT_A
+              + "', '"
+              + TEAM
+              + "', 'engineering_friction_v0.0-legacy', 99, 1, 1, 1, 1, 1, 1, 0.5, 0.5, 0.5, 999,"
+              + " 'REVIEW_WAIT', now())");
+    }
+
+    TenantContextHolder.set(tenantA);
+    FrictionSummaryView view = summary.summary();
+
+    assertThat(view.teamsReporting()).isEqualTo(1);
+    assertThat(view.teams()).hasSize(1);
+    assertThat(view.metricVersion()).isEqualTo(FrictionDefinition.VERSION);
+    assertThat(view.teams().get(0).frictionScore()).isEqualTo(55); // the CURRENT version's score
+  }
+
+  /**
+   * DEBT-020 item 2 regression: {@code core.external_ref} is unique per {@code (source_system,
+   * source_instance, external_id)}, not per {@code entity_id} — a second identity source anchored
+   * to the same canonical work item must not duplicate its evidence row.
+   */
+  @Test
+  void evidence_is_not_duplicated_by_a_second_identity_source_for_the_same_entity()
+      throws SQLException {
+    TenantContext tenantA = TenantContext.of(TENANT_A);
+    compute.compute(tenantA);
+
+    // A second connector (e.g. a future GitHub correlation) anchors ITS OWN identity to the same
+    // canonical entity_id as T-2's existing 'jira' anchor.
+    try (Connection admin =
+            DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+        Statement st = admin.createStatement()) {
+      st.execute(
+          "INSERT INTO core.external_ref (tenant_id, entity_type, entity_id, source_system,"
+              + " source_instance, external_id, external_key, last_seen_at) VALUES ('"
+              + TENANT_A
+              + "', 'WORK_ITEM', '"
+              + ITEM_2
+              + "', 'github', 'sim', 'github:T-2-dup', 'T-2', now())");
+    }
+
+    TenantContextHolder.set(tenantA);
+    FrictionEvidenceView teamEvidence = evidence.evidence(TEAM);
+
+    assertThat(teamEvidence.items()).hasSize(2); // still 2, not 3 — no fan-out
+    assertThat(teamEvidence.items())
+        .filteredOn(item -> "T-2".equals(item.workItemKey()))
+        .hasSize(1);
   }
 }

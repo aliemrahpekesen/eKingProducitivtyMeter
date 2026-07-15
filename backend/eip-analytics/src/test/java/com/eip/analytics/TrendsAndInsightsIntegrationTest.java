@@ -360,4 +360,33 @@ class TrendsAndInsightsIntegrationTest {
         .extracting(RecommendationView::severity)
         .containsOnly("WARN");
   }
+
+  /**
+   * DEBT-020 item 2 regression: {@code core.external_ref} is unique per {@code (source_system,
+   * source_instance, external_id)}, not per {@code entity_id} — a second identity source anchored
+   * to the same in-flight work item must not duplicate its row.
+   */
+  @Test
+  void in_flight_items_are_not_duplicated_by_a_second_identity_source_for_the_same_entity()
+      throws SQLException {
+    try (Connection admin =
+            DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+        Statement st = admin.createStatement()) {
+      st.execute(
+          "INSERT INTO core.external_ref (tenant_id, entity_type, entity_id, source_system,"
+              + " source_instance, external_id, external_key, last_seen_at) VALUES ('"
+              + TENANT_A
+              + "', 'WORK_ITEM', '"
+              + ITEM_3
+              + "', 'github', 'sim', 'github:T-3-dup', 'T-3', now())");
+    }
+
+    TenantContextHolder.set(TenantContext.of(TENANT_A));
+    List<TeamInFlightView> inFlightViews = inFlight.inFlight();
+
+    assertThat(inFlightViews).hasSize(1);
+    assertThat(inFlightViews.get(0).items()).hasSize(1); // still 1, not 2 — no fan-out
+    assertThat(inFlightViews.get(0).items().get(0).workItemKey()).isEqualTo("T-3");
+  }
 }
