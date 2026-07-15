@@ -8,6 +8,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 import com.eip.app.application.RunFrictionPipelineUseCase;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
@@ -44,8 +45,11 @@ import org.testcontainers.utility.DockerImageName;
  * PostgreSQL <em>and</em> a real Kafka broker (KRaft, Testcontainers): the friction pipeline's
  * canonical write emits outbox rows, the scheduled relay publishes them, the real
  * {@code @KafkaListener} consumer receives them and records {@code core.processed_events},
- * redelivering an already-processed event is deduped (no double processing), and a malformed
- * message is routed to the DLQ topic rather than blocking or infinitely redelivering.
+ * redelivering an already-processed event is deduped (no double processing), a burst of N distinct
+ * events for one tenant coalesces into fewer than N recompute runs ({@code
+ * FrictionRecomputeCoalescer} dirty-set semantics, DEBT-017 residual) while the friction read model
+ * still converges to the correct scores, and a malformed message is routed to the DLQ topic rather
+ * than blocking or infinitely redelivering.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Tag("integration")
@@ -74,6 +78,7 @@ class OutboxKafkaIntegrationTest {
     registry.add("spring.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
     registry.add("eip.events.enabled", () -> "true");
     registry.add("eip.events.relay-delay-ms", () -> "200");
+    registry.add("eip.events.recompute-delay-ms", () -> "300");
   }
 
   private static void prepareDatabase() {
@@ -137,9 +142,10 @@ class OutboxKafkaIntegrationTest {
   }
 
   @Autowired private RunFrictionPipelineUseCase pipeline;
+  @Autowired private MeterRegistry meterRegistry;
 
   @Test
-  void outbox_rows_publish_through_kafka_and_the_real_consumer_dedups() {
+  void outbox_rows_publish_through_kafka_and_the_real_consumer_dedups_and_coalesces() {
     pipeline.run(TENANT_A);
 
     // The scheduled relay (200ms) publishes every outbox row.
@@ -155,16 +161,42 @@ class OutboxKafkaIntegrationTest {
         .atMost(Duration.ofSeconds(30))
         .untilAsserted(() -> assertThat(processedEventsCount()).isEqualTo(9L));
 
-    // Redeliver an event the consumer has ALREADY recorded: must not double-process.
+    // Coalescing (DEBT-017 residual): the burst of 9 distinct events marked the tenant dirty; the
+    // FrictionRecomputeCoalescer sweep (300ms here) recomputes each dirty tenant at most once per
+    // sweep — so the total number of executed recomputes must land strictly below the event count.
+    // First wait for at least one sweep to have actually computed (runs >= 1), then give the
+    // coalescer several further sweep windows (pollDelay) so any straggling mark is drained before
+    // asserting the ceiling.
+    await()
+        .atMost(Duration.ofSeconds(20))
+        .untilAsserted(() -> assertThat(recomputeRuns()).isGreaterThanOrEqualTo(1.0));
+    await()
+        .pollDelay(Duration.ofSeconds(2))
+        .atMost(Duration.ofSeconds(10))
+        .untilAsserted(() -> assertThat(recomputeRuns()).isLessThan(9.0));
+
+    // The final compute covers the last event: the read model converged to the golden simulation
+    // scores (Platform 91 — same derivation as FrictionPipelineIntegrationTest).
+    await()
+        .atMost(Duration.ofSeconds(20))
+        .untilAsserted(() -> assertThat(platformFrictionScore()).isEqualTo(91L));
+
+    // Redeliver an event the consumer has ALREADY recorded: must not double-process (and must not
+    // re-mark the tenant dirty — dedup short-circuits before the coalescer).
     UUID processedEventId = anyProcessedEventId();
     String envelopeJson = envelopeJsonFor(processedEventId);
     long stableCount = processedEventsCount();
+    double stableRuns = recomputeRuns();
     sendRaw(TOPIC, TENANT_A + ":replay", envelopeJson);
 
     await()
         .pollDelay(Duration.ofSeconds(3))
         .atMost(Duration.ofSeconds(20))
-        .untilAsserted(() -> assertThat(processedEventsCount()).isEqualTo(stableCount));
+        .untilAsserted(
+            () -> {
+              assertThat(processedEventsCount()).isEqualTo(stableCount);
+              assertThat(recomputeRuns()).isEqualTo(stableRuns);
+            });
   }
 
   @Test
@@ -220,6 +252,19 @@ class OutboxKafkaIntegrationTest {
             + "' AND consumer_group = '"
             + CONSUMER_GROUP
             + "'");
+  }
+
+  private double recomputeRuns() {
+    return meterRegistry.counter("eip.events.recompute.runs").count();
+  }
+
+  private long platformFrictionScore() {
+    return scalarAsSuperuser(
+        "SELECT coalesce(max(f.friction_score), -1) FROM analytics.rm_team_friction_current f"
+            + " JOIN core.team t ON t.id = f.team_id"
+            + " WHERE f.tenant_id = '"
+            + TENANT_A
+            + "' AND t.name = 'Platform'");
   }
 
   private UUID anyProcessedEventId() {

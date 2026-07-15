@@ -4,7 +4,6 @@
  */
 package com.eip.app.events;
 
-import com.eip.analytics.api.ComputeFrictionUseCase;
 import com.eip.app.persistence.ProcessedEventsRepository;
 import com.eip.tenancy.context.TenantContext;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -20,12 +19,14 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
 
 /**
- * Reacts to {@code eip.domain.workitem} events by scheduling a friction recompute for the event's
- * tenant (BackendPlan §6). Idempotent via {@link ProcessedEventsRepository} (dedup on {@code
- * eventId}): a redelivered event is acknowledged and skipped without recomputing. Any processing
- * failure (malformed envelope, dedup/compute error) routes the raw message to {@link #DLQ_TOPIC}
- * and the listener returns normally — never rethrows — so the container acks the original message
- * and there is no infinite redelivery loop.
+ * Reacts to {@code eip.domain.workitem} events by marking the event's tenant dirty in {@link
+ * FrictionRecomputeCoalescer} (BackendPlan §6; DEBT-017 residual) — the coalescer's own
+ * {@code @Scheduled} sweep, not this listener, performs the actual friction recompute, so a burst
+ * of events for one tenant collapses into at most one compute call per sweep window. Idempotent via
+ * {@link ProcessedEventsRepository} (dedup on {@code eventId}): a redelivered event is acknowledged
+ * and skipped without marking anything dirty. Any processing failure (malformed envelope, dedup
+ * error) routes the raw message to {@link #DLQ_TOPIC} and the listener returns normally — never
+ * rethrows — so the container acks the original message and there is no infinite redelivery loop.
  */
 @Component
 @ConditionalOnProperty(prefix = "eip.events", name = "enabled", matchIfMissing = true)
@@ -40,7 +41,7 @@ public class WorkItemEventsConsumer {
   private static final Logger log = LoggerFactory.getLogger(WorkItemEventsConsumer.class);
 
   private final ProcessedEventsRepository processed;
-  private final ComputeFrictionUseCase compute;
+  private final FrictionRecomputeCoalescer coalescer;
   private final KafkaTemplate<String, String> kafka;
   private final ObjectMapper mapper;
   private final Counter dlqCounter;
@@ -49,19 +50,19 @@ public class WorkItemEventsConsumer {
    * Creates the consumer.
    *
    * @param processed the consumer idempotency ledger
-   * @param compute the friction recompute use case
+   * @param coalescer the recompute coalescer this consumer marks dirty
    * @param kafka the Kafka template (used only to route failures to the DLQ topic)
    * @param mapper the shared {@link ObjectMapper}
    * @param registry the Micrometer registry
    */
   public WorkItemEventsConsumer(
       ProcessedEventsRepository processed,
-      ComputeFrictionUseCase compute,
+      FrictionRecomputeCoalescer coalescer,
       KafkaTemplate<String, String> kafka,
       ObjectMapper mapper,
       MeterRegistry registry) {
     this.processed = processed;
-    this.compute = compute;
+    this.coalescer = coalescer;
     this.kafka = kafka;
     this.mapper = mapper;
     this.dlqCounter =
@@ -84,7 +85,7 @@ public class WorkItemEventsConsumer {
       TenantContext tenant = TenantContext.of(tenantId);
 
       if (processed.recordIfNew(tenant, CONSUMER_GROUP, eventId)) {
-        compute.compute(tenant);
+        coalescer.markDirty(tenantId);
       } else {
         log.info("duplicate work-item event {} — skipped", eventId);
       }
