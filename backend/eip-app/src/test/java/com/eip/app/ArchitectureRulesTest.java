@@ -54,7 +54,8 @@ class ArchitectureRulesTest {
             "com.eip.app.application..",
             "com.eip.analytics.api..",
             "com.eip.ingestion.api..",
-            "com.eip.tenancy.api..")
+            "com.eip.tenancy.api..",
+            "com.eip.reports.api..")
         .because("controllers call application/query ports and return API DTOs, nothing else")
         .check(CLASSES);
   }
@@ -123,10 +124,12 @@ class ArchitectureRulesTest {
             "com.eip.analytics.persistence..",
             "com.eip.ingestion.application..",
             "com.eip.ingestion.persistence..",
-            "com.eip.connectors..")
+            "com.eip.connectors..",
+            "com.eip.reports.application..",
+            "com.eip.reports.persistence..")
         .because(
-            "normalization, correlation, metric, and projection logic belong to their owning"
-                + " modules; eip-app wires and invokes use cases only (ADR-019)")
+            "normalization, correlation, metric, projection, and report-composition logic belong"
+                + " to their owning modules; eip-app wires and invokes use cases only (ADR-019)")
         .check(CLASSES);
   }
 }

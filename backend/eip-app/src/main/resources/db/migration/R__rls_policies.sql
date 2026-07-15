@@ -45,7 +45,8 @@ DECLARE
     'cicd.build',                    -- TASK-0016 INC-2
     'quality.quality_gate',          -- TASK-0016 INC-2
     'analytics.flow_correlation',    -- TASK-0016 INC-2 (correlation evidence)
-    'analytics.rm_team_friction_current' -- TASK-0016 INC-2 (computed friction read model)
+    'analytics.rm_team_friction_current', -- TASK-0016 INC-2 (computed friction read model)
+    'reports.generated_report'       -- TASK-0022 M4 Wave R1 (deterministic report engine)
   ];
   -- Platform-scoped (enumerated no-RLS exceptions, DatabasePlan §2): core.tenant,
   -- core.worker_heartbeat, analytics.analytics_watermark — deliberately absent from this list.

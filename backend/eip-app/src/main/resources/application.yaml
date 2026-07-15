@@ -52,6 +52,13 @@ eip:
   sync:
     scheduled-enabled: true
     auto-delay-ms: 300000
+  # Deterministic weekly report generation (TASK-0022, ADR-023). scheduled-enabled defaults ON;
+  # set to false to disable ScheduledReportRunner entirely (e.g. a test that would otherwise risk
+  # racing the weekly pass). schedule-cron is a standard Spring cron expression (seconds-first);
+  # the default fires once a week, Monday 06:00 server time.
+  reports:
+    scheduled-enabled: true
+    schedule-cron: "0 0 6 * * MON"
 
 springdoc:
   api-docs:

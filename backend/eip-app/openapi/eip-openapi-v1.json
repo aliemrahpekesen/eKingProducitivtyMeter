@@ -61,6 +61,67 @@
         }
       }
     },
+    "/api/v1/reports" : {
+      "get" : {
+        "tags" : [ "reports-controller" ],
+        "operationId" : "listReports",
+        "parameters" : [ {
+          "name" : "cursor",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "limit",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 20
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ReportPageView"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post" : {
+        "tags" : [ "reports-controller" ],
+        "operationId" : "generate",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/GenerateReportRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "description" : "Created",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ReportView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/tenants" : {
       "get" : {
         "tags" : [ "admin-tenant-controller" ],
@@ -378,6 +439,60 @@
         }
       }
     },
+    "/api/v1/reports/{id}" : {
+      "get" : {
+        "tags" : [ "reports-controller" ],
+        "operationId" : "get",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ReportDocumentView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/reports/{id}/html" : {
+      "get" : {
+        "tags" : [ "reports-controller" ],
+        "operationId" : "html",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/metrics/trends" : {
       "get" : {
         "tags" : [ "metrics-controller" ],
@@ -573,6 +688,57 @@
   },
   "components" : {
     "schemas" : {
+      "GenerateReportRequest" : {
+        "required" : [ "type" ],
+        "type" : "object",
+        "properties" : {
+          "type" : {
+            "type" : "string"
+          },
+          "weeks" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "ReportView" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "type" : {
+            "type" : "string"
+          },
+          "title" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "periodStart" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "periodEnd" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "weeks" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "completedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
       "CreateTenantRequest" : {
         "required" : [ "name", "slug" ],
         "type" : "object",
@@ -758,7 +924,104 @@
           }
         }
       },
-      "TeamTrendView" : {
+      "ReportPageView" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ReportView"
+            }
+          },
+          "nextCursor" : {
+            "type" : "string"
+          },
+          "hasMore" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "RecommendationView" : {
+        "type" : "object",
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "severity" : {
+            "type" : "string"
+          },
+          "title" : {
+            "type" : "string"
+          },
+          "rationale" : {
+            "type" : "string"
+          },
+          "actions" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "metricRefs" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
+      },
+      "ReportDocument" : {
+        "type" : "object",
+        "properties" : {
+          "reportVersion" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "title" : {
+            "type" : "string"
+          },
+          "periodStart" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "periodEnd" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "weeks" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "generatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "metricVersion" : {
+            "type" : "string"
+          },
+          "totals" : {
+            "$ref" : "#/components/schemas/ReportTotals"
+          },
+          "teams" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ReportTeamSection"
+            }
+          }
+        }
+      },
+      "ReportDocumentView" : {
+        "type" : "object",
+        "properties" : {
+          "report" : {
+            "$ref" : "#/components/schemas/ReportView"
+          },
+          "document" : {
+            "$ref" : "#/components/schemas/ReportDocument"
+          }
+        }
+      },
+      "ReportTeamSection" : {
         "type" : "object",
         "properties" : {
           "teamId" : {
@@ -768,11 +1031,69 @@
           "teamName" : {
             "type" : "string"
           },
+          "frictionScore" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "dominantCause" : {
+            "type" : "string"
+          },
           "points" : {
             "type" : "array",
             "items" : {
               "$ref" : "#/components/schemas/TrendPointView"
             }
+          },
+          "recommendations" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/RecommendationView"
+            }
+          },
+          "inFlightCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "blockedInFlightCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "ReportTotals" : {
+        "type" : "object",
+        "properties" : {
+          "teamsReporting" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "itemsResolved" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "avgCycleSec" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "p85CycleSec" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "flowEfficiencyPct" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "blockedPct" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "reviewWaitPct" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "avgFrictionScore" : {
+            "type" : "integer",
+            "format" : "int32"
           }
         }
       },
@@ -809,6 +1130,24 @@
           "frictionScore" : {
             "type" : "integer",
             "format" : "int32"
+          }
+        }
+      },
+      "TeamTrendView" : {
+        "type" : "object",
+        "properties" : {
+          "teamId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "teamName" : {
+            "type" : "string"
+          },
+          "points" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/TrendPointView"
+            }
           }
         }
       },
@@ -862,35 +1201,6 @@
             "type" : "array",
             "items" : {
               "$ref" : "#/components/schemas/InFlightItemView"
-            }
-          }
-        }
-      },
-      "RecommendationView" : {
-        "type" : "object",
-        "properties" : {
-          "code" : {
-            "type" : "string"
-          },
-          "severity" : {
-            "type" : "string"
-          },
-          "title" : {
-            "type" : "string"
-          },
-          "rationale" : {
-            "type" : "string"
-          },
-          "actions" : {
-            "type" : "array",
-            "items" : {
-              "type" : "string"
-            }
-          },
-          "metricRefs" : {
-            "type" : "array",
-            "items" : {
-              "type" : "string"
             }
           }
         }
