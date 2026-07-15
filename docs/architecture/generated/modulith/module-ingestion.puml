@@ -10,10 +10,13 @@ top to bottom direction
 
 Container_Boundary("Modules.Modules_boundary", "Modules", $tags="") {
   Component(Modules.Modules.Connectors, "Connectors", $techn="Module", $descr="", $tags="", $link="")
+  Component(Modules.Modules.Core, "Core", $techn="Module", $descr="", $tags="", $link="")
   Component(Modules.Modules.Ingestion, "Ingestion", $techn="Module", $descr="", $tags="", $link="")
   Component(Modules.Modules.Tenancy, "Tenancy", $techn="Module", $descr="", $tags="", $link="")
 }
 
+Rel(Modules.Modules.Tenancy, Modules.Modules.Core, "depends on", $techn="", $tags="", $link="")
+Rel(Modules.Modules.Ingestion, Modules.Modules.Core, "depends on", $techn="", $tags="", $link="")
 Rel(Modules.Modules.Ingestion, Modules.Modules.Tenancy, "uses", $techn="", $tags="", $link="")
 Rel(Modules.Modules.Ingestion, Modules.Modules.Connectors, "uses", $techn="", $tags="", $link="")
 
