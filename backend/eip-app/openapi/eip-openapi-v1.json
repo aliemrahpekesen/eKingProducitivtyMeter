@@ -213,6 +213,33 @@
         }
       }
     },
+    "/api/v1/admin/connectors/{connectorId}/sync" : {
+      "post" : {
+        "tags" : [ "admin-connector-controller" ],
+        "operationId" : "sync",
+        "parameters" : [ {
+          "name" : "connectorId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PipelineResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/connectors/{connectorId}/status" : {
       "post" : {
         "tags" : [ "admin-connector-controller" ],
@@ -293,6 +320,76 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/SessionView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/metrics/trends" : {
+      "get" : {
+        "tags" : [ "metrics-controller" ],
+        "operationId" : "trends",
+        "parameters" : [ {
+          "name" : "weeks",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 12
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TrendsView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/metrics/in-flight" : {
+      "get" : {
+        "tags" : [ "metrics-controller" ],
+        "operationId" : "inFlight",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/TeamInFlightView"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/insights/recommendations" : {
+      "get" : {
+        "tags" : [ "insights-controller" ],
+        "operationId" : "recommendations",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/TeamRecommendationsView"
+                  }
                 }
               }
             }
@@ -607,6 +704,165 @@
           },
           "organizationName" : {
             "type" : "string"
+          }
+        }
+      },
+      "TeamTrendView" : {
+        "type" : "object",
+        "properties" : {
+          "teamId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "teamName" : {
+            "type" : "string"
+          },
+          "points" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/TrendPointView"
+            }
+          }
+        }
+      },
+      "TrendPointView" : {
+        "type" : "object",
+        "properties" : {
+          "weekStart" : {
+            "type" : "string"
+          },
+          "itemsResolved" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "avgCycleSec" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "p85CycleSec" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "flowEfficiencyPct" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "blockedPct" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "reviewWaitPct" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "frictionScore" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "TrendsView" : {
+        "type" : "object",
+        "properties" : {
+          "rangeWeeks" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "teams" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/TeamTrendView"
+            }
+          }
+        }
+      },
+      "InFlightItemView" : {
+        "type" : "object",
+        "properties" : {
+          "workItemKey" : {
+            "type" : "string"
+          },
+          "title" : {
+            "type" : "string"
+          },
+          "state" : {
+            "type" : "string"
+          },
+          "ageSec" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "blocked" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "TeamInFlightView" : {
+        "type" : "object",
+        "properties" : {
+          "teamId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "teamName" : {
+            "type" : "string"
+          },
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/InFlightItemView"
+            }
+          }
+        }
+      },
+      "RecommendationView" : {
+        "type" : "object",
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "severity" : {
+            "type" : "string"
+          },
+          "title" : {
+            "type" : "string"
+          },
+          "rationale" : {
+            "type" : "string"
+          },
+          "actions" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "metricRefs" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
+      },
+      "TeamRecommendationsView" : {
+        "type" : "object",
+        "properties" : {
+          "teamId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "teamName" : {
+            "type" : "string"
+          },
+          "frictionScore" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "recommendations" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/RecommendationView"
+            }
           }
         }
       },
