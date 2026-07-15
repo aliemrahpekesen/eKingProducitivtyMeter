@@ -10,6 +10,19 @@ const devPort = Number(process.env.VITE_PORT ?? process.env.FRONTEND_PORT ?? 517
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        // echarts (+ its zrender renderer) is by far the largest dependency; isolate it into its
+        // own vendor chunk so the app chunk stays small. Paired with the dynamic import in
+        // src/lib/useECharts.ts, this chunk is only fetched when a chart actually mounts.
+        manualChunks: (id: string): string | undefined =>
+          id.includes('node_modules/echarts') || id.includes('node_modules/zrender')
+            ? 'echarts'
+            : undefined,
+      },
+    },
+  },
   server: {
     port: devPort,
     proxy: {
