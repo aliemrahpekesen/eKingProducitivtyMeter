@@ -58,6 +58,18 @@ backend-build: ## Build the backend (Gradle multi-module)
 frontend-build: ## Build the frontend (Vite)
 	pnpm --dir frontend install && pnpm --dir frontend build
 
+.PHONY: install
+install: ## Full local install (all infra + backend + frontend). ENV=dev|test|preprod (default dev); ports overridable
+	@bash scripts/install/install.sh --env $(or $(ENV),dev)
+
+.PHONY: stop
+stop: ## Stop everything `make install` started (keeps data volumes)
+	@bash scripts/install/stop.sh
+
+.PHONY: uninstall
+uninstall: ## DESTRUCTIVE: remove all EIP containers and data volumes
+	@bash scripts/install/uninstall.sh
+
 .PHONY: demo-up
 demo-up: ## One-command local demo (fixed demo tenant preloaded). Override ports: POSTGRES_PORT / EIP_BACKEND_PORT / VITE_PORT
 	@test -f $(COMPOSE_ENV) || cp infra/docker-compose/.env.example $(COMPOSE_ENV)
