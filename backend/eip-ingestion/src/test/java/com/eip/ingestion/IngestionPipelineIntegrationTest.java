@@ -8,6 +8,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.eip.connectors.simulation.SimulationConnector;
 import com.eip.ingestion.api.IngestionResult;
+import com.eip.ingestion.application.ConnectorRegistry;
 import com.eip.ingestion.application.NormalizationService;
 import com.eip.ingestion.application.SimulationIngestionService;
 import com.eip.ingestion.persistence.CanonicalWriteRepository;
@@ -129,7 +130,7 @@ class IngestionPipelineIntegrationTest {
     ingestion =
         new SimulationIngestionService(
             runner,
-            new SimulationConnector(),
+            new ConnectorRegistry(java.util.List.of(new SimulationConnector())),
             new ConnectorRegistryRepository(jdbc),
             staging,
             new RawPayloadCodec(mapper));

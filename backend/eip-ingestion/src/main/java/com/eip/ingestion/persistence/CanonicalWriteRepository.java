@@ -49,7 +49,7 @@ public class CanonicalWriteRepository {
       String status,
       @Nullable UUID teamId,
       Timestamp createdInSource,
-      Timestamp resolvedAt) {}
+      @Nullable Timestamp resolvedAt) {}
 
   /** One work-item state-transition upsert row. */
   public record TransitionRow(
@@ -131,6 +131,55 @@ public class CanonicalWriteRepository {
           });
     }
     return workItemRefIds();
+  }
+
+  /**
+   * Ensures teams exist for source-named team labels, creating missing ones under an "Imported"
+   * organisation/business unit (control-plane bootstrap for freshly connected sources).
+   *
+   * @param names the team names present in the staged data
+   * @return the refreshed team-id-by-name map
+   */
+  public Map<String, UUID> ensureImportedTeams(java.util.Set<String> names) {
+    UUID businessUnitId =
+        jdbc.sql(
+                "SELECT id FROM core.business_unit WHERE deleted_at IS NULL ORDER BY created_at LIMIT 1")
+            .query(UUID.class)
+            .optional()
+            .orElseGet(
+                () -> {
+                  UUID orgId =
+                      jdbc.sql(
+                              """
+                              INSERT INTO core.organization (tenant_id, name, slug)
+                              VALUES (current_setting('app.tenant_id')::uuid, 'Imported', 'imported')
+                              RETURNING id
+                              """)
+                          .query(UUID.class)
+                          .single();
+                  return jdbc.sql(
+                          """
+                          INSERT INTO core.business_unit (tenant_id, organization_id, name)
+                          VALUES (current_setting('app.tenant_id')::uuid, :orgId, 'Imported')
+                          RETURNING id
+                          """)
+                      .param("orgId", orgId)
+                      .query(UUID.class)
+                      .single();
+                });
+    java.util.List<String> missing = new java.util.ArrayList<>(names);
+    jdbcTemplate.batchUpdate(
+        """
+        INSERT INTO core.team (tenant_id, business_unit_id, name, type)
+        VALUES (current_setting('app.tenant_id')::uuid, ?, ?, 'STREAM_ALIGNED')
+        """,
+        missing,
+        missing.size(),
+        (ps, name) -> {
+          ps.setObject(1, businessUnitId);
+          ps.setString(2, name);
+        });
+    return teamIdsByName();
   }
 
   private Map<String, UUID> workItemRefIds() {

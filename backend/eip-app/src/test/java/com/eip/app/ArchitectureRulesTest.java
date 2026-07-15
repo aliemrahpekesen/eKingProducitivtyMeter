@@ -65,7 +65,8 @@ class ArchitectureRulesTest {
         .that()
         .resideInAnyPackage(
             "com.eip.core..",
-            "com.eip.connectors..",
+            "com.eip.connectors.spi..",
+            "com.eip.connectors.simulation..",
             "com.eip.analytics.friction..",
             "com.eip.tenancy.context..")
         .should()
@@ -81,8 +82,31 @@ class ArchitectureRulesTest {
             "jakarta.persistence..",
             "com.fasterxml.jackson..")
         .because(
-            "domain calculations, value objects, connector contracts, and the RLS primitive are"
+            "domain calculations, value objects, connector CONTRACTS, and the RLS primitive are"
                 + " framework-independent pure Java (founder decision 5)")
+        .check(CLASSES);
+  }
+
+  @Test
+  void connector_implementations_use_no_spring_or_jdbc() {
+    // Real connector impls may use Jackson + the JDK HttpClient, but never Spring or JDBC:
+    // they must stay extractable and testable without a container (founder decision 5).
+    noClasses()
+        .that()
+        .resideInAPackage("com.eip.connectors..")
+        .should()
+        .dependOnClassesThat()
+        .resideInAnyPackage(
+            "org.springframework.beans..",
+            "org.springframework.context..",
+            "org.springframework.stereotype..",
+            "org.springframework.jdbc..",
+            "org.springframework.transaction..",
+            "org.springframework.web..",
+            "org.springframework.boot..",
+            "java.sql..",
+            "javax.sql..",
+            "jakarta.persistence..")
         .check(CLASSES);
   }
 

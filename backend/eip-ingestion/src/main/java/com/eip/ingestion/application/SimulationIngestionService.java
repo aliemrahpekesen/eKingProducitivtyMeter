@@ -39,12 +39,18 @@ public class SimulationIngestionService implements IngestSimulationDataUseCase {
 
   public SimulationIngestionService(
       TenantTransactionRunner tx,
-      Connector connector,
+      ConnectorRegistry connectors,
       ConnectorRegistryRepository registry,
       StagingRawRepository staging,
       RawPayloadCodec codec) {
     this.tx = tx;
-    this.connector = connector;
+    this.connector =
+        connectors
+            .byType("simulation")
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        "simulation connector disabled (eip.simulation.enabled=false)"));
     this.registry = registry;
     this.staging = staging;
     this.codec = codec;
@@ -59,7 +65,8 @@ public class SimulationIngestionService implements IngestSimulationDataUseCase {
         tenant,
         () -> {
           UUID connectorId = registry.ensureConnector(connector.type(), connector.simulation());
-          Map<String, byte[]> existing = staging.contentHashes(connectorId);
+          Map<String, byte[]> existing =
+              staging.contentHashes(StagingRawRepository.rawTable("simulation"), connectorId);
 
           List<RawUpsert> changes = new ArrayList<>();
           int inserted = 0;
@@ -81,7 +88,7 @@ public class SimulationIngestionService implements IngestSimulationDataUseCase {
             }
           }
           if (!changes.isEmpty()) {
-            staging.upsertAll(connectorId, changes);
+            staging.upsertAll(StagingRawRepository.rawTable("simulation"), connectorId, changes);
           }
           return new IngestionResult(emitted.size(), inserted, updated, unchanged);
         });

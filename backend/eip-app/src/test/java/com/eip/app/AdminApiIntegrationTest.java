@@ -199,7 +199,7 @@ class AdminApiIntegrationTest {
   void registers_a_jira_connector_with_an_envelope_encrypted_secret() throws Exception {
     mvc.perform(get("/api/v1/admin/connector-types"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$[?(@.type=='jira')].syncAvailable").value(false))
+        .andExpect(jsonPath("$[?(@.type=='jira')].syncAvailable").value(true)) // real sync (M2)
         .andExpect(jsonPath("$[?(@.type=='simulation')].syncAvailable").value(true));
 
     String body =
@@ -209,7 +209,7 @@ class AdminApiIntegrationTest {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(
                         "{\"type\":\"jira\",\"name\":\"Acme Jira\",\"config\":{\"baseUrl\":"
-                            + "\"https://acme.atlassian.net\",\"email\":\"svc@acme.io\"},"
+                            + "\"http://127.0.0.1:1\",\"email\":\"svc@acme.io\"},"
                             + "\"secret\":\""
                             + JIRA_TOKEN
                             + "\"}"))
@@ -282,11 +282,12 @@ class AdminApiIntegrationTest {
   @Test
   @Order(5)
   void connection_tests_are_honest_and_status_toggles() throws Exception {
+    // Real probe now: an unreachable Jira fails honestly (never a fake OK).
     mvc.perform(
             post("/api/v1/admin/connectors/" + jiraConnectorId + "/test")
                 .header(HeaderTenantResolver.HEADER, tenantA))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.outcome").value("NOT_AVAILABLE"));
+        .andExpect(jsonPath("$.outcome").value("FAILED"));
 
     String simBody =
         mvc.perform(

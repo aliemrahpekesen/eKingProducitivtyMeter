@@ -72,8 +72,20 @@ public class NormalizationService implements NormalizeStagedDataUseCase {
         () -> {
           Map<String, UUID> teamsByName = canonical.teamIdsByName();
 
-          // Work items: resolve stable ids through external_ref, then batch upsert.
-          List<Parsed> items = parse(staging.readStream(STREAM_WORK_ITEM));
+          // Work items: resolve stable ids through external_ref, then batch upsert. Teams named
+          // by sources but missing in the control plane are auto-created under an "Imported"
+          // structure so freshly connected sources chart immediately (team-level only, NFR-071).
+          List<Parsed> items = parse(readAll(STREAM_WORK_ITEM));
+          java.util.Set<String> unknownTeams = new java.util.LinkedHashSet<>();
+          for (Parsed p : items) {
+            String team = p.text("team");
+            if (!team.isBlank() && !teamsByName.containsKey(team)) {
+              unknownTeams.add(team);
+            }
+          }
+          if (!unknownTeams.isEmpty()) {
+            teamsByName = canonical.ensureImportedTeams(unknownTeams);
+          }
           Map<String, UUID> idsByExternalId =
               canonical.resolveWorkItemIds(
                   items.stream()
@@ -100,13 +112,13 @@ public class NormalizationService implements NormalizeStagedDataUseCase {
                     p.text("status"),
                     teamsByName.get(p.text("team")),
                     p.timestamp("createdAt"),
-                    p.timestamp("resolvedAt")));
+                    p.timestampOrNull("resolvedAt")));
           }
           canonical.upsertWorkItems(workItems);
 
           // Transitions: stitch to items via the in-memory key map.
           List<TransitionRow> transitions = new ArrayList<>();
-          for (Parsed p : parse(staging.readStream(STREAM_TRANSITION))) {
+          for (Parsed p : parse(readAll(STREAM_TRANSITION))) {
             @Nullable UUID workItemId = idsByKey.get(p.text("workItemKey"));
             if (workItemId == null) {
               continue; // orphan transition; impossible for the simulation dataset
@@ -123,7 +135,7 @@ public class NormalizationService implements NormalizeStagedDataUseCase {
 
           // Pull requests, then their id map for reviews/builds.
           List<PullRequestRow> pullRequests = new ArrayList<>();
-          for (Parsed p : parse(staging.readStream(STREAM_PULL_REQUEST))) {
+          for (Parsed p : parse(readAll(STREAM_PULL_REQUEST))) {
             pullRequests.add(
                 new PullRequestRow(
                     teamsByName.get(p.text("team")),
@@ -139,7 +151,7 @@ public class NormalizationService implements NormalizeStagedDataUseCase {
           Map<String, UUID> prIds = canonical.pullRequestIdsBySourceKey();
 
           List<CodeReviewRow> reviews = new ArrayList<>();
-          for (Parsed p : parse(staging.readStream(STREAM_CODE_REVIEW))) {
+          for (Parsed p : parse(readAll(STREAM_CODE_REVIEW))) {
             @Nullable UUID prId = prIds.get(p.text("pullRequestKey"));
             if (prId == null) {
               continue; // pull_request_id is NOT NULL; skip orphans as before
@@ -155,7 +167,7 @@ public class NormalizationService implements NormalizeStagedDataUseCase {
           canonical.upsertCodeReviews(reviews);
 
           List<BuildRow> builds = new ArrayList<>();
-          for (Parsed p : parse(staging.readStream(STREAM_BUILD))) {
+          for (Parsed p : parse(readAll(STREAM_BUILD))) {
             builds.add(
                 new BuildRow(
                     prIds.get(p.text("pullRequestKey")),
@@ -168,7 +180,7 @@ public class NormalizationService implements NormalizeStagedDataUseCase {
           Map<String, UUID> buildIds = canonical.buildIdsBySourceKey();
 
           List<QualityGateRow> gates = new ArrayList<>();
-          for (Parsed p : parse(staging.readStream(STREAM_QUALITY_GATE))) {
+          for (Parsed p : parse(readAll(STREAM_QUALITY_GATE))) {
             gates.add(
                 new QualityGateRow(
                     buildIds.get(p.text("buildKey")),
@@ -179,6 +191,15 @@ public class NormalizationService implements NormalizeStagedDataUseCase {
           }
           canonical.upsertQualityGates(gates);
         });
+  }
+
+  /** Reads one stream across every raw staging table (bounded by the connector-type count). */
+  private List<StagedRow> readAll(String stream) {
+    List<StagedRow> rows = new ArrayList<>();
+    for (String table : StagingRawRepository.rawTables()) {
+      rows.addAll(staging.readStream(table, stream));
+    }
+    return rows;
   }
 
   private List<Parsed> parse(List<StagedRow> rows) {
@@ -231,6 +252,11 @@ public class NormalizationService implements NormalizeStagedDataUseCase {
 
     Timestamp timestamp(String field) {
       return Timestamp.from(Instant.parse(text(field)));
+    }
+
+    @Nullable Timestamp timestampOrNull(String field) {
+      @Nullable String value = textOrNull(field);
+      return (value == null || value.isBlank()) ? null : Timestamp.from(Instant.parse(value));
     }
   }
 }

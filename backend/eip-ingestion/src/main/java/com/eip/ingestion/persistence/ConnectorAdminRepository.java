@@ -102,6 +102,28 @@ public class ConnectorAdminRepository {
         .optional();
   }
 
+  /** A row with its secret link (in-process use only). */
+  public record RowWithSecret(ConnectorAdminView view, @Nullable UUID secretId) {}
+
+  /**
+   * Loads one connector together with its secret link (for sync/test flows only).
+   *
+   * @param id the connector id
+   * @return the row, if visible under the current tenant
+   */
+  public Optional<RowWithSecret> findWithSecret(UUID id) {
+    return jdbc.sql(
+            """
+            SELECT id, type, name, status, simulation, config::text, secret_id
+            FROM core.connector WHERE id = :id AND deleted_at IS NULL
+            """)
+        .param("id", id)
+        .query(
+            (rs, rowNum) ->
+                new RowWithSecret(mapRow(rs, rowNum), rs.getObject("secret_id", UUID.class)))
+        .optional();
+  }
+
   /**
    * Updates a connector's lifecycle status.
    *

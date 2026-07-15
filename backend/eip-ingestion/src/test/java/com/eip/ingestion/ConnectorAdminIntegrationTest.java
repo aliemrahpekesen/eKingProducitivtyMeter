@@ -7,13 +7,17 @@ package com.eip.ingestion;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.eip.connectors.bitbucket.BitbucketConnector;
+import com.eip.connectors.jira.JiraConnector;
 import com.eip.connectors.simulation.SimulationConnector;
+import com.eip.connectors.sonarqube.SonarQubeConnector;
 import com.eip.core.error.ResourceNotFoundException;
 import com.eip.core.error.ValidationException;
 import com.eip.ingestion.api.ManageConnectorsUseCase.ConnectorAdminView;
 import com.eip.ingestion.api.ManageConnectorsUseCase.RegisterConnectorCommand;
 import com.eip.ingestion.api.ManageConnectorsUseCase.TestConnectionResult;
 import com.eip.ingestion.application.ConnectorAdminService;
+import com.eip.ingestion.application.ConnectorRegistry;
 import com.eip.ingestion.persistence.ConnectorAdminRepository;
 import com.eip.tenancy.context.TenantContext;
 import com.eip.tenancy.context.TenantContextHolder;
@@ -95,7 +99,12 @@ class ConnectorAdminIntegrationTest {
             runner,
             new ConnectorAdminRepository(jdbc, mapper),
             new SecretsService(jdbc, EnvelopeCipher.newDek(), 1),
-            new SimulationConnector(),
+            new ConnectorRegistry(
+                java.util.List.of(
+                    new SimulationConnector(),
+                    new JiraConnector(),
+                    new BitbucketConnector(),
+                    new SonarQubeConnector())),
             mapper);
   }
 
@@ -122,7 +131,7 @@ class ConnectorAdminIntegrationTest {
             new RegisterConnectorCommand(
                 "jira",
                 "Acme Jira",
-                Map.of("baseUrl", "https://acme.atlassian.net", "email", "svc@acme.io"),
+                Map.of("baseUrl", "http://127.0.0.1:1", "email", "svc@acme.io"),
                 "token-123"));
     assertThat(jira.hasSecret()).isTrue();
     assertThat(jira.status()).isEqualTo("CONFIGURED");
@@ -144,10 +153,9 @@ class ConnectorAdminIntegrationTest {
     ConnectorAdminView sim =
         service.register(new RegisterConnectorCommand("simulation", "Sample", Map.of(), null));
 
-    // Honest connection tests.
+    // Honest connection tests: the Jira probe is REAL now — an unreachable base URL fails.
     TestConnectionResult jiraTest = service.test(jira.id());
-    assertThat(jiraTest.outcome()).isEqualTo("NOT_AVAILABLE");
-    assertThat(jiraTest.message()).contains("DEBT-018");
+    assertThat(jiraTest.outcome()).isEqualTo("FAILED");
     assertThat(service.test(sim.id()).outcome()).isEqualTo("OK");
 
     // Status lifecycle + invalid status fails closed.

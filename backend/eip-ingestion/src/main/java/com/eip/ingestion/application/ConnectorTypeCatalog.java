@@ -52,9 +52,11 @@ public final class ConnectorTypeCatalog {
               """
               {"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object",
                "title":"Bitbucket","properties":{
-                 "baseUrl":{"type":"string","format":"uri","title":"Base URL"},
+                 "baseUrl":{"type":"string","format":"uri","title":"Base URL",
+                            "description":"e.g. https://api.bitbucket.org"},
+                 "username":{"type":"string","title":"Service account username"},
                  "workspace":{"type":"string","title":"Workspace / project"}},
-               "required":["baseUrl","workspace"]}
+               "required":["baseUrl","username","workspace"]}
               """,
               "App password / token",
               false),

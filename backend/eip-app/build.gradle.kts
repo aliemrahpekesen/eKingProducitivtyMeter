@@ -51,6 +51,10 @@ dependencies {
     testImplementation(libs.spring.modulith.starter.core)
     testImplementation("org.springframework.modulith:spring-modulith-docs")
     testImplementation("com.tngtech.archunit:archunit-junit5:1.3.0")
+    // WireMock (BackendPlan §14: sync engine tested against WireMock'd connectors);
+    // standalone (shaded) jar avoids Jetty/Tomcat classpath clashes. Version literal ->
+    // catalog pass (DEBT-001).
+    testImplementation("org.wiremock:wiremock-standalone:3.9.1")
     testImplementation("org.testcontainers:postgresql")
     testImplementation("org.postgresql:postgresql")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

@@ -6,6 +6,7 @@ package com.eip.app.api;
 
 import com.eip.app.application.LoadSampleDataUseCase;
 import com.eip.app.application.RunFrictionPipelineUseCase.PipelineResult;
+import com.eip.app.application.SyncConnectorUseCase;
 import com.eip.ingestion.api.ManageConnectorsUseCase;
 import com.eip.ingestion.api.ManageConnectorsUseCase.ConnectorAdminView;
 import com.eip.ingestion.api.ManageConnectorsUseCase.ConnectorTypeView;
@@ -38,11 +39,15 @@ public class AdminConnectorController {
 
   private final ManageConnectorsUseCase connectors;
   private final LoadSampleDataUseCase sampleData;
+  private final SyncConnectorUseCase syncConnector;
 
   public AdminConnectorController(
-      ManageConnectorsUseCase connectors, LoadSampleDataUseCase sampleData) {
+      ManageConnectorsUseCase connectors,
+      LoadSampleDataUseCase sampleData,
+      SyncConnectorUseCase syncConnector) {
     this.connectors = connectors;
     this.sampleData = sampleData;
+    this.syncConnector = syncConnector;
   }
 
   /**
@@ -104,6 +109,18 @@ public class AdminConnectorController {
   @PostMapping("/connectors/{connectorId}/test")
   public TestConnectionResult test(@PathVariable UUID connectorId) {
     return connectors.test(connectorId);
+  }
+
+  /**
+   * Runs a real synchronization for one registered connector, then recomputes the tenant's metrics
+   * (Jira live in M2; other types arrive with M2b and fail with a clear message).
+   *
+   * @param connectorId the registered connector
+   * @return staging + computation outcome
+   */
+  @PostMapping("/connectors/{connectorId}/sync")
+  public PipelineResult sync(@PathVariable UUID connectorId) {
+    return syncConnector.sync(connectorId);
   }
 
   /**

@@ -5,7 +5,8 @@
 package com.eip.ingestion.application;
 
 import com.eip.connectors.spi.Connector;
-import com.eip.connectors.spi.RawRecord;
+import com.eip.connectors.spi.ConnectorConfig;
+import com.eip.connectors.spi.TestConnectionOutcome;
 import com.eip.core.error.ResourceNotFoundException;
 import com.eip.core.error.ValidationException;
 import com.eip.ingestion.api.ManageConnectorsUseCase;
@@ -14,7 +15,6 @@ import com.eip.tenancy.secrets.SecretsService;
 import com.eip.tenancy.tx.TenantTransactionRunner;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -36,25 +36,36 @@ public class ConnectorAdminService implements ManageConnectorsUseCase {
   private final TenantTransactionRunner tx;
   private final ConnectorAdminRepository repository;
   private final SecretsService secrets;
-  private final Connector simulationConnector;
+  private final ConnectorRegistry registry;
   private final ObjectMapper mapper;
 
   public ConnectorAdminService(
       TenantTransactionRunner tx,
       ConnectorAdminRepository repository,
       SecretsService secrets,
-      Connector simulationConnector,
+      ConnectorRegistry registry,
       ObjectMapper mapper) {
     this.tx = tx;
     this.repository = repository;
     this.secrets = secrets;
-    this.simulationConnector = simulationConnector;
+    this.registry = registry;
     this.mapper = mapper;
   }
 
   @Override
   public List<ConnectorTypeView> types() {
-    return ConnectorTypeCatalog.all();
+    // Catalog entries stay honest: syncAvailable reflects the INSTALLED implementation.
+    return ConnectorTypeCatalog.all().stream()
+        .map(
+            t ->
+                new ConnectorTypeView(
+                    t.type(),
+                    t.displayName(),
+                    t.description(),
+                    t.configSchema(),
+                    t.secretLabel(),
+                    registry.byType(t.type()).map(Connector::syncAvailable).orElse(false)))
+        .toList();
   }
 
   @Override
@@ -111,26 +122,26 @@ public class ConnectorAdminService implements ManageConnectorsUseCase {
 
   @Override
   public TestConnectionResult test(UUID connectorId) {
-    ConnectorAdminView connector =
+    // Resolve config + reveal the secret in a short transaction; probe the source OUTSIDE it.
+    var resolved =
         tx.readCurrent(
-            () ->
-                repository
-                    .find(connectorId)
-                    .orElseThrow(() -> new ResourceNotFoundException("connector not found")));
-    if (connector.type().equals("simulation")) {
-      List<RawRecord> probe = new ArrayList<>();
-      simulationConnector.sync(() -> probe::add);
-      return new TestConnectionResult(
-          "OK", "Simulation source reachable — " + probe.size() + " records available.");
-    }
-    return new TestConnectionResult(
-        "NOT_AVAILABLE",
-        ConnectorTypeCatalog.byType(connector.type())
-                .map(ConnectorTypeView::displayName)
-                .orElse(connector.type())
-            + " sync is not implemented in this release; it arrives with Connector Foundation"
-            + " (DEBT-018). Configuration is stored and will be used as soon as the connector"
-            + " lands.");
+            () -> {
+              var row =
+                  repository
+                      .findWithSecret(connectorId)
+                      .orElseThrow(() -> new ResourceNotFoundException("connector not found"));
+              String secret = row.secretId() == null ? null : secrets.reveal(row.secretId());
+              return java.util.Map.entry(
+                  row.view(), new ConnectorConfig(row.view().config(), secret));
+            });
+    TestConnectionOutcome outcome =
+        registry
+            .byType(resolved.getKey().type())
+            .map(c -> c.testConnection(resolved.getValue()))
+            .orElse(
+                TestConnectionOutcome.notAvailable(
+                    "no connector implementation installed for " + resolved.getKey().type()));
+    return new TestConnectionResult(outcome.outcome(), outcome.message());
   }
 
   private void requireSchemaRequiredKeys(ConnectorTypeView type, Map<String, String> config) {

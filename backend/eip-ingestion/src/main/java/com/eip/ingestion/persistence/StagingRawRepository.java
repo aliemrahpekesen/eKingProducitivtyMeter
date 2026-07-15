@@ -25,9 +25,37 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class StagingRawRepository {
 
+  /** Whitelisted raw tables by connector type — SQL is composed ONLY from these constants. */
+  private static final java.util.Map<String, String> RAW_TABLES =
+      java.util.Map.of(
+          "simulation", "staging.raw_simulation",
+          "jira", "staging.raw_jira",
+          "bitbucket", "staging.raw_bitbucket",
+          "sonarqube", "staging.raw_sonarqube");
+
+  /**
+   * Resolves the staging table for a connector type (whitelist — never caller-composed SQL).
+   *
+   * @param connectorType the connector type
+   * @return the fully qualified table name
+   */
+  public static String rawTable(String connectorType) {
+    String table = RAW_TABLES.get(connectorType);
+    if (table == null) {
+      throw new IllegalArgumentException(
+          "no raw staging table for connector type " + connectorType);
+    }
+    return table;
+  }
+
+  /** All raw staging tables (normalization reads every source). */
+  public static java.util.Collection<String> rawTables() {
+    return RAW_TABLES.values();
+  }
+
   private static final String UPSERT =
       """
-      INSERT INTO staging.raw_simulation
+      INSERT INTO %s
         (tenant_id, connector_id, stream, natural_key, source_system, source_instance,
          external_id, op, fetch_kind, payload, content_hash)
       VALUES (current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?)
@@ -35,7 +63,7 @@ public class StagingRawRepository {
         source_system = EXCLUDED.source_system, source_instance = EXCLUDED.source_instance,
         external_id = EXCLUDED.external_id, op = EXCLUDED.op, fetch_kind = EXCLUDED.fetch_kind,
         payload = EXCLUDED.payload, content_hash = EXCLUDED.content_hash, ingested_at = now()
-      WHERE raw_simulation.content_hash IS DISTINCT FROM EXCLUDED.content_hash
+      WHERE %s.content_hash IS DISTINCT FROM EXCLUDED.content_hash
       """;
 
   private final JdbcClient jdbc;
@@ -95,13 +123,12 @@ public class StagingRawRepository {
    * @param connectorId the owning connector
    * @return existing hashes by stream + natural key
    */
-  public Map<String, byte[]> contentHashes(UUID connectorId) {
+  public Map<String, byte[]> contentHashes(String table, UUID connectorId) {
     Map<String, byte[]> hashes = new HashMap<>();
     jdbc.sql(
-            """
-            SELECT stream, natural_key, content_hash FROM staging.raw_simulation
-            WHERE connector_id = :connectorId
-            """)
+            "SELECT stream, natural_key, content_hash FROM "
+                + table
+                + " WHERE connector_id = :connectorId")
         .param("connectorId", connectorId)
         .query(
             (rs, rowNum) -> {
@@ -118,9 +145,10 @@ public class StagingRawRepository {
    * @param connectorId the owning connector
    * @param changes the pre-classified inserts/updates (unchanged records are not sent)
    */
-  public void upsertAll(UUID connectorId, List<RawUpsert> changes) {
+  public void upsertAll(String table, UUID connectorId, List<RawUpsert> changes) {
+    String bare = table.substring(table.indexOf('.') + 1);
     jdbcTemplate.batchUpdate(
-        UPSERT,
+        UPSERT.formatted(table, bare),
         changes,
         changes.size(),
         (ps, change) -> {
@@ -144,14 +172,11 @@ public class StagingRawRepository {
    * @param stream the logical source stream
    * @return the staged rows ordered by natural key
    */
-  public List<StagedRow> readStream(String stream) {
+  public List<StagedRow> readStream(String table, String stream) {
     return jdbc.sql(
-            """
-            SELECT natural_key, source_system, source_instance, external_id, payload::text
-            FROM staging.raw_simulation
-            WHERE stream = :stream AND op = 'upsert'
-            ORDER BY natural_key
-            """)
+            "SELECT natural_key, source_system, source_instance, external_id, payload::text FROM "
+                + table
+                + " WHERE stream = :stream AND op = 'upsert' ORDER BY natural_key")
         .param("stream", stream)
         .query(
             (rs, rowNum) ->
@@ -165,7 +190,7 @@ public class StagingRawRepository {
   }
 
   /**
-   * Builds the map key for {@link #contentHashes(UUID)}.
+   * Builds the map key for {@link #contentHashes(String, UUID)}.
    *
    * @param stream the stream name
    * @param naturalKey the record's natural key
