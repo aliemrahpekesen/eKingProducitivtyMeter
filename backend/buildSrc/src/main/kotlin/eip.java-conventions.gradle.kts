@@ -6,11 +6,28 @@
 // eip-core in TASK-0005; this convention makes `check` the single entry point CI invokes.
 
 import net.ltgt.gradle.errorprone.errorprone
+import org.gradle.api.artifacts.VersionCatalogsExtension
+
+// DEBT-001: precompiled script plugins (this file) do NOT get the type-safe `libs` accessor that
+// regular build scripts (incl. buildSrc/build.gradle.kts itself) get for free — confirmed
+// empirically (`:buildSrc:compileKotlin` fails "Unresolved reference: libs" even outside the
+// plugins {} block). The catalog is still the single source of truth: look it up via Gradle's
+// documented programmatic API (`VersionCatalogsExtension`/`VersionCatalog`) instead, which works
+// from any script.
+val catalogLibs = extensions.getByType<VersionCatalogsExtension>().named("libs")
+fun catalogVersion(alias: String) = catalogLibs.findVersion(alias).get().requiredVersion
+fun catalogLibrary(alias: String) = catalogLibs.findLibrary(alias).get()
 
 plugins {
     `java-library`
     jacoco
     checkstyle
+    // NOT `alias(libs.plugins.spotless)`: a precompiled script plugin's OWN `plugins {}` block is
+    // extracted and compiled in an isolated early pass with no access to ANY extension, including
+    // VersionCatalogsExtension (confirmed empirically). The plugin's version is still
+    // catalog-sourced: it comes from buildSrc's own classpath
+    // (buildSrc/build.gradle.kts `implementation(libs.spotless.plugin.gradle)`), so no version
+    // literal is duplicated here — DEBT-001 residual, documented rather than worked around.
     id("com.diffplug.spotless")
     id("net.ltgt.errorprone")
 }
@@ -20,7 +37,7 @@ version = "0.1.0-SNAPSHOT"
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
+        languageVersion = JavaLanguageVersion.of(catalogVersion("java").toInt())
     }
 }
 
@@ -29,8 +46,8 @@ repositories {
 }
 
 dependencies {
-    errorprone("com.google.errorprone:error_prone_core:2.36.0")
-    errorprone("com.uber.nullaway:nullaway:0.12.1")
+    errorprone(catalogLibrary("errorprone-core"))
+    errorprone(catalogLibrary("nullaway"))
 }
 
 tasks.withType<JavaCompile>().configureEach {
@@ -50,9 +67,20 @@ tasks.withType<Test>().configureEach {
     finalizedBy(tasks.named("jacocoTestReport"))
 }
 
+// XML report (DEBT-003): needed to measure/enforce per-module line/branch coverage
+// programmatically (this file's LINE/BRANCH JacocoCoverageVerification rules below, and any
+// ad-hoc tooling reading build/reports/jacoco/test/jacocoTestReport.xml); HTML remains for human
+// inspection.
+tasks.withType<JacocoReport>().configureEach {
+    reports {
+        xml.required.set(true)
+        html.required.set(true)
+    }
+}
+
 spotless {
     java {
-        googleJavaFormat("1.24.0")
+        googleJavaFormat(catalogVersion("googleJavaFormat"))
         licenseHeader(
             """
             /*
@@ -66,21 +94,27 @@ spotless {
 }
 
 checkstyle {
-    toolVersion = "10.20.1"
+    toolVersion = catalogVersion("checkstyle")
     configFile = rootProject.file("config/checkstyle/checkstyle.xml")
     isIgnoreFailures = false
     maxWarnings = 0
 }
 
 jacoco {
-    toolVersion = "0.8.12"
+    toolVersion = catalogVersion("jacoco")
 }
 
-// Coverage ratchet (TestingStrategy §1): ≥85% on the eip-core shared kernel, ≥75% elsewhere.
-// Composition-root main classes are excluded from measurement (nothing to unit-test in a bootstrap
-// class). On the empty Phase-0 skeleton there are no measured classes, so the rule passes; it starts
-// biting the moment real logic and its tests land.
-val coverageMinimum = if (project.name == "eip-core") "0.85".toBigDecimal() else "0.75".toBigDecimal()
+// Coverage ratchet (TestingStrategy §1, DEBT-003 paid): ≥85% LINE + ≥75% BRANCH on the eip-core
+// shared kernel AND eip-analytics (the two modules TestingStrategy §1 names explicitly); ≥75% LINE
+// elsewhere (no branch floor on the "elsewhere" tier — TestingStrategy §1 states line-only there).
+// Uses JaCoCo's LINE/BRANCH counters explicitly rather than the default INSTRUCTION counter, which
+// does not match the doc's source-of-record semantics. Composition-root main classes are excluded
+// from measurement (nothing to unit-test in a bootstrap class). Empty modules (no source yet, e.g.
+// eip-ai/eip-workers pre-Phase-1) have no measured classes, so JacocoCoverageVerification is
+// SKIPPED by Gradle automatically — the rule starts biting the moment real logic and its tests land.
+val highCoverageTierModules = setOf("eip-core", "eip-analytics")
+val lineMinimum = if (project.name in highCoverageTierModules) "0.85".toBigDecimal() else "0.75".toBigDecimal()
+val branchMinimum = "0.75".toBigDecimal()
 
 tasks.withType<JacocoCoverageVerification>().configureEach {
     classDirectories.setFrom(
@@ -92,7 +126,16 @@ tasks.withType<JacocoCoverageVerification>().configureEach {
     )
     violationRules {
         rule {
-            limit { minimum = coverageMinimum }
+            limit {
+                counter = "LINE"
+                minimum = lineMinimum
+            }
+            if (project.name in highCoverageTierModules) {
+                limit {
+                    counter = "BRANCH"
+                    minimum = branchMinimum
+                }
+            }
         }
     }
 }

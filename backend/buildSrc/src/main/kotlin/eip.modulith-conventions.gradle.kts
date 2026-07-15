@@ -4,12 +4,18 @@
 // dependency and the concrete boundary test are added by that task; wiring the test libraries here
 // keeps the `./gradlew check` CI stage (TASK-0002) the single entry point that runs them once present.
 
+import org.gradle.api.artifacts.VersionCatalogsExtension
+
 plugins {
     id("eip.java-conventions")
 }
 
+// DEBT-001: see eip.java-conventions.gradle.kts for why this uses the programmatic
+// VersionCatalogsExtension API rather than the type-safe `libs` accessor.
+val catalogLibs = extensions.getByType<VersionCatalogsExtension>().named("libs")
+
 dependencies {
-    testImplementation("org.junit.jupiter:junit-jupiter:5.11.3")
-    testImplementation("com.tngtech.archunit:archunit-junit5:1.3.0")
+    testImplementation(catalogLibs.findLibrary("junit-jupiter").get())
+    testImplementation(catalogLibs.findLibrary("archunit-junit5").get())
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

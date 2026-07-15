@@ -12,7 +12,7 @@ dependencies {
     implementation(project(":eip-analytics"))
     implementation(project(":eip-ai"))
     implementation(project(":eip-reports"))
-    implementation("org.springframework.boot:spring-boot-starter")
+    implementation(libs.spring.boot.starter)
 
     // Web + OpenAPI: the first /api/v1 read surface (TASK-0010). RFC 7807 problem+json is built into
     // Spring 6 (ProblemDetail); springdoc generates the OpenAPI 3 contract at /v3/api-docs.
@@ -23,7 +23,7 @@ dependencies {
     // Modulith annotations referenced by the library modules' package metadata must resolve on
     // this compile classpath too (annotation-only; the verification itself is a test concern).
     compileOnly(platform(libs.spring.modulith.bom))
-    compileOnly("org.springframework.modulith:spring-modulith-core")
+    compileOnly(libs.spring.modulith.core)
     implementation(libs.springdoc.openapi.webmvc)
 
     // OIDC resource server + deny-by-default RBAC (SecurityModel §3/§4, M5 Wave S1a). Versions
@@ -59,17 +59,16 @@ dependencies {
     // Application-wide Spring Modulith verification + ArchUnit layering rules (BackendPlan §3).
     testImplementation(platform(libs.spring.modulith.bom))
     testImplementation(libs.spring.modulith.starter.core)
-    testImplementation("org.springframework.modulith:spring-modulith-docs")
-    testImplementation("com.tngtech.archunit:archunit-junit5:1.3.0")
+    testImplementation(libs.spring.modulith.docs)
+    testImplementation(libs.archunit.junit5)
     // WireMock (BackendPlan §14: sync engine tested against WireMock'd connectors);
-    // standalone (shaded) jar avoids Jetty/Tomcat classpath clashes. Version literal ->
-    // catalog pass (DEBT-001).
-    testImplementation("org.wiremock:wiremock-standalone:3.9.1")
-    testImplementation("org.testcontainers:postgresql")
-    testImplementation("org.postgresql:postgresql")
+    // standalone (shaded) jar avoids Jetty/Tomcat classpath clashes.
+    testImplementation(libs.wiremock.standalone)
+    testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.postgresql)
     // Real Kafka broker (KRaft) for OutboxKafkaIntegrationTest (DEBT-017); version managed by the
     // Boot-BOM-aligned Testcontainers BOM.
-    testImplementation("org.testcontainers:kafka")
+    testImplementation(libs.testcontainers.kafka)
     testImplementation("org.springframework.kafka:spring-kafka-test")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

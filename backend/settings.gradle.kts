@@ -4,6 +4,16 @@
 
 plugins {
     // Auto-provisions the Java 21 toolchain when it is not already installed.
+    //
+    // DEBT-001 residual: this version is NOT routed through gradle/libs.versions.toml's
+    // `foojayResolver` entry. A settings file's own `plugins {}` block resolves before that same
+    // file's `dependencyResolutionManagement`/implicit-catalog machinery is available — Gradle
+    // does not support `alias(libs.plugins...)` (nor any version-catalog lookup) inside a settings
+    // script's own plugins block, only in build scripts and (via `dependencyResolutionManagement`)
+    // the rest of this file. Confirmed empirically as part of DEBT-001's catalog-consistency pass:
+    // buildSrc's own settings.gradle.kts avoids this exact trap by wiring its `libs` catalog in
+    // `dependencyResolutionManagement`, not its (empty) plugins block. Kept in sync with
+    // libs.versions.toml's `foojayResolver` value by hand; bump both together.
     id("org.gradle.toolchains.foojay-resolver-convention") version "0.8.0"
 }
 

@@ -14,28 +14,28 @@ dependencies {
     // JdbcTemplate + transactions via eip-tenancy's TenantTransactionRunner. Jackson serializes
     // raw payloads to jsonb and parses them back in normalization. Versions from the Boot BOM.
     implementation(platform(libs.spring.boot.bom))
-    implementation("org.springframework:spring-context")
-    implementation("org.springframework:spring-jdbc")
-    implementation("org.springframework:spring-tx")
+    implementation(libs.spring.context)
+    implementation(libs.spring.jdbc)
+    implementation(libs.spring.tx)
     implementation("org.springframework.boot:spring-boot-autoconfigure") // @ConditionalOnProperty
-    implementation("com.fasterxml.jackson.core:jackson-databind")
+    implementation(libs.jackson.databind)
 
     // Spring Modulith package metadata (annotations only; application-wide verification in eip-app).
     compileOnly(platform(libs.spring.modulith.bom))
-    compileOnly("org.springframework.modulith:spring-modulith-core")
+    compileOnly(libs.spring.modulith.core)
 
     // Module integration tests run the real staging + normalization SQL against Testcontainers
     // PostgreSQL under the NOBYPASSRLS role, migrated with the app's Flyway scripts (schema truth
     // lives in eip-app's db/migration — single source, referenced by filesystem location).
     testImplementation(platform(libs.spring.boot.bom))
-    testImplementation("org.testcontainers:postgresql")
-    testImplementation("org.postgresql:postgresql")
-    testImplementation("org.flywaydb:flyway-core")
-    testImplementation("org.flywaydb:flyway-database-postgresql")
+    testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.postgresql)
+    testImplementation(libs.flyway.core)
+    testImplementation(libs.flyway.database.postgresql)
     testImplementation(libs.assertj.core)
     // The event envelope carries java.time.Instant fields; production serialization uses eip-app's
     // Boot-autoconfigured ObjectMapper (jsr310 already on its runtime classpath via
     // spring-boot-starter-json). Module-local tests construct a plain ObjectMapper directly, so the
     // module needs the datatype module on its own test classpath.
-    testImplementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
+    testImplementation(libs.jackson.datatype.jsr310)
 }

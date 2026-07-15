@@ -12,16 +12,16 @@ dependencies {
     // Spring transaction + JDBC support for the tenant-aware transaction runner. Versions from the
     // Boot BOM. spring-tx is `api` because the runner's constructor takes PlatformTransactionManager.
     api(platform(libs.spring.boot.bom))
-    api("org.springframework:spring-tx")
-    implementation("org.springframework:spring-jdbc")
-    implementation("org.springframework:spring-context") // @Service/@Repository admin layer (ADR-022 M1)
+    api(libs.spring.tx)
+    implementation(libs.spring.jdbc)
+    implementation(libs.spring.context) // @Service/@Repository admin layer (ADR-022 M1)
 
     // Spring Modulith package metadata (annotations only, compile-time; verified application-wide
     // from eip-app's ApplicationModules test — BackendPlan §3).
     compileOnly(platform(libs.spring.modulith.bom))
-    compileOnly("org.springframework.modulith:spring-modulith-core")
+    compileOnly(libs.spring.modulith.core)
     testCompileOnly(platform(libs.spring.modulith.bom))
-    testCompileOnly("org.springframework.modulith:spring-modulith-core")
+    testCompileOnly(libs.spring.modulith.core)
 
     // Test-only: Mockito (third-party java.sql/Spring-tx seam, CodingStandards §5) + AssertJ.
     testImplementation(platform(libs.spring.boot.bom))
@@ -29,8 +29,8 @@ dependencies {
     testImplementation(libs.assertj.core)
     // Module integration tests run the admin/secrets SQL against Testcontainers PostgreSQL under
     // the NOBYPASSRLS role, migrated with the app's Flyway scripts (single schema source).
-    testImplementation("org.testcontainers:postgresql")
-    testImplementation("org.postgresql:postgresql")
-    testImplementation("org.flywaydb:flyway-core")
-    testImplementation("org.flywaydb:flyway-database-postgresql")
+    testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.postgresql)
+    testImplementation(libs.flyway.core)
+    testImplementation(libs.flyway.database.postgresql)
 }

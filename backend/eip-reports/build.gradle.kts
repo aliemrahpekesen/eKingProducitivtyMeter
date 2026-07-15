@@ -25,22 +25,22 @@ dependencies {
     // relied on transitively via eip-app's web starter) so the module's own tests can serialize the
     // document's Instant fields without a Spring context.
     api(platform(libs.spring.boot.bom))
-    implementation("org.springframework:spring-context")
-    implementation("org.springframework:spring-jdbc")
-    implementation("org.springframework:spring-tx")
-    api("com.fasterxml.jackson.core:jackson-databind")
-    implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
+    implementation(libs.spring.context)
+    implementation(libs.spring.jdbc)
+    implementation(libs.spring.tx)
+    api(libs.jackson.databind)
+    implementation(libs.jackson.datatype.jsr310)
 
     // Spring Modulith package metadata (annotations only; application-wide verification in eip-app).
     compileOnly(platform(libs.spring.modulith.bom))
-    compileOnly("org.springframework.modulith:spring-modulith-core")
+    compileOnly(libs.spring.modulith.core)
 
     // Module integration tests run the real insert/list/find SQL against Testcontainers PostgreSQL
     // under the NOBYPASSRLS role, migrated with the app's Flyway scripts (single schema source) —
     // mirrors eip-analytics's harness.
-    testImplementation("org.testcontainers:postgresql")
-    testImplementation("org.postgresql:postgresql")
-    testImplementation("org.flywaydb:flyway-core")
-    testImplementation("org.flywaydb:flyway-database-postgresql")
+    testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.postgresql)
+    testImplementation(libs.flyway.core)
+    testImplementation(libs.flyway.database.postgresql)
     testImplementation(libs.assertj.core)
 }
