@@ -16,8 +16,9 @@ import org.springframework.context.annotation.Configuration;
 /**
  * Registers the installed connector implementations. The connectors themselves stay
  * framework-independent pure Java — only their wiring is Spring. The simulation source is toggled
- * by {@code eip.simulation.enabled} (default on); the real connectors are always installed: Jira
- * syncs for real (M2), Bitbucket/SonarQube probe for real with sync arriving in M2b (DEBT-018).
+ * by {@code eip.simulation.enabled} (default on); the real connectors are always installed: Jira,
+ * Bitbucket and SonarQube all probe and sync for real (M2/M2b). Remaining DEBT-018 scope: a
+ * descriptor-driven catalog and additional connector types.
  */
 @Configuration(proxyBeanMethods = false)
 public class SimulationSourceConfiguration {
@@ -47,7 +48,7 @@ public class SimulationSourceConfiguration {
   }
 
   /**
-   * The Bitbucket connector (M2 partial: real probe; sync in M2b).
+   * The real Bitbucket connector (M2b: authenticated probe + paginated full sync).
    *
    * @return the connector
    */
@@ -57,7 +58,7 @@ public class SimulationSourceConfiguration {
   }
 
   /**
-   * The SonarQube connector (M2 partial: real probe; sync in M2b).
+   * The real SonarQube connector (M2b: authenticated probe + paginated full sync).
    *
    * @return the connector
    */

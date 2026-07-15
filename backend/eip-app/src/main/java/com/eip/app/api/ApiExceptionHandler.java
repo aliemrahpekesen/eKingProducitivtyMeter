@@ -10,6 +10,7 @@ import com.eip.core.error.InternalException;
 import com.eip.core.error.PermissionDeniedException;
 import com.eip.core.error.ResourceNotFoundException;
 import com.eip.core.error.ValidationException;
+import com.eip.ingestion.api.SourceSyncException;
 import com.eip.tenancy.context.TenantContextHolder.NoTenantBoundException;
 import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
@@ -71,6 +72,18 @@ public class ApiExceptionHandler {
   }
 
   /**
+   * A connector sync failed against the upstream source (unreachable, auth rejected, or non-2xx).
+   *
+   * @param e the failure
+   * @return a 502 problem+json
+   */
+  @ExceptionHandler(SourceSyncException.class)
+  public ProblemDetail handleSourceSync(SourceSyncException e) {
+    return problem(
+        HttpStatus.BAD_GATEWAY, message(e), "Source sync failed", "/problems/source-sync");
+  }
+
+  /**
    * Maps Jakarta Bean Validation failures on request bodies to 400 problem+json (BackendPlan §11).
    *
    * @param e the failure
@@ -113,7 +126,7 @@ public class ApiExceptionHandler {
     };
   }
 
-  private static String message(EipException e) {
+  private static String message(Throwable e) {
     @Nullable String message = e.getMessage();
     return message == null ? "Request failed." : message;
   }

@@ -169,7 +169,8 @@ class AdminJiraSyncIntegrationTest {
         .andExpect(jsonPath("$.ingestion.unchanged").value(10))
         .andExpect(jsonPath("$.ingestion.inserted").value(0));
 
-    // 7. Types without a shipped sync fail honestly (Bitbucket arrives with M2b).
+    // 7. Bitbucket sync now ships (M2b): registering a connector against an unreachable host
+    // surfaces an honest 502 from the source, not a fake success.
     String bitbucketId =
         JsonPath.read(
             mvc.perform(
@@ -188,8 +189,8 @@ class AdminJiraSyncIntegrationTest {
     mvc.perform(
             post("/api/v1/admin/connectors/" + bitbucketId + "/sync")
                 .header(HeaderTenantResolver.HEADER, tenant))
-        .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.detail", org.hamcrest.Matchers.containsString("DEBT-018")));
+        .andExpect(status().isBadGateway())
+        .andExpect(jsonPath("$.detail", org.hamcrest.Matchers.containsString("bitbucket")));
   }
 
   private static void stubJira() {

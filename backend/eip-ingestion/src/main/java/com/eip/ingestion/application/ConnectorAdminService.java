@@ -25,8 +25,10 @@ import org.springframework.stereotype.Service;
  * Connector administration for the current tenant. Registration validates the type against the
  * catalog and the config against the schema's required keys; secrets go through the
  * envelope-encrypting {@code SecretsService} and are never readable through any admin surface.
- * {@code test} is honest: only the simulation source can really connect in this release — real
- * types report {@code NOT_AVAILABLE} until Connector Foundation lands (DEBT-018), never a fake OK.
+ * {@code test} is honest: simulation, Jira, Bitbucket and SonarQube all probe the real source;
+ * {@code NOT_AVAILABLE} is reported only when no connector implementation is installed for the
+ * type, never a fake OK. Remaining DEBT-018 scope: a descriptor-driven catalog and additional
+ * connector types.
  */
 @Service
 public class ConnectorAdminService implements ManageConnectorsUseCase {

@@ -12,6 +12,7 @@ import com.eip.core.error.ResourceNotFoundException;
 import com.eip.core.error.ValidationException;
 import com.eip.ingestion.api.IngestionResult;
 import com.eip.ingestion.api.RunConnectorSyncUseCase;
+import com.eip.ingestion.api.SourceSyncException;
 import com.eip.ingestion.persistence.ConnectorAdminRepository;
 import com.eip.ingestion.persistence.RawPayloadCodec;
 import com.eip.ingestion.persistence.StagingRawRepository;
@@ -92,18 +93,24 @@ public class RealConnectorSyncService implements RunConnectorSyncUseCase {
 
     // Source fetch: OUTSIDE any database transaction.
     List<RawRecord> emitted = new ArrayList<>();
-    connector.sync(
-        new SyncContext() {
-          @Override
-          public com.eip.connectors.spi.RawSink rawSink() {
-            return emitted::add;
-          }
+    try {
+      connector.sync(
+          new SyncContext() {
+            @Override
+            public com.eip.connectors.spi.RawSink rawSink() {
+              return emitted::add;
+            }
 
-          @Override
-          public ConnectorConfig config() {
-            return resolved.config();
-          }
-        });
+            @Override
+            public ConnectorConfig config() {
+              return resolved.config();
+            }
+          });
+    } catch (RuntimeException e) {
+      throw new SourceSyncException(
+          resolved.type() + " sync failed against the source: " + String.valueOf(e.getMessage()),
+          e);
+    }
 
     String table = StagingRawRepository.rawTable(resolved.type());
     return tx.callCurrent(
