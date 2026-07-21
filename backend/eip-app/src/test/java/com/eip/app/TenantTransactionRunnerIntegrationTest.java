@@ -16,6 +16,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
@@ -144,6 +145,53 @@ class TenantTransactionRunnerIntegrationTest {
   void current_tenant_reads_fail_closed_without_a_bound_context() {
     assertThatThrownBy(() -> runner.readCurrent(() -> "x"))
         .isInstanceOf(TenantContextHolder.NoTenantBoundException.class);
+  }
+
+  @Test
+  void a_nested_call_for_the_same_tenant_is_a_safe_no_op_and_both_reads_stay_scoped() {
+    UUID orgId = UUID.randomUUID();
+    runner.run(TenantContext.of(tenantA), () -> insertOrg(orgId, tenantA, "nested-same-tenant"));
+
+    String outerAndInnerBound =
+        runner.call(
+            TenantContext.of(tenantA),
+            () -> {
+              String outerBound =
+                  jdbc.sql("SELECT current_setting('app.tenant_id')").query(String.class).single();
+              String innerBound =
+                  runner.read(
+                      TenantContext.of(tenantA),
+                      () ->
+                          jdbc.sql("SELECT current_setting('app.tenant_id')")
+                              .query(String.class)
+                              .single());
+              return outerBound + "/" + innerBound;
+            });
+
+    assertThat(outerAndInnerBound).isEqualTo(tenantA + "/" + tenantA);
+    // Both the outer call and the nested same-tenant call see the row correctly scoped to A.
+    assertThat(countOrg(tenantA, "nested-same-tenant")).isEqualTo(1L);
+    assertThat(countOrg(tenantB, "nested-same-tenant")).isZero();
+  }
+
+  @Test
+  void a_nested_call_for_a_different_tenant_throws_before_the_inner_work_runs() {
+    AtomicBoolean innerWorkRan = new AtomicBoolean(false);
+
+    assertThatThrownBy(
+            () ->
+                runner.call(
+                    TenantContext.of(tenantA),
+                    () ->
+                        runner.call(
+                            TenantContext.of(tenantB),
+                            () -> {
+                              innerWorkRan.set(true);
+                              return "unreachable";
+                            })))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("nested TenantTransactionRunner call with a different tenant");
+    assertThat(innerWorkRan).isFalse();
   }
 
   private void insertOrg(UUID id, UUID tenantId, String slug) {

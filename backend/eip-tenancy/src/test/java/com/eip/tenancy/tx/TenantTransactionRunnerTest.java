@@ -10,6 +10,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -19,6 +20,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -40,6 +42,8 @@ class TenantTransactionRunnerTest {
 
   private static final TenantContext TENANT =
       TenantContext.of(UUID.fromString("00000000-0000-4000-8000-0000000000aa"));
+  private static final TenantContext OTHER_TENANT =
+      TenantContext.of(UUID.fromString("00000000-0000-4000-8000-0000000000bb"));
 
   private final PlatformTransactionManager txManager = mock(PlatformTransactionManager.class);
   private final DataSource dataSource = mock(DataSource.class);
@@ -127,5 +131,42 @@ class TenantTransactionRunnerTest {
 
     assertThat(runner.readCurrent(() -> "y")).isEqualTo("y");
     verify(statement).setString(eq(1), eq(TENANT.tenantId().toString()));
+  }
+
+  @Test
+  void nested_call_for_the_same_tenant_is_a_safe_no_op_and_skips_the_redundant_bind()
+      throws SQLException {
+    String result =
+        runner.call(
+            TENANT,
+            () -> {
+              String inner = runner.read(TENANT, () -> "inner-ok");
+              return "outer-" + inner;
+            });
+
+    assertThat(result).isEqualTo("outer-inner-ok");
+    // Only the outermost call binds the GUC; the nested same-tenant call reuses it.
+    verify(connection, times(1)).prepareStatement("select set_config('app.tenant_id', ?, true)");
+    verify(statement, times(1)).execute();
+  }
+
+  @Test
+  void nested_call_for_a_different_tenant_throws_before_the_inner_work_runs() {
+    AtomicBoolean innerWorkRan = new AtomicBoolean(false);
+
+    assertThatThrownBy(
+            () ->
+                runner.call(
+                    TENANT,
+                    () ->
+                        runner.call(
+                            OTHER_TENANT,
+                            () -> {
+                              innerWorkRan.set(true);
+                              return "unreachable";
+                            })))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("nested TenantTransactionRunner call with a different tenant");
+    assertThat(innerWorkRan).isFalse();
   }
 }

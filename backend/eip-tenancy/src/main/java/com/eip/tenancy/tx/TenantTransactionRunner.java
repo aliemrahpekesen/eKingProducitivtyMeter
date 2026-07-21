@@ -12,6 +12,7 @@ import java.sql.SQLException;
 import java.util.Objects;
 import java.util.function.Supplier;
 import javax.sql.DataSource;
+import org.jspecify.annotations.Nullable;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.jdbc.datasource.DataSourceUtils;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -24,8 +25,17 @@ import org.springframework.transaction.support.TransactionTemplate;
  * RlsTenantBinder} on the transaction-bound connection (obtained through {@link DataSourceUtils},
  * so every subsequent {@code JdbcClient}/{@code JdbcTemplate} call inside the work joins the same
  * connection), and lets Spring commit or roll back. The GUC is transaction-local ({@code
- * set_config(..., true)}), so it resets on commit/rollback and never leaks into the pool — no
- * manual autocommit or state restoration anywhere.
+ * set_config(..., true)}), so it resets on commit/rollback and never leaks into the pool.
+ *
+ * <p>Spring's default propagation joins an already-active physical transaction rather than opening
+ * a new one, so a nested call to this runner (from work already running inside an outer {@link
+ * #call}/{@link #run}/{@link #read}) would otherwise rebind {@code app.tenant_id} on the SAME
+ * shared connection. This runner tracks, per thread, which tenant the outermost call bound: a
+ * nested call for that SAME tenant is a safe no-op (the redundant {@code set_config} is skipped,
+ * the enclosing binding is reused for the rest of the nested work); a nested call for a DIFFERENT
+ * tenant fails fast with {@link IllegalStateException} rather than silently widening or narrowing
+ * RLS scope for the remainder of the enclosing transaction. Same-tenant nesting is a safe no-op;
+ * different-tenant nesting fails fast rather than corrupting RLS scope.
  *
  * <p>Local PostgreSQL transactions only (BackendPlan §6): no XA/JTA. Callers doing external IO
  * (connector fetches) must do it OUTSIDE the supplied work so no remote call holds a transaction
@@ -36,6 +46,14 @@ public class TenantTransactionRunner {
   private final TransactionTemplate readWrite;
   private final TransactionTemplate readOnly;
   private final DataSource dataSource;
+
+  /**
+   * The tenant bound by the outermost active call to this runner on the current thread, if any.
+   * Static per ErrorProne's {@code ThreadLocalUsage} check; safe because this class is the single
+   * approved transaction boundary (effectively one bean per application) and every outermost call
+   * removes its entry in a {@code finally} block, so no state survives past that call.
+   */
+  private static final ThreadLocal<TenantContext> ACTIVE_TENANT = new ThreadLocal<>();
 
   /**
    * Creates the runner over the application's transaction manager and datasource.
@@ -114,13 +132,33 @@ public class TenantTransactionRunner {
   }
 
   private <T> T execute(TransactionTemplate template, TenantContext tenant, Supplier<T> work) {
-    T result =
-        template.execute(
-            status -> {
-              bind(tenant);
-              return work.get();
-            });
-    return Objects.requireNonNull(result, "transactional work returned null");
+    @Nullable TenantContext enclosing = ACTIVE_TENANT.get();
+    if (enclosing != null && !enclosing.equals(tenant)) {
+      throw new IllegalStateException(
+          "nested TenantTransactionRunner call with a different tenant is not supported — RLS GUC"
+              + " would be silently rebound for the enclosing transaction");
+    }
+    boolean isOutermostCall = enclosing == null;
+    if (isOutermostCall) {
+      ACTIVE_TENANT.set(tenant);
+    }
+    try {
+      T result =
+          template.execute(
+              status -> {
+                // Same-tenant nested calls join the enclosing physical transaction; the GUC is
+                // already bound on its connection, so re-running set_config would be redundant.
+                if (isOutermostCall) {
+                  bind(tenant);
+                }
+                return work.get();
+              });
+      return Objects.requireNonNull(result, "transactional work returned null");
+    } finally {
+      if (isOutermostCall) {
+        ACTIVE_TENANT.remove();
+      }
+    }
   }
 
   /** Binds the RLS GUC on the transaction-bound connection (inside the active transaction). */
