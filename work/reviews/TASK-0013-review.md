@@ -28,7 +28,7 @@ The increment is **correct, deterministic, tenant-isolated, and anti-surveillanc
 
 ### MINOR
 
-- **MINOR-1 — FEAT-031 metric surface omits `inputs`.** `FrictionMetricView` exposed 7 of the 8 FEAT-031/FR-056 definition fields; the `inputs jsonb` column (present in `analytics.metric_definition`) was not surfaced. *Location:* [FrictionMetricView.java](../../backend/eip-app/src/main/java/com/eip/app/api/FrictionMetricView.java). → **Fixed**: added `inputs` (as a JSON `JsonNode`) to the view + `readDefinition` SELECT + demo/test seed. The first metric-definition contract is now FEAT-031-complete.
+- **MINOR-1 — FEAT-031 metric surface omits `inputs`.** `FrictionMetricView` exposed 7 of the 8 FEAT-031/FR-056 definition fields; the `inputs jsonb` column (present in `analytics.metric_definition`) was not surfaced. *Location (at review time; moved to `eip-analytics` by the TASK-0016 architecture remediation):* [FrictionMetricView.java](../../backend/eip-analytics/src/main/java/com/eip/analytics/api/FrictionMetricView.java). → **Fixed**: added `inputs` (as a JSON `JsonNode`) to the view + `readDefinition` SELECT + demo/test seed. The first metric-definition contract is now FEAT-031-complete.
 - **MINOR-2 — observability waiver not extended to name the new endpoint.** G6 is content-triggered by adding `/friction/summary`; [DEBT-009](../debt-register.md) named only `session`/`connectors`, so this third endpoint's deferral was technically unregistered (Law 9). *Location:* [work/debt-register.md](../debt-register.md). → **Fixed**: DEBT-009 origin + description extended to include TASK-0013 / `friction/summary`.
 - **MINOR-3 — (same root as MINOR-1)** FR-056 `inputs` completeness under G7. → resolved by the MINOR-1 fix.
 
