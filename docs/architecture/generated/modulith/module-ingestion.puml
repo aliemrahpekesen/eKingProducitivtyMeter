@@ -9,10 +9,10 @@ top to bottom direction
 !include <C4/C4_Component>
 
 Container_Boundary("Modules.Modules_boundary", "Modules", $tags="") {
+  Component(Modules.Modules.Tenancy, "Tenancy", $techn="Module", $descr="", $tags="", $link="")
   Component(Modules.Modules.Connectors, "Connectors", $techn="Module", $descr="", $tags="", $link="")
   Component(Modules.Modules.Core, "Core", $techn="Module", $descr="", $tags="", $link="")
   Component(Modules.Modules.Ingestion, "Ingestion", $techn="Module", $descr="", $tags="", $link="")
-  Component(Modules.Modules.Tenancy, "Tenancy", $techn="Module", $descr="", $tags="", $link="")
 }
 
 Rel(Modules.Modules.Ingestion, Modules.Modules.Connectors, "depends on", $techn="", $tags="", $link="")
