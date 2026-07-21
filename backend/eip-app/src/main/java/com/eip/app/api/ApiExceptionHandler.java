@@ -4,6 +4,9 @@
  */
 package com.eip.app.api;
 
+import com.eip.ai.api.AiDisabledException;
+import com.eip.ai.api.LlmUnavailableException;
+import com.eip.ai.api.NarrativeRejectedException;
 import com.eip.app.persistence.ConnectorCursor.InvalidCursorException;
 import com.eip.core.error.EipException;
 import com.eip.core.error.InternalException;
@@ -81,6 +84,50 @@ public class ApiExceptionHandler {
   public ProblemDetail handleSourceSync(SourceSyncException e) {
     return problem(
         HttpStatus.BAD_GATEWAY, message(e), "Source sync failed", "/problems/source-sync");
+  }
+
+  /**
+   * The current tenant has not enabled the AI explanation layer (ADR-024: opt-in, default OFF).
+   *
+   * @param e the failure
+   * @return a 409 problem+json
+   */
+  @ExceptionHandler(AiDisabledException.class)
+  public ProblemDetail handleAiDisabled(AiDisabledException e) {
+    return problem(
+        HttpStatus.CONFLICT,
+        "AI explanations are not enabled for this tenant",
+        "AI disabled",
+        "/problems/ai-disabled");
+  }
+
+  /**
+   * The configured LLM provider was unreachable, timed out, or returned a non-2xx response
+   * (ADR-024).
+   *
+   * @param e the failure
+   * @return a 502 problem+json
+   */
+  @ExceptionHandler(LlmUnavailableException.class)
+  public ProblemDetail handleLlmUnavailable(LlmUnavailableException e) {
+    return problem(
+        HttpStatus.BAD_GATEWAY, message(e), "AI upstream unavailable", "/problems/ai-upstream");
+  }
+
+  /**
+   * A generated AI narrative cited a number not present in the deterministic data it was given and
+   * was discarded (ADR-024, {@code NumericCrossChecker}).
+   *
+   * @param e the failure
+   * @return a 502 problem+json
+   */
+  @ExceptionHandler(NarrativeRejectedException.class)
+  public ProblemDetail handleNarrativeRejected(NarrativeRejectedException e) {
+    return problem(
+        HttpStatus.BAD_GATEWAY,
+        "the AI narrative failed numeric verification and was discarded",
+        "AI narrative rejected",
+        "/problems/ai-rejected");
   }
 
   /**

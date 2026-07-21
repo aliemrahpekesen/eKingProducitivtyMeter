@@ -56,6 +56,9 @@ class ArchitectureRulesTest {
             "com.eip.ingestion.api..",
             "com.eip.tenancy.api..",
             "com.eip.reports.api..",
+            // M6-A (ADR-024): the AI explanation-layer ports/DTOs — controllers compose these with
+            // com.eip.reports.api's own DTOs (AiExplainController.narrative), pure DTO translation.
+            "com.eip.ai.api..",
             // M5 Wave S1a (SecurityModel §4): the deny-by-default RBAC declaration surface —
             // @RequiresPermission/@PermissionExempt (annotations, not logic) and the pure
             // Permission enum they reference — is a controller-layer concern like any other DTO.
@@ -131,7 +134,14 @@ class ArchitectureRulesTest {
             "com.eip.ingestion.persistence..",
             "com.eip.connectors..",
             "com.eip.reports.application..",
-            "com.eip.reports.persistence..")
+            "com.eip.reports.persistence..",
+            // M6-A (ADR-024): prompt composition, the numeric cross-check, and the policy/audit
+            // stores belong to eip-ai — eip-app calls its api ports only, same as every other
+            // module.
+            "com.eip.ai.application..",
+            "com.eip.ai.persistence..",
+            "com.eip.ai.providers..",
+            "com.eip.ai.spi..")
         .because(
             "normalization, correlation, metric, projection, and report-composition logic belong"
                 + " to their owning modules; eip-app wires and invokes use cases only (ADR-019)")

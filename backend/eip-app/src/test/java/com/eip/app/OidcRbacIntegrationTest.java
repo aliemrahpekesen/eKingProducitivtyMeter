@@ -219,6 +219,25 @@ class OidcRbacIntegrationTest {
         .andExpect(jsonPath("$.detail", containsString("declares no permission")));
   }
 
+  /**
+   * M6-A (ADR-024): {@code ai.agent.invoke} RBAC denial. Header mode always resolves an implicit
+   * {@code TENANT_ADMIN} principal (see {@code AiLayerIntegrationTest}, which covers the AI layer's
+   * happy paths), so a genuine 403 for a lesser role can only be exercised here, against a real
+   * validated-JWT role.
+   */
+  @Test
+  @Order(9)
+  void viewer_cannot_invoke_the_ai_explanation_layer() throws Exception {
+    mvc.perform(
+            post("/api/v1/insights/explain")
+                .with(jwt().jwt(rolesAndTenant("VIEWER", tenantA)))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"weeks\":12}"))
+        .andExpect(status().isForbidden())
+        .andExpect(jsonPath("$.title").value("Permission denied"))
+        .andExpect(jsonPath("$.detail", containsString("ai.agent.invoke")));
+  }
+
   private static Consumer<Jwt.Builder> roles(String... roleNames) {
     return builder -> builder.claim("realm_access", Map.of("roles", List.of(roleNames)));
   }

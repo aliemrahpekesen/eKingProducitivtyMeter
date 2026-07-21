@@ -45,7 +45,13 @@ public enum Permission {
   AUDIT_READ("audit.read"),
 
   /** Platform operations: health, upgrades, KMS rotation. PLATFORM_ADMIN only. */
-  PLATFORM_OPERATE("platform.operate");
+  PLATFORM_OPERATE("platform.operate"),
+
+  /** Invoke an AI agent capability (e.g. the AI explanation layer's explain/narrate actions). */
+  AI_AGENT_INVOKE("ai.agent.invoke"),
+
+  /** Manage a tenant's AI policy (provider, model, budgets, egress). */
+  AI_POLICY_MANAGE("ai.policy.manage");
 
   private final String wireId;
 

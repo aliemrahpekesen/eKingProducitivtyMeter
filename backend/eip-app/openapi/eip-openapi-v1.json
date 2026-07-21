@@ -10,6 +10,50 @@
     "description" : "Generated server url"
   } ],
   "paths" : {
+    "/api/v1/ai/policy" : {
+      "get" : {
+        "tags" : [ "ai-policy-controller" ],
+        "operationId" : "get",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AiPolicyView"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put" : {
+        "tags" : [ "ai-policy-controller" ],
+        "operationId" : "update",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/UpdateAiPolicyRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AiPolicyView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/webhooks/{tenantId}/{connectorId}" : {
       "post" : {
         "tags" : [ "webhook-controller" ],
@@ -115,6 +159,61 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ReportView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/reports/{id}/narrative" : {
+      "post" : {
+        "tags" : [ "ai-explain-controller" ],
+        "operationId" : "narrative",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ExplanationView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/insights/explain" : {
+      "post" : {
+        "tags" : [ "ai-explain-controller" ],
+        "operationId" : "explain",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ExplainRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ExplanationView"
                 }
               }
             }
@@ -460,7 +559,7 @@
     "/api/v1/reports/{id}" : {
       "get" : {
         "tags" : [ "reports-controller" ],
-        "operationId" : "get",
+        "operationId" : "get_1",
         "parameters" : [ {
           "name" : "id",
           "in" : "path",
@@ -661,6 +760,24 @@
         }
       }
     },
+    "/api/v1/ai/status" : {
+      "get" : {
+        "tags" : [ "ai-policy-controller" ],
+        "operationId" : "status",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AiStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/structure" : {
       "get" : {
         "tags" : [ "admin-structure-controller" ],
@@ -706,6 +823,62 @@
   },
   "components" : {
     "schemas" : {
+      "UpdateAiPolicyRequest" : {
+        "type" : "object",
+        "properties" : {
+          "enabled" : {
+            "type" : "boolean"
+          },
+          "provider" : {
+            "type" : "string"
+          },
+          "baseUrl" : {
+            "type" : "string"
+          },
+          "model" : {
+            "type" : "string"
+          },
+          "secret" : {
+            "type" : "string"
+          },
+          "temperature" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "maxTokens" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "AiPolicyView" : {
+        "type" : "object",
+        "properties" : {
+          "enabled" : {
+            "type" : "boolean"
+          },
+          "provider" : {
+            "type" : "string"
+          },
+          "baseUrl" : {
+            "type" : "string"
+          },
+          "model" : {
+            "type" : "string"
+          },
+          "hasSecret" : {
+            "type" : "boolean"
+          },
+          "temperature" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "maxTokens" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
       "GenerateReportRequest" : {
         "required" : [ "type" ],
         "type" : "object",
@@ -754,6 +927,42 @@
           "completedAt" : {
             "type" : "string",
             "format" : "date-time"
+          }
+        }
+      },
+      "ExplanationView" : {
+        "type" : "object",
+        "properties" : {
+          "narrative" : {
+            "type" : "string"
+          },
+          "provider" : {
+            "type" : "string"
+          },
+          "model" : {
+            "type" : "string"
+          },
+          "citedNumbers" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "generatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "disclaimer" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ExplainRequest" : {
+        "type" : "object",
+        "properties" : {
+          "weeks" : {
+            "type" : "integer",
+            "format" : "int32"
           }
         }
       },
@@ -1513,6 +1722,14 @@
             "type" : "string"
           },
           "hasMore" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "AiStatusResponse" : {
+        "type" : "object",
+        "properties" : {
+          "enabled" : {
             "type" : "boolean"
           }
         }

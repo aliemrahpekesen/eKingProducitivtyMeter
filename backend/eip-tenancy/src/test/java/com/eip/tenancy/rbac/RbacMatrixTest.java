@@ -4,6 +4,8 @@
  */
 package com.eip.tenancy.rbac;
 
+import static com.eip.tenancy.rbac.Permission.AI_AGENT_INVOKE;
+import static com.eip.tenancy.rbac.Permission.AI_POLICY_MANAGE;
 import static com.eip.tenancy.rbac.Permission.AUDIT_READ;
 import static com.eip.tenancy.rbac.Permission.CONNECTOR_CONFIGURE;
 import static com.eip.tenancy.rbac.Permission.CONNECTOR_SECRET_REVEAL;
@@ -39,11 +41,13 @@ class RbacMatrixTest {
     assertThat(REPORT_EXPORT.wireId()).isEqualTo("report.export");
     assertThat(AUDIT_READ.wireId()).isEqualTo("audit.read");
     assertThat(PLATFORM_OPERATE.wireId()).isEqualTo("platform.operate");
+    assertThat(AI_AGENT_INVOKE.wireId()).isEqualTo("ai.agent.invoke");
+    assertThat(AI_POLICY_MANAGE.wireId()).isEqualTo("ai.policy.manage");
   }
 
   @Test
-  void catalogDeclaresExactlyTheTenDocumentedPermissions() {
-    assertThat(Permission.values()).hasSize(10);
+  void catalogDeclaresExactlyTheTwelveDocumentedPermissions() {
+    assertThat(Permission.values()).hasSize(12);
   }
 
   @Test
@@ -53,16 +57,19 @@ class RbacMatrixTest {
 
   @Test
   void platformAdmin_row() {
-    // | tenant.manage | user.manage | ... | audit.read | ... | platform.operate |  all ✓
+    // | tenant.manage | user.manage | ... | audit.read | ... | platform.operate |  all ✓; no
+    // ai.agent.invoke/ai.policy.manage (SecurityModel §4: both columns are "—" for PLATFORM_ADMIN).
     assertThat(Role.PLATFORM_ADMIN.permissions())
-        .containsExactlyInAnyOrder(TENANT_MANAGE, USER_MANAGE, AUDIT_READ, PLATFORM_OPERATE);
+        .containsExactlyInAnyOrder(TENANT_MANAGE, USER_MANAGE, AUDIT_READ, PLATFORM_OPERATE)
+        .doesNotContain(AI_AGENT_INVOKE, AI_POLICY_MANAGE);
   }
 
   @Test
   void tenantAdmin_row() {
     // TENANT_ADMIN column: tenant.manage, user.manage, connector.configure,
-    // connector.secret.write, dashboard.view, report.generate, report.export, audit.read — all ✓.
-    // connector.secret.reveal is "opt-in, audited", NOT a default-granted permission.
+    // connector.secret.write, dashboard.view, report.generate, report.export, audit.read,
+    // ai.agent.invoke, ai.policy.manage — all ✓. connector.secret.reveal is "opt-in, audited", NOT
+    // a default-granted permission.
     assertThat(Role.TENANT_ADMIN.permissions())
         .containsExactlyInAnyOrder(
             TENANT_MANAGE,
@@ -72,15 +79,19 @@ class RbacMatrixTest {
             DASHBOARD_VIEW,
             REPORT_GENERATE,
             REPORT_EXPORT,
-            AUDIT_READ)
+            AUDIT_READ,
+            AI_AGENT_INVOKE,
+            AI_POLICY_MANAGE)
         .doesNotContain(CONNECTOR_SECRET_REVEAL, PLATFORM_OPERATE);
   }
 
   @Test
   void managerScopeTemplates_row() {
     // "Manager-scope templates" column (ENGINEERING_MANAGER/TEAM_LEAD/RELEASE_MANAGER) and ANALYST
-    // share one column in the doc table: dashboard.view, report.generate, report.export — all ✓.
-    Set<Permission> expected = Set.of(DASHBOARD_VIEW, REPORT_GENERATE, REPORT_EXPORT);
+    // share one column in the doc table: dashboard.view, report.generate, report.export,
+    // ai.agent.invoke — all ✓; ai.policy.manage stays TENANT_ADMIN-only ("—" for this column).
+    Set<Permission> expected =
+        Set.of(DASHBOARD_VIEW, REPORT_GENERATE, REPORT_EXPORT, AI_AGENT_INVOKE);
     assertThat(Role.ENGINEERING_MANAGER.permissions())
         .containsExactlyInAnyOrderElementsOf(expected);
     assertThat(Role.TEAM_LEAD.permissions()).containsExactlyInAnyOrderElementsOf(expected);
@@ -90,8 +101,10 @@ class RbacMatrixTest {
 
   @Test
   void member_row() {
-    // MEMBER column: only dashboard.view ✓.
-    assertThat(Role.MEMBER.permissions()).containsExactly(DASHBOARD_VIEW);
+    // MEMBER column: dashboard.view and ai.agent.invoke ("✓ (subset)" in SecurityModel §4 — a scope
+    // restriction on what can be explained, not a narrower permission set in v0.1).
+    assertThat(Role.MEMBER.permissions())
+        .containsExactlyInAnyOrder(DASHBOARD_VIEW, AI_AGENT_INVOKE);
   }
 
   @Test

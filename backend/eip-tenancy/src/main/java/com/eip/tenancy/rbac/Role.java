@@ -4,6 +4,8 @@
  */
 package com.eip.tenancy.rbac;
 
+import static com.eip.tenancy.rbac.Permission.AI_AGENT_INVOKE;
+import static com.eip.tenancy.rbac.Permission.AI_POLICY_MANAGE;
 import static com.eip.tenancy.rbac.Permission.AUDIT_READ;
 import static com.eip.tenancy.rbac.Permission.CONNECTOR_CONFIGURE;
 import static com.eip.tenancy.rbac.Permission.CONNECTOR_SECRET_WRITE;
@@ -47,26 +49,31 @@ public enum Role {
           DASHBOARD_VIEW,
           REPORT_GENERATE,
           REPORT_EXPORT,
-          AUDIT_READ)),
+          AUDIT_READ,
+          AI_AGENT_INVOKE,
+          AI_POLICY_MANAGE)),
 
   /** Seeded template (manager-scope): EM — team-level metrics, reports for owned scope. */
-  ENGINEERING_MANAGER(Set.of(DASHBOARD_VIEW, REPORT_GENERATE, REPORT_EXPORT)),
+  ENGINEERING_MANAGER(Set.of(DASHBOARD_VIEW, REPORT_GENERATE, REPORT_EXPORT, AI_AGENT_INVOKE)),
 
   /** Seeded template (manager-scope): team lead — team dashboards + generated sprint reviews. */
-  TEAM_LEAD(Set.of(DASHBOARD_VIEW, REPORT_GENERATE, REPORT_EXPORT)),
+  TEAM_LEAD(Set.of(DASHBOARD_VIEW, REPORT_GENERATE, REPORT_EXPORT, AI_AGENT_INVOKE)),
 
   /** Seeded template (manager-scope): release/delivery manager — release dashboards + notes. */
-  RELEASE_MANAGER(Set.of(DASHBOARD_VIEW, REPORT_GENERATE, REPORT_EXPORT)),
+  RELEASE_MANAGER(Set.of(DASHBOARD_VIEW, REPORT_GENERATE, REPORT_EXPORT, AI_AGENT_INVOKE)),
 
   /** Base role: analytics consumer — dashboards, drill-downs, report generation in scope. */
-  ANALYST(Set.of(DASHBOARD_VIEW, REPORT_GENERATE, REPORT_EXPORT)),
+  ANALYST(Set.of(DASHBOARD_VIEW, REPORT_GENERATE, REPORT_EXPORT, AI_AGENT_INVOKE)),
 
   /**
    * Seeded template: engineer — team dashboards and own work-item context only. No {@link
    * Permission#REPORT_GENERATE}/{@link Permission#REPORT_EXPORT} (SecurityModel §4: MEMBER's row
-   * carries neither).
+   * carries neither); does carry {@link Permission#AI_AGENT_INVOKE} (SecurityModel §4 marks
+   * MEMBER's cell "✓ (subset)" — the subset is a scope restriction on WHAT can be explained, not a
+   * narrower permission set; v0.1 grants the same flat permission as every other AI_AGENT_INVOKE
+   * role).
    */
-  MEMBER(Set.of(DASHBOARD_VIEW)),
+  MEMBER(Set.of(DASHBOARD_VIEW, AI_AGENT_INVOKE)),
 
   /**
    * Base role: read-only stakeholder. {@link Permission#REPORT_EXPORT} is marked "scope-gated" in
@@ -83,7 +90,7 @@ public enum Role {
 
   // Set.of(...) is genuinely immutable at runtime; ErrorProne's ImmutableEnumChecker only
   // recognizes a fixed allow-list of static types (e.g. Guava's ImmutableSet), which this
-  // dependency-free module deliberately does not depend on for a ten-element permission set.
+  // dependency-free module deliberately does not depend on for a twelve-element permission set.
   @SuppressWarnings("ImmutableEnumChecker")
   private final Set<Permission> permissions;
 
