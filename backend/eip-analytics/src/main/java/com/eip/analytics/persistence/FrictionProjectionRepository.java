@@ -103,6 +103,8 @@ public class FrictionProjectionRepository {
 
   /**
    * Maps each work item to its first pull request (deterministic {@code DISTINCT ON} pick).
+   * Excludes soft-deleted pull requests ({@code deleted_at IS NULL} — DEBT-018 item 4), same as
+   * every other {@code eip-analytics} read over a delete-lifecycle-aware table.
    *
    * @return pull-request ids by work-item id
    */
@@ -110,12 +112,13 @@ public class FrictionProjectionRepository {
     return uuidMap(
         """
         SELECT DISTINCT ON (work_item_id) work_item_id, id FROM scm.pull_request
-        WHERE work_item_id IS NOT NULL ORDER BY work_item_id, id
+        WHERE work_item_id IS NOT NULL AND deleted_at IS NULL ORDER BY work_item_id, id
         """);
   }
 
   /**
-   * Maps each pull request to its first build.
+   * Maps each pull request to its first build. Excludes soft-deleted builds ({@code deleted_at IS
+   * NULL} — DEBT-018 item 4).
    *
    * @return build ids by pull-request id
    */
@@ -123,12 +126,13 @@ public class FrictionProjectionRepository {
     return uuidMap(
         """
         SELECT DISTINCT ON (pull_request_id) pull_request_id, id FROM cicd.build
-        WHERE pull_request_id IS NOT NULL ORDER BY pull_request_id, id
+        WHERE pull_request_id IS NOT NULL AND deleted_at IS NULL ORDER BY pull_request_id, id
         """);
   }
 
   /**
-   * Maps each build to its first quality gate.
+   * Maps each build to its first quality gate. Excludes soft-deleted quality gates ({@code
+   * deleted_at IS NULL} — DEBT-018 item 4).
    *
    * @return quality-gate ids by build id
    */
@@ -136,7 +140,7 @@ public class FrictionProjectionRepository {
     return uuidMap(
         """
         SELECT DISTINCT ON (build_id) build_id, id FROM quality.quality_gate
-        WHERE build_id IS NOT NULL ORDER BY build_id, id
+        WHERE build_id IS NOT NULL AND deleted_at IS NULL ORDER BY build_id, id
         """);
   }
 

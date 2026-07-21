@@ -38,6 +38,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Consumer;
 import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
 
@@ -47,14 +48,20 @@ import org.springframework.stereotype.Service;
  * of per-record lookups. Work-item identity is anchored through {@code core.external_ref} (AD-14),
  * so re-normalizing resolves the same stable ids and changes nothing.
  *
- * <p><strong>Delete lifecycle (DEBT-020 item 3, v0.1 — work items only):</strong> a staged {@code
- * op='delete'} row for the work-item stream resolves its canonical id through the same external-ref
- * identity path and sets {@code work.work_item.deleted_at} (a bookkeeping "now", since no source
- * reports a deletion instant); a later {@code upsert} for that same identity is a REVIVAL — {@link
- * CanonicalWriteRepository#upsertWorkItems} clears {@code deleted_at} and reports the row as
- * changed, so it emits an {@code upserted} outbox event same as any other change. No outbox event
- * is emitted for the deletion itself (event-type vocabulary stays {@code upserted} only; a
- * dedicated {@code deleted} event type is v0.2 follow-up).
+ * <p><strong>Delete lifecycle (DEBT-020 item 3 for work items; extended to {@code pull_request} /
+ * {@code code_review} / {@code build} / {@code quality_gate} by DEBT-018 item 4):</strong> a staged
+ * {@code op='delete'} row for the work-item stream resolves its canonical id through the
+ * external-ref identity path and sets {@code work.work_item.deleted_at} (a bookkeeping "now", since
+ * no source reports a deletion instant); a later {@code upsert} for that same identity is a REVIVAL
+ * — {@link CanonicalWriteRepository#upsertWorkItems} clears {@code deleted_at} and reports the row
+ * as changed, so it emits an {@code upserted} outbox event same as any other change. The other four
+ * streams follow the identical shape but resolve identity by natural key ({@code source_key})
+ * instead of {@code core.external_ref} (see {@link #markDeletedByNaturalKey}) — no outbox event
+ * exists for those streams at all today (unchanged), so their deletion is bookkeeping-only,
+ * observable via each stream's own {@code deleted_at} filter in {@code eip-analytics} reads. No
+ * outbox event is emitted for ANY deletion itself (event-type vocabulary stays {@code upserted}
+ * only; a dedicated {@code deleted} event type is v0.2 follow-up). No real connector emits {@code
+ * op='delete'} for these four entity kinds yet (same honest caveat as the work-item lifecycle).
  *
  * <p><strong>Outbox-emission semantics (chosen trade-off, BackendPlan §6):</strong> exactly one
  * {@code core.event_outbox} row is written per canonical work item whose row {@linkplain
@@ -112,8 +119,10 @@ public class NormalizationService implements NormalizeStagedDataUseCase {
           // Work items: resolve stable ids through external_ref, then batch upsert. Teams named
           // by sources but missing in the control plane are auto-created under an "Imported"
           // structure so freshly connected sources chart immediately (team-level only, NFR-071).
-          // This is the one phase that also sees op='delete' rows (DEBT-020 item 3): every other
-          // stream below reads readAll/readStream, which only ever returns op='upsert'.
+          // Work items resolve their delete lifecycle through external_ref identity (DEBT-020 item
+          // 3); the transition stream alone below reads readAll/readStream (op='upsert' only) since
+          // transitions have no delete lifecycle of their own — every other stream reads
+          // readAllWithDeletes for its own natural-key delete lifecycle (DEBT-018 item 4).
           List<StagedRow> workItemRows = readAllWithDeletes(STREAM_WORK_ITEM);
           List<Parsed> items =
               parse(workItemRows.stream().filter(r -> "upsert".equals(r.op())).toList());
@@ -195,9 +204,15 @@ public class NormalizationService implements NormalizeStagedDataUseCase {
           }
           canonical.upsertTransitions(transitions);
 
-          // Pull requests, then their id map for reviews/builds.
+          // Pull requests, then their id map for reviews/builds. Delete lifecycle (DEBT-018 item
+          // 4, mirrors work items — DEBT-020 item 3): readAllWithDeletes so op='delete' rows are
+          // seen too; the natural key (StagedRow#naturalKey, identical to the "key" field every
+          // stream's own upsert path already writes as source_key) resolves straight to the id map
+          // refreshed immediately after the upsert, so it sees both pre-existing AND just-written
+          // rows — never creating a missing anchor for an identity never upserted.
+          List<StagedRow> pullRequestRows = readAllWithDeletes(STREAM_PULL_REQUEST);
           List<PullRequestRow> pullRequests = new ArrayList<>();
-          for (Parsed p : parse(readAll(STREAM_PULL_REQUEST))) {
+          for (Parsed p : parse(upsertsOnly(pullRequestRows))) {
             pullRequests.add(
                 new PullRequestRow(
                     teamsByName.get(p.text("team")),
@@ -211,9 +226,11 @@ public class NormalizationService implements NormalizeStagedDataUseCase {
           }
           canonical.upsertPullRequests(pullRequests);
           Map<String, UUID> prIds = canonical.pullRequestIdsBySourceKey();
+          markDeletedByNaturalKey(pullRequestRows, prIds, canonical::markPullRequestsDeleted);
 
+          List<StagedRow> codeReviewRows = readAllWithDeletes(STREAM_CODE_REVIEW);
           List<CodeReviewRow> reviews = new ArrayList<>();
-          for (Parsed p : parse(readAll(STREAM_CODE_REVIEW))) {
+          for (Parsed p : parse(upsertsOnly(codeReviewRows))) {
             @Nullable UUID prId = prIds.get(p.text("pullRequestKey"));
             if (prId == null) {
               continue; // pull_request_id is NOT NULL; skip orphans as before
@@ -227,9 +244,14 @@ public class NormalizationService implements NormalizeStagedDataUseCase {
                     p.timestamp("completedAt")));
           }
           canonical.upsertCodeReviews(reviews);
+          markDeletedByNaturalKey(
+              codeReviewRows,
+              canonical.codeReviewIdsBySourceKey(),
+              canonical::markCodeReviewsDeleted);
 
+          List<StagedRow> buildRows = readAllWithDeletes(STREAM_BUILD);
           List<BuildRow> builds = new ArrayList<>();
-          for (Parsed p : parse(readAll(STREAM_BUILD))) {
+          for (Parsed p : parse(upsertsOnly(buildRows))) {
             builds.add(
                 new BuildRow(
                     prIds.get(p.text("pullRequestKey")),
@@ -240,9 +262,11 @@ public class NormalizationService implements NormalizeStagedDataUseCase {
           }
           canonical.upsertBuilds(builds);
           Map<String, UUID> buildIds = canonical.buildIdsBySourceKey();
+          markDeletedByNaturalKey(buildRows, buildIds, canonical::markBuildsDeleted);
 
+          List<StagedRow> qualityGateRows = readAllWithDeletes(STREAM_QUALITY_GATE);
           List<QualityGateRow> gates = new ArrayList<>();
-          for (Parsed p : parse(readAll(STREAM_QUALITY_GATE))) {
+          for (Parsed p : parse(upsertsOnly(qualityGateRows))) {
             gates.add(
                 new QualityGateRow(
                     buildIds.get(p.text("buildKey")),
@@ -252,6 +276,10 @@ public class NormalizationService implements NormalizeStagedDataUseCase {
                     p.timestamp("evaluatedAt")));
           }
           canonical.upsertQualityGates(gates);
+          markDeletedByNaturalKey(
+              qualityGateRows,
+              canonical.qualityGateIdsBySourceKey(),
+              canonical::markQualityGatesDeleted);
         });
   }
 
@@ -305,8 +333,10 @@ public class NormalizationService implements NormalizeStagedDataUseCase {
   }
 
   /**
-   * Reads one stream's upsert AND delete rows across every raw staging table — only the work-item
-   * phase calls this (DEBT-020 item 3); every other stream reads {@link #readAll}.
+   * Reads one stream's upsert AND delete rows across every raw staging table — the work-item phase
+   * (DEBT-020 item 3) and the pull-request/code-review/build/quality-gate phases (DEBT-018 item 4)
+   * call this; the transition phase alone reads {@link #readAll} (transitions have no delete
+   * lifecycle of their own — they simply stop being emitted once their work item is deleted).
    */
   private List<StagedRow> readAllWithDeletes(String stream) {
     List<StagedRow> rows = new ArrayList<>();
@@ -314,6 +344,43 @@ public class NormalizationService implements NormalizeStagedDataUseCase {
       rows.addAll(staging.readStreamWithDeletes(table, stream));
     }
     return rows;
+  }
+
+  /** Filters a {@link #readAllWithDeletes} result down to its {@code upsert} rows. */
+  private static List<StagedRow> upsertsOnly(List<StagedRow> rows) {
+    return rows.stream().filter(r -> "upsert".equals(r.op())).toList();
+  }
+
+  /**
+   * Resolves {@code op='delete'} rows to an already-known canonical id by natural key — the same
+   * identity every non-work-item stream upserts on as {@code source_key} ({@link
+   * StagedRow#naturalKey()} and the payload's {@code key} field are the same value, by every
+   * connector's own construction; natural key is used here because a delete's payload may be empty)
+   * — and marks them deleted (DEBT-018 item 4, mirrors the work-item delete path). NEVER creates a
+   * missing anchor: a delete for a natural key never seen as an upsert has nothing to delete and is
+   * silently skipped, exactly like {@code existingWorkItemIdsByExternalId} guards the work-item
+   * path.
+   *
+   * @param rows the stream's upsert+delete rows ({@link #readAllWithDeletes})
+   * @param idsBySourceKey the canonical ids by {@code source_key}, refreshed AFTER this run's
+   *     upsert so it reflects both pre-existing and just-written rows
+   * @param markDeleted the repository call that soft-deletes the resolved ids
+   */
+  private static void markDeletedByNaturalKey(
+      List<StagedRow> rows, Map<String, UUID> idsBySourceKey, Consumer<List<UUID>> markDeleted) {
+    List<UUID> toDelete = new ArrayList<>();
+    for (StagedRow row : rows) {
+      if (!"delete".equals(row.op())) {
+        continue;
+      }
+      @Nullable UUID id = idsBySourceKey.get(row.naturalKey());
+      if (id != null) {
+        toDelete.add(id);
+      } // else: delete for an identity never ingested as an upsert; nothing to delete
+    }
+    if (!toDelete.isEmpty()) {
+      markDeleted.accept(toDelete);
+    }
   }
 
   private List<Parsed> parse(List<StagedRow> rows) {

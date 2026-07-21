@@ -201,6 +201,84 @@ class JiraConnectorTest {
   }
 
   @Test
+  void sync_pages_the_changelog_when_the_embedded_history_is_truncated() {
+    // DEBT-018 item 5: the search response declares changelog.total=4 but embeds only 2 histories
+    // — the connector must page the remainder via the dedicated /changelog endpoint and merge all
+    // 4 transitions chronologically, not just the embedded page's 2.
+    WireMockServer truncated = new WireMockServer(WireMockConfiguration.options().dynamicPort());
+    truncated.start();
+    try {
+      truncated.stubFor(
+          get(urlPathEqualTo("/rest/api/3/search"))
+              .willReturn(
+                  aResponse()
+                      .withStatus(200)
+                      .withHeader("Content-Type", "application/json")
+                      .withBody(TRUNCATED_SEARCH_BODY)));
+      truncated.stubFor(
+          get(urlPathEqualTo("/rest/api/3/issue/20001/changelog"))
+              .withQueryParam("startAt", equalTo("2"))
+              .withQueryParam("maxResults", equalTo("100"))
+              .willReturn(
+                  aResponse()
+                      .withStatus(200)
+                      .withHeader("Content-Type", "application/json")
+                      .withBody(CHANGELOG_PAGE_BODY)));
+
+      JiraConnector connector = new JiraConnector();
+      List<RawRecord> emitted = new ArrayList<>();
+      connector.sync(
+          new SyncContext() {
+            @Override
+            public com.eip.connectors.spi.RawSink rawSink() {
+              return emitted::add;
+            }
+
+            @Override
+            public ConnectorConfig config() {
+              return new ConnectorConfig(
+                  Map.of("baseUrl", truncated.baseUrl(), "email", "svc@acme.io"), "token-1");
+            }
+          });
+
+      List<RawRecord> transitions =
+          emitted.stream().filter(r -> r.stream().equals("work_item_transition")).toList();
+      assertThat(transitions).hasSize(4); // all 4 histories, not just the embedded page's 2
+      assertThat(transitions.stream().map(t -> t.payload().get("toState")))
+          .containsExactly("IN_PROGRESS", "BLOCKED", "IN_PROGRESS", "DONE");
+      truncated.verify(getRequestedFor(urlPathEqualTo("/rest/api/3/issue/20001/changelog")));
+    } finally {
+      truncated.stop();
+    }
+  }
+
+  @Test
+  void sync_makes_no_extra_changelog_call_when_the_embedded_history_is_complete() {
+    // The shared JIRA server's SEARCH_BODY changelogs have no "total" field at all, so the
+    // connector defaults total to the embedded histories' own size — never truncated, so no
+    // /changelog stub is even registered on JIRA; if the connector wrongly tried to page anyway,
+    // WireMock would 404 it and the existing sync tests above would already be failing.
+    JIRA.resetRequests();
+    JiraConnector connector = new JiraConnector();
+    List<RawRecord> emitted = new ArrayList<>();
+    connector.sync(
+        new SyncContext() {
+          @Override
+          public com.eip.connectors.spi.RawSink rawSink() {
+            return emitted::add;
+          }
+
+          @Override
+          public ConnectorConfig config() {
+            return JiraConnectorTest.this.config();
+          }
+        });
+
+    assertThat(emitted).isNotEmpty();
+    assertThat(JIRA.findAll(getRequestedFor(urlPathEqualTo("/rest/api/3/search")))).hasSize(1);
+  }
+
+  @Test
   void state_mapping_covers_the_canonical_vocabulary() {
     assertThat(JiraConnector.canonicalStateName("Impediment / On Hold")).isEqualTo("BLOCKED");
     assertThat(JiraConnector.canonicalStateName("Code Review")).isEqualTo("IN_REVIEW");
@@ -243,5 +321,32 @@ class JiraConnectorTest {
            {"id":"h8","created":"2026-01-05T12:00:00.000+0000","items":[
              {"field":"status","fromString":"In Review","toString":"Done"}]}]}}
       ]}
+      """;
+
+  // DEBT-018 item 5 fixtures: changelog.total (4) exceeds the embedded histories (2), so the
+  // connector must page /rest/api/3/issue/20001/changelog?startAt=2 for the remaining 2.
+  private static final String TRUNCATED_SEARCH_BODY =
+      """
+      {"startAt":0,"maxResults":100,"total":1,"issues":[
+        {"id":"20001","key":"PLAT-3",
+         "fields":{"summary":"Truncated history","project":{"key":"PLAT"},
+                   "issuetype":{"name":"Task"},
+                   "status":{"name":"In Progress","statusCategory":{"key":"indeterminate"}},
+                   "created":"2026-01-05T09:00:00.000+0000","resolutiondate":null},
+         "changelog":{"total":4,"startAt":0,"maxResults":2,"histories":[
+           {"id":"h1","created":"2026-01-05T10:00:00.000+0000","items":[
+             {"field":"status","fromString":"To Do","toString":"In Progress"}]},
+           {"id":"h2","created":"2026-01-05T11:00:00.000+0000","items":[
+             {"field":"status","fromString":"In Progress","toString":"Blocked"}]}]}}
+      ]}
+      """;
+
+  private static final String CHANGELOG_PAGE_BODY =
+      """
+      {"startAt":2,"maxResults":100,"total":4,"isLast":true,"values":[
+        {"id":"h3","created":"2026-01-05T13:00:00.000+0000","items":[
+          {"field":"status","fromString":"Blocked","toString":"In Progress"}]},
+        {"id":"h4","created":"2026-01-05T14:00:00.000+0000","items":[
+          {"field":"status","fromString":"In Progress","toString":"Done"}]}]}
       """;
 }

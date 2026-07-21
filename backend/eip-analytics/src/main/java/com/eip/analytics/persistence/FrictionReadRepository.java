@@ -156,6 +156,12 @@ public class FrictionReadRepository {
    * to pin against, so a stable dedup is the only well-defined minimal fix at this join site
    * (DEBT-020 item 2).
    *
+   * <p>The three artifact joins additionally filter {@code deleted_at IS NULL} in their {@code ON}
+   * clause, not the {@code WHERE} clause (DEBT-018 item 4): a soft-deleted pull
+   * request/build/quality gate must read back as ABSENT (the row's {@code pr_key}/{@code
+   * build_key}/{@code gate_key} come back {@code null}), never exclude the whole evidence row — the
+   * work item itself may still be very much alive.
+   *
    * @param teamId the team
    * @return the items ordered by work-item key
    */
@@ -175,9 +181,12 @@ public class FrictionReadRepository {
               WHERE entity_type = 'WORK_ITEM'
               ORDER BY entity_id, source_system, source_instance, external_id
             ) er ON er.entity_id = fc.work_item_id
-            LEFT JOIN scm.pull_request pr ON pr.id = fc.pull_request_id
-            LEFT JOIN cicd.build b ON b.id = fc.build_id
-            LEFT JOIN quality.quality_gate qg ON qg.id = fc.quality_gate_id
+            LEFT JOIN scm.pull_request pr
+              ON pr.id = fc.pull_request_id AND pr.deleted_at IS NULL
+            LEFT JOIN cicd.build b
+              ON b.id = fc.build_id AND b.deleted_at IS NULL
+            LEFT JOIN quality.quality_gate qg
+              ON qg.id = fc.quality_gate_id AND qg.deleted_at IS NULL
             WHERE fc.team_id = :teamId AND wi.deleted_at IS NULL
             ORDER BY er.external_key
             """)

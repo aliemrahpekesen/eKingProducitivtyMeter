@@ -113,7 +113,12 @@ public class RealConnectorSyncService implements RunConnectorSyncUseCase {
         switch (mode) {
           case FULL -> true;
           case INCREMENTAL -> false;
-          case AUTO -> !hasCheckpoint;
+          // DEBT-018 item 3: AUTO with an existing checkpoint runs incremental ONLY when the
+          // connector actually narrows its fetch from the cursor (Connector#incrementalSupported).
+          // Otherwise it is forced FULL: never hand a cursor to a connector that never asked for
+          // one, and never stamp the checkpoint's last_incremental_sync_at for a run that fetched
+          // (and fetch-kind-tagged) everything as FULL anyway.
+          case AUTO -> !hasCheckpoint || !connector.incrementalSupported();
         };
     Map<String, String> cursorForSync = fullSync ? Map.of() : resolved.cursor().orElse(Map.of());
 

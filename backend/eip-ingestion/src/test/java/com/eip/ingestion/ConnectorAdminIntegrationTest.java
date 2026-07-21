@@ -111,8 +111,7 @@ class ConnectorAdminIntegrationTest {
                     new SonarQubeConnector(),
                     new GitHubConnector(),
                     new GitLabConnector(),
-                    new JenkinsConnector())),
-            mapper);
+                    new JenkinsConnector())));
   }
 
   @AfterAll
@@ -166,6 +165,12 @@ class ConnectorAdminIntegrationTest {
     TestConnectionResult jiraTest = service.test(jira.id());
     assertThat(jiraTest.outcome()).isEqualTo("FAILED");
     assertThat(service.test(sim.id()).outcome()).isEqualTo("OK");
+
+    // Health (DEBT-018 item 2): v0.1 delegates to the same probe as test() — identical outcomes.
+    assertThat(service.health(jira.id()).outcome()).isEqualTo("FAILED");
+    assertThat(service.health(sim.id()).outcome()).isEqualTo("OK");
+    assertThatThrownBy(() -> service.health(UUID.randomUUID()))
+        .isInstanceOf(ResourceNotFoundException.class);
 
     // Status lifecycle + invalid status fails closed.
     assertThat(service.setStatus(jira.id(), "DISABLED").status()).isEqualTo("DISABLED");

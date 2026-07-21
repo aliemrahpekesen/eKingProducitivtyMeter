@@ -38,4 +38,7 @@ dependencies {
     // spring-boot-starter-json). Module-local tests construct a plain ObjectMapper directly, so the
     // module needs the datatype module on its own test classpath.
     testImplementation(libs.jackson.datatype.jsr310)
+    // WireMock'd source for RealConnectorSyncServiceIntegrationTest (DEBT-018 item 3): already an
+    // approved, catalog'd dependency (used the same way in eip-connectors/eip-app test scope).
+    testImplementation(libs.wiremock.standalone)
 }

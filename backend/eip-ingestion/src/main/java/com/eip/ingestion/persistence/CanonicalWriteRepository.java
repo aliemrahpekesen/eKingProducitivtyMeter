@@ -323,7 +323,13 @@ public class CanonicalWriteRepository {
           team_id = EXCLUDED.team_id, work_item_id = EXCLUDED.work_item_id,
           title = EXCLUDED.title, source_branch = EXCLUDED.source_branch,
           status = EXCLUDED.status, created_in_source = EXCLUDED.created_in_source,
-          merged_at = EXCLUDED.merged_at
+          merged_at = EXCLUDED.merged_at, deleted_at = NULL
+        WHERE ROW(pull_request.team_id, pull_request.work_item_id, pull_request.title,
+                  pull_request.source_branch, pull_request.status,
+                  pull_request.created_in_source, pull_request.merged_at, pull_request.deleted_at)
+          IS DISTINCT FROM ROW(EXCLUDED.team_id, EXCLUDED.work_item_id, EXCLUDED.title,
+                               EXCLUDED.source_branch, EXCLUDED.status,
+                               EXCLUDED.created_in_source, EXCLUDED.merged_at, NULL::timestamptz)
         """,
         rows,
         rows.size(),
@@ -340,12 +346,32 @@ public class CanonicalWriteRepository {
   }
 
   /**
-   * Returns pull-request ids keyed by source key (for stitching reviews/builds).
+   * Returns pull-request ids keyed by source key (for stitching reviews/builds, and for resolving
+   * {@code op='delete'} rows to their existing canonical id — DEBT-018 item 4 — since a
+   * soft-deleted row still carries its {@code source_key}).
    *
    * @return pull-request ids by source key
    */
   public Map<String, UUID> pullRequestIdsBySourceKey() {
     return keyedIds("SELECT source_key, id FROM scm.pull_request");
+  }
+
+  /**
+   * Marks canonical pull requests deleted (DEBT-018 item 4, mirrors {@link #markWorkItemsDeleted}).
+   * {@code deleted_at} is a bookkeeping timestamp — the source's {@code delete} assertion carries
+   * no deletion instant.
+   *
+   * @param pullRequestIds the canonical ids to mark deleted
+   */
+  public void markPullRequestsDeleted(List<UUID> pullRequestIds) {
+    if (pullRequestIds.isEmpty()) {
+      return;
+    }
+    jdbcTemplate.batchUpdate(
+        "UPDATE scm.pull_request SET deleted_at = now() WHERE id = ? AND deleted_at IS NULL",
+        pullRequestIds,
+        pullRequestIds.size(),
+        (ps, id) -> ps.setObject(1, id));
   }
 
   /**
@@ -361,7 +387,12 @@ public class CanonicalWriteRepository {
         VALUES (current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?)
         ON CONFLICT (tenant_id, source_key) DO UPDATE SET
           pull_request_id = EXCLUDED.pull_request_id, outcome = EXCLUDED.outcome,
-          requested_at = EXCLUDED.requested_at, completed_at = EXCLUDED.completed_at
+          requested_at = EXCLUDED.requested_at, completed_at = EXCLUDED.completed_at,
+          deleted_at = NULL
+        WHERE ROW(code_review.pull_request_id, code_review.outcome, code_review.requested_at,
+                  code_review.completed_at, code_review.deleted_at)
+          IS DISTINCT FROM ROW(EXCLUDED.pull_request_id, EXCLUDED.outcome,
+                               EXCLUDED.requested_at, EXCLUDED.completed_at, NULL::timestamptz)
         """,
         rows,
         rows.size(),
@@ -372,6 +403,32 @@ public class CanonicalWriteRepository {
           ps.setTimestamp(4, r.requestedAt());
           ps.setTimestamp(5, r.completedAt());
         });
+  }
+
+  /**
+   * Returns code-review ids keyed by source key — used only to resolve {@code op='delete'} rows to
+   * their existing canonical id (DEBT-018 item 4); no downstream stream stitches on this map.
+   *
+   * @return code-review ids by source key
+   */
+  public Map<String, UUID> codeReviewIdsBySourceKey() {
+    return keyedIds("SELECT source_key, id FROM scm.code_review");
+  }
+
+  /**
+   * Marks canonical code reviews deleted (DEBT-018 item 4, mirrors {@link #markWorkItemsDeleted}).
+   *
+   * @param codeReviewIds the canonical ids to mark deleted
+   */
+  public void markCodeReviewsDeleted(List<UUID> codeReviewIds) {
+    if (codeReviewIds.isEmpty()) {
+      return;
+    }
+    jdbcTemplate.batchUpdate(
+        "UPDATE scm.code_review SET deleted_at = now() WHERE id = ? AND deleted_at IS NULL",
+        codeReviewIds,
+        codeReviewIds.size(),
+        (ps, id) -> ps.setObject(1, id));
   }
 
   /**
@@ -387,7 +444,12 @@ public class CanonicalWriteRepository {
         VALUES (current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?)
         ON CONFLICT (tenant_id, source_key) DO UPDATE SET
           pull_request_id = EXCLUDED.pull_request_id, status = EXCLUDED.status,
-          started_at = EXCLUDED.started_at, finished_at = EXCLUDED.finished_at
+          started_at = EXCLUDED.started_at, finished_at = EXCLUDED.finished_at,
+          deleted_at = NULL
+        WHERE ROW(build.pull_request_id, build.status, build.started_at, build.finished_at,
+                  build.deleted_at)
+          IS DISTINCT FROM ROW(EXCLUDED.pull_request_id, EXCLUDED.status, EXCLUDED.started_at,
+                               EXCLUDED.finished_at, NULL::timestamptz)
         """,
         rows,
         rows.size(),
@@ -401,12 +463,29 @@ public class CanonicalWriteRepository {
   }
 
   /**
-   * Returns build ids keyed by source key (for stitching quality gates).
+   * Returns build ids keyed by source key (for stitching quality gates, and for resolving {@code
+   * op='delete'} rows to their existing canonical id — DEBT-018 item 4).
    *
    * @return build ids by source key
    */
   public Map<String, UUID> buildIdsBySourceKey() {
     return keyedIds("SELECT source_key, id FROM cicd.build");
+  }
+
+  /**
+   * Marks canonical builds deleted (DEBT-018 item 4, mirrors {@link #markWorkItemsDeleted}).
+   *
+   * @param buildIds the canonical ids to mark deleted
+   */
+  public void markBuildsDeleted(List<UUID> buildIds) {
+    if (buildIds.isEmpty()) {
+      return;
+    }
+    jdbcTemplate.batchUpdate(
+        "UPDATE cicd.build SET deleted_at = now() WHERE id = ? AND deleted_at IS NULL",
+        buildIds,
+        buildIds.size(),
+        (ps, id) -> ps.setObject(1, id));
   }
 
   /**
@@ -422,7 +501,11 @@ public class CanonicalWriteRepository {
         VALUES (current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?)
         ON CONFLICT (tenant_id, source_key) DO UPDATE SET
           build_id = EXCLUDED.build_id, pull_request_id = EXCLUDED.pull_request_id,
-          status = EXCLUDED.status, evaluated_at = EXCLUDED.evaluated_at
+          status = EXCLUDED.status, evaluated_at = EXCLUDED.evaluated_at, deleted_at = NULL
+        WHERE ROW(quality_gate.build_id, quality_gate.pull_request_id, quality_gate.status,
+                  quality_gate.evaluated_at, quality_gate.deleted_at)
+          IS DISTINCT FROM ROW(EXCLUDED.build_id, EXCLUDED.pull_request_id, EXCLUDED.status,
+                               EXCLUDED.evaluated_at, NULL::timestamptz)
         """,
         rows,
         rows.size(),
@@ -433,6 +516,32 @@ public class CanonicalWriteRepository {
           ps.setString(4, r.status());
           ps.setTimestamp(5, r.evaluatedAt());
         });
+  }
+
+  /**
+   * Returns quality-gate ids keyed by source key — used only to resolve {@code op='delete'} rows to
+   * their existing canonical id (DEBT-018 item 4); no downstream stream stitches on this map.
+   *
+   * @return quality-gate ids by source key
+   */
+  public Map<String, UUID> qualityGateIdsBySourceKey() {
+    return keyedIds("SELECT source_key, id FROM quality.quality_gate");
+  }
+
+  /**
+   * Marks canonical quality gates deleted (DEBT-018 item 4, mirrors {@link #markWorkItemsDeleted}).
+   *
+   * @param qualityGateIds the canonical ids to mark deleted
+   */
+  public void markQualityGatesDeleted(List<UUID> qualityGateIds) {
+    if (qualityGateIds.isEmpty()) {
+      return;
+    }
+    jdbcTemplate.batchUpdate(
+        "UPDATE quality.quality_gate SET deleted_at = now() WHERE id = ? AND deleted_at IS NULL",
+        qualityGateIds,
+        qualityGateIds.size(),
+        (ps, id) -> ps.setObject(1, id));
   }
 
   private Map<String, UUID> keyedIds(String sql) {

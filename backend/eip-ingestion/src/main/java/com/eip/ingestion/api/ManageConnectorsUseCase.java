@@ -60,6 +60,18 @@ public interface ManageConnectorsUseCase {
   TestConnectionResult test(UUID connectorId);
 
   /**
+   * Probes a connector's health for the Connector Health Monitor (ConnectorFramework §9, DEBT-018
+   * item 2). v0.1: identical resolve-then-probe shape as {@link #test(UUID)} — the connector's
+   * default {@code healthCheck} delegates to {@code testConnection} (no scheduler/session model
+   * exists yet to make the two probes distinct; see {@code HealthStatus} in {@code
+   * eip-connectors}).
+   *
+   * @param connectorId the connector
+   * @return the same 3-outcome shape as {@link #test(UUID)}
+   */
+  TestConnectionResult health(UUID connectorId);
+
+  /**
    * One catalog entry.
    *
    * @param type the {@code core.connector.type} discriminator

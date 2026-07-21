@@ -760,6 +760,33 @@
         }
       }
     },
+    "/api/v1/connectors/{connectorId}/health" : {
+      "get" : {
+        "tags" : [ "connector-controller" ],
+        "operationId" : "health",
+        "parameters" : [ {
+          "name" : "connectorId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TestConnectionResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/ai/status" : {
       "get" : {
         "tags" : [ "ai-policy-controller" ],

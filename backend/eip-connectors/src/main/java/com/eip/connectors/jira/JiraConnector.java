@@ -45,6 +45,13 @@ import org.jspecify.annotations.Nullable;
  * subtracted from the cursor before formatting, which absorbs both that timezone skew and any clock
  * drift between this service and Jira: the re-fetched overlap tail is free because staging is
  * content-hash idempotent (unchanged issues upsert as no-ops).
+ *
+ * <p><b>Changelog pagination (DEBT-018 item 5):</b> the search response embeds each issue's first
+ * changelog page (Cloud caps it around 100 entries). When the embedded {@code changelog.total}
+ * exceeds the embedded entry count, {@code emitIssue} pages the remainder via the dedicated {@code
+ * GET /rest/api/3/issue/{issueId}/changelog} endpoint (bounded, see {@link
+ * #fetchOverflowChangelog}) and merges all entries chronologically before emitting transitions — an
+ * issue with a complete embedded changelog makes no extra call.
  */
 public final class JiraConnector implements Connector {
 
@@ -53,6 +60,8 @@ public final class JiraConnector implements Connector {
 
   private static final int PAGE_SIZE = 100;
   private static final int MAX_PAGES = 50; // v0.1 bound: 5000 issues per sync
+  private static final int CHANGELOG_PAGE_SIZE = 100;
+  private static final int MAX_CHANGELOG_PAGES = 10; // v0.1 bound: 1000 extra history entries/issue
   private static final int OVERLAP_MINUTES = 10;
   private static final DateTimeFormatter JIRA_TS =
       DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.ROOT);
@@ -110,6 +119,18 @@ public final class JiraConnector implements Connector {
     return true;
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * <p>Jira is the sole connector that actually reads {@link SyncContext#cursor()} today (the
+   * {@code updatedSince} JQL narrowing in {@link #jql(ConnectorConfig, Map)}), so it is the sole
+   * override of this flag (DEBT-018 item 3).
+   */
+  @Override
+  public boolean incrementalSupported() {
+    return true;
+  }
+
   @Override
   public TestConnectionOutcome testConnection(ConnectorConfig config) {
     try {
@@ -162,7 +183,7 @@ public final class JiraConnector implements Connector {
       }
       JsonNode issues = response.body().path("issues");
       for (JsonNode issue : issues) {
-        emitIssue(context, issue, kind);
+        emitIssue(context, issue, kind, base, auth);
       }
       int total = response.body().path("total").asInt(0);
       startAt += issues.size();
@@ -172,7 +193,8 @@ public final class JiraConnector implements Connector {
     }
   }
 
-  private void emitIssue(SyncContext context, JsonNode issue, FetchKind kind) {
+  private void emitIssue(
+      SyncContext context, JsonNode issue, FetchKind kind, String base, String auth) {
     String key = issue.path("key").asText();
     String id = issue.path("id").asText();
     JsonNode fields = issue.path("fields");
@@ -195,9 +217,17 @@ public final class JiraConnector implements Connector {
             new RawRecord(
                 "work_item", key, "jira", instance(context), "jira:" + id, Op.UPSERT, kind, item));
 
-    // Changelog → canonical transitions, chronological. First changelog page per issue (v0.1).
+    // Changelog → canonical transitions, chronological. The search response embeds the first
+    // changelog page per issue (Cloud caps it around 100 entries — ConnectorFramework §11.1); when
+    // Jira's own total says more history exists than what came back embedded, page the rest via the
+    // dedicated /changelog endpoint (DEBT-018 item 5) instead of silently truncating history.
+    JsonNode changelog = issue.path("changelog");
     List<JsonNode> histories = new ArrayList<>();
-    issue.path("changelog").path("histories").forEach(histories::add);
+    changelog.path("histories").forEach(histories::add);
+    int changelogTotal = changelog.path("total").asInt(histories.size());
+    if (changelogTotal > histories.size()) {
+      histories.addAll(fetchOverflowChangelog(base, auth, id, histories.size(), changelogTotal));
+    }
     histories.sort(java.util.Comparator.comparing(h -> h.path("created").asText()));
     int seq = 0;
     for (JsonNode history : histories) {
@@ -226,6 +256,54 @@ public final class JiraConnector implements Connector {
                     transition));
       }
     }
+  }
+
+  /**
+   * Pages the dedicated {@code GET /rest/api/3/issue/{issueId}/changelog} endpoint for the history
+   * entries the search response's embedded {@code changelog.histories} truncated (DEBT-018 item 5).
+   * Confirmed against the Jira Cloud REST v3 "Get changelogs" endpoint: this endpoint's response
+   * shape names its entry array {@code values} — NOT {@code histories}, unlike the search
+   * response's embedded object — but each entry has the identical {@code id}/{@code created}/{@code
+   * items} shape, so the merge below needs no separate mapping. Bounded to {@value
+   * #MAX_CHANGELOG_PAGES} extra pages per issue, matching this connector's existing bounded-
+   * pagination style (v0.1: a pathological single-issue history beyond that many extra pages is
+   * truncated rather than fetched without bound).
+   *
+   * @param base the Jira base URL
+   * @param auth the resolved Basic auth header value
+   * @param issueId the issue's immutable native id
+   * @param alreadyFetched how many history entries the embedded changelog already carried (the
+   *     {@code startAt} to resume from)
+   * @param total the changelog's total entry count, per Jira's own {@code changelog.total}
+   * @return the additional history entries, in the order Jira returned them
+   */
+  private List<JsonNode> fetchOverflowChangelog(
+      String base, String auth, String issueId, int alreadyFetched, int total) {
+    List<JsonNode> extra = new ArrayList<>();
+    int fetched = alreadyFetched;
+    for (int page = 0; page < MAX_CHANGELOG_PAGES && fetched < total; page++) {
+      JsonResponse response =
+          http.getJson(
+              base
+                  + "/rest/api/3/issue/"
+                  + issueId
+                  + "/changelog?startAt="
+                  + fetched
+                  + "&maxResults="
+                  + CHANGELOG_PAGE_SIZE,
+              auth);
+      if (response.status() != 200) {
+        throw new IllegalStateException(
+            "Jira changelog fetch failed: HTTP " + response.status() + " for issue " + issueId);
+      }
+      JsonNode values = response.body().path("values");
+      if (!values.isArray() || values.isEmpty()) {
+        break;
+      }
+      values.forEach(extra::add);
+      fetched += values.size();
+    }
+    return extra;
   }
 
   /** Maps a Jira status object (name + statusCategory) to the canonical workflow state. */

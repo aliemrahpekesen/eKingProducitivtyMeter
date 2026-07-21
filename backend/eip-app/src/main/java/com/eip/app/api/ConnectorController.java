@@ -6,9 +6,13 @@ package com.eip.app.api;
 
 import com.eip.app.application.ListConnectorsQuery;
 import com.eip.app.security.RequiresPermission;
+import com.eip.ingestion.api.ManageConnectorsUseCase;
+import com.eip.ingestion.api.ManageConnectorsUseCase.TestConnectionResult;
 import com.eip.tenancy.rbac.Permission;
+import java.util.UUID;
 import org.jspecify.annotations.Nullable;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -24,9 +28,12 @@ import org.springframework.web.bind.annotation.RestController;
 public class ConnectorController {
 
   private final ListConnectorsQuery connectors;
+  private final ManageConnectorsUseCase connectorAdmin;
 
-  public ConnectorController(ListConnectorsQuery connectors) {
+  public ConnectorController(
+      ListConnectorsQuery connectors, ManageConnectorsUseCase connectorAdmin) {
     this.connectors = connectors;
+    this.connectorAdmin = connectorAdmin;
   }
 
   /**
@@ -45,5 +52,22 @@ public class ConnectorController {
       @RequestParam(name = "limit", defaultValue = "" + ListConnectorsQuery.DEFAULT_LIMIT)
           int limit) {
     return connectors.list(cursor, limit);
+  }
+
+  /**
+   * Probes a connector's health (ConnectorFramework §9: "{@code healthCheck()} results are exposed
+   * at {@code /api/v1/connectors/{instanceId}/health}"; DEBT-018 item 2). Permission choice: {@link
+   * Permission#DASHBOARD_VIEW} rather than {@code AdminConnectorController}'s {@code
+   * CONNECTOR_CONFIGURE} — health is a read-only probe result, safe for any dashboard viewer,
+   * unlike registering/editing a connector.
+   *
+   * @param connectorId the connector
+   * @return the same {@code OK}/{@code NOT_AVAILABLE}/{@code FAILED} shape {@code
+   *     AdminConnectorController}'s {@code /test} endpoint returns
+   */
+  @GetMapping("/connectors/{connectorId}/health")
+  @RequiresPermission(Permission.DASHBOARD_VIEW)
+  public TestConnectionResult health(@PathVariable UUID connectorId) {
+    return connectorAdmin.health(connectorId);
   }
 }
