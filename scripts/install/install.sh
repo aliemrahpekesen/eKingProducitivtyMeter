@@ -37,8 +37,12 @@ if [ "$EIP_ENV" = "prod" ]; then
   ✗ prod is configuration-complete (OIDC + RBAC have landed, DEBT-012) but this one-command LOCAL
     installer intentionally refuses --env prod outright — a real prod deployment replaces every
     CHANGE_ME (DB credentials, EIP_OIDC_ISSUER) via its secret manager and enterprise IdP, which is
-    not this script's job. Use --env preprod for a production rehearsal (also requires a real
-    EIP_OIDC_ISSUER — see config/environments/preprod.env), or dev/test for seeded environments.
+    not this script's job. Use --env preprod for a production rehearsal: ProductionSecretsGuard
+    (DEBT-005) requires real, non-fixture EIP_APP_DB_PASSWORD / EIP_MIGRATOR_DB_PASSWORD /
+    EIP_SECRETS_MASTER_KEY as well as a real EIP_OIDC_ISSUER — this script now generates and
+    persists ephemeral DB/master-key secrets for you on first --env preprod run (DEBT-022; see
+    .install/preprod.secrets.env), but you must still supply a real, non-CHANGE_ME EIP_OIDC_ISSUER
+    yourself — see config/environments/preprod.env. Use dev/test for seeded environments.
 MSG
   exit 2
 fi
@@ -153,16 +157,72 @@ echo "==> [4/8] Provisioning the RLS role (eip_app, NOBYPASSRLS — RLS enforced
 $COMPOSE exec -T postgres psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
   < infra/docker-compose/postgres/demo-roles.sql >/dev/null
 
+# preprod (DEBT-022): ProductionSecretsGuard (com.eip.app.config) refuses prod/preprod boot while
+# EIP_APP_DB_PASSWORD / EIP_MIGRATOR_DB_PASSWORD / EIP_SECRETS_MASTER_KEY are blank, CHANGE_ME, or
+# a known dev-fixture value — which is exactly what dev/test intentionally inject below. So for a
+# preprod rehearsal only, generate REAL ephemeral secrets on first run, persist them to a
+# gitignored state file so a later stop/start reuses the same values instead of rotating
+# credentials under a running install, and apply the generated passwords to the actual Postgres
+# roles (dev/test are completely unaffected by this block).
+APP_DB_PASSWORD="eip_app_dev_pw"
+MIGRATOR_DB_PASSWORD="$POSTGRES_PASSWORD"
+PREPROD_SECRETS_MASTER_KEY=""
+PREPROD_SECRETS_FILE="$STATE_DIR/preprod.secrets.env"
+if [ "$EIP_ENV" = "preprod" ]; then
+  echo "==> [4b/8] Provisioning ephemeral preprod secrets…"
+  gen_secret() { # 32 random bytes, base64 — same shape as EipSecretsProperties.DEV_ONLY_MASTER_KEY
+    if command -v openssl >/dev/null 2>&1; then
+      openssl rand -base64 32
+    else
+      head -c 32 /dev/urandom | base64
+    fi
+  }
+  if [ -f "$PREPROD_SECRETS_FILE" ]; then
+    # shellcheck disable=SC1090
+    . "$PREPROD_SECRETS_FILE"
+  else
+    EIP_APP_DB_PASSWORD="$(gen_secret)"
+    EIP_MIGRATOR_DB_PASSWORD="$(gen_secret)"
+    EIP_SECRETS_MASTER_KEY="$(gen_secret)"
+    (
+      umask 077
+      cat >"$PREPROD_SECRETS_FILE" <<EOF
+EIP_APP_DB_PASSWORD=$EIP_APP_DB_PASSWORD
+EIP_MIGRATOR_DB_PASSWORD=$EIP_MIGRATOR_DB_PASSWORD
+EIP_SECRETS_MASTER_KEY=$EIP_SECRETS_MASTER_KEY
+EOF
+    )
+  fi
+  APP_DB_PASSWORD="$EIP_APP_DB_PASSWORD"
+  MIGRATOR_DB_PASSWORD="$EIP_MIGRATOR_DB_PASSWORD"
+  PREPROD_SECRETS_MASTER_KEY="$EIP_SECRETS_MASTER_KEY"
+  $COMPOSE exec -T postgres psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+    -c "ALTER ROLE eip_app WITH PASSWORD '${APP_DB_PASSWORD}';" >/dev/null
+  $COMPOSE exec -T postgres psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+    -c "ALTER ROLE ${POSTGRES_USER} WITH PASSWORD '${MIGRATOR_DB_PASSWORD}';" >/dev/null
+  echo "    ✓ ephemeral secrets ready — ${PREPROD_SECRETS_FILE} (values never printed)"
+fi
+
 # --- [5/8] backend ------------------------------------------------------------------------------
 echo "==> [5/8] Building + starting eip-app (profile: ${SPRING_PROFILE}) on :${BACKEND_PORT}…"
 (cd backend && ./gradlew -q :eip-app:bootJar)
 JAR="$(ls backend/eip-app/build/libs/*.jar | grep -v -- '-plain' | head -1)"
-EIP_DB_URL="jdbc:postgresql://localhost:${POSTGRES_PORT}/${POSTGRES_DB}" \
-  EIP_APP_DB_USER="eip_app" EIP_APP_DB_PASSWORD="eip_app_dev_pw" \
-  EIP_MIGRATOR_DB_USER="$POSTGRES_USER" EIP_MIGRATOR_DB_PASSWORD="$POSTGRES_PASSWORD" \
-  EIP_OTLP_TRACES_ENDPOINT="http://localhost:${OTLP_HTTP_PORT}/v1/traces" \
-  SERVER_PORT="$BACKEND_PORT" SPRING_PROFILES_ACTIVE="$SPRING_PROFILE" \
-  nohup java -jar "$JAR" >"$STATE_DIR/backend.log" 2>&1 &
+if [ "$EIP_ENV" = "preprod" ]; then
+  EIP_DB_URL="jdbc:postgresql://localhost:${POSTGRES_PORT}/${POSTGRES_DB}" \
+    EIP_APP_DB_USER="eip_app" EIP_APP_DB_PASSWORD="$APP_DB_PASSWORD" \
+    EIP_MIGRATOR_DB_USER="$POSTGRES_USER" EIP_MIGRATOR_DB_PASSWORD="$MIGRATOR_DB_PASSWORD" \
+    EIP_SECRETS_MASTER_KEY="$PREPROD_SECRETS_MASTER_KEY" \
+    EIP_OTLP_TRACES_ENDPOINT="http://localhost:${OTLP_HTTP_PORT}/v1/traces" \
+    SERVER_PORT="$BACKEND_PORT" SPRING_PROFILES_ACTIVE="$SPRING_PROFILE" \
+    nohup java -jar "$JAR" >"$STATE_DIR/backend.log" 2>&1 &
+else
+  EIP_DB_URL="jdbc:postgresql://localhost:${POSTGRES_PORT}/${POSTGRES_DB}" \
+    EIP_APP_DB_USER="eip_app" EIP_APP_DB_PASSWORD="eip_app_dev_pw" \
+    EIP_MIGRATOR_DB_USER="$POSTGRES_USER" EIP_MIGRATOR_DB_PASSWORD="$POSTGRES_PASSWORD" \
+    EIP_OTLP_TRACES_ENDPOINT="http://localhost:${OTLP_HTTP_PORT}/v1/traces" \
+    SERVER_PORT="$BACKEND_PORT" SPRING_PROFILES_ACTIVE="$SPRING_PROFILE" \
+    nohup java -jar "$JAR" >"$STATE_DIR/backend.log" 2>&1 &
+fi
 echo $! >"$STATE_DIR/backend.pid"
 BACKEND_URL="http://localhost:${BACKEND_PORT}"
 printf "    waiting for the API"
@@ -229,6 +289,16 @@ if [ "$CORE_ONLY" -ne 1 ]; then
   PROM="     Prometheus   http://localhost:${PROMETHEUS_PORT}"
   OTELL="     OTel OTLP    grpc :${OTLP_GRPC_PORT} · http :${OTLP_HTTP_PORT}"
 fi
+PREPROD_SECRETS_MSG=""
+POSTGRES_SUMMARY="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:${POSTGRES_PORT}/${POSTGRES_DB}   (app role: eip_app, RLS enforced)"
+if [ "$EIP_ENV" = "preprod" ]; then
+  PREPROD_SECRETS_MSG="     Secrets      ${PREPROD_SECRETS_FILE}   (ephemeral rehearsal secrets, generated
+                  locally — never printed; NOT for a real prod deployment, which must supply its
+                  own via config/environments/prod.env / your secret manager)"
+  # the eip_app/migrator role passwords were rotated to the generated secrets above — the compose
+  # superuser password captured in $POSTGRES_PASSWORD no longer matches, so never print it here.
+  POSTGRES_SUMMARY="postgresql://${POSTGRES_USER}@localhost:${POSTGRES_PORT}/${POSTGRES_DB}   (app role: eip_app, RLS enforced; password rotated — see ${PREPROD_SECRETS_FILE})"
+fi
 cat <<EOF
 
   ══════════════════════════════════════════════════════════════════════════════
@@ -244,7 +314,7 @@ $( [ "$SEEDED" = "1" ] && cat <<SEEDEOF
        curl -H "X-EIP-Tenant: ${DEMO_TENANT_ID}" ${BACKEND_URL}/api/v1/friction/summary
 SEEDEOF
 )
-     PostgreSQL   postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:${POSTGRES_PORT}/${POSTGRES_DB}   (app role: eip_app, RLS enforced)
+     PostgreSQL   ${POSTGRES_SUMMARY}
      Redis        redis://localhost:${REDIS_PORT}
      Kafka        localhost:${KAFKA_PORT}
      MinIO        http://localhost:${MINIO_CONSOLE_PORT}   (eip_minio / eip_minio_dev_pw)
@@ -257,6 +327,7 @@ SEEDEOF
 ${OTELL}
 ${PROM}
 ${GRAF}
+${PREPROD_SECRETS_MSG}
 
      Stop:        ./scripts/install/stop.sh        (keeps data)
      Uninstall:   ./scripts/install/uninstall.sh   (DESTRUCTIVE: removes volumes)

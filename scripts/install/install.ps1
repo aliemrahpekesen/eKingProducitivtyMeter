@@ -25,10 +25,15 @@ Set-Location $Root
 
 if ($Env -eq 'prod') {
   Write-Host @'
-  X prod is configuration-complete but INTENTIONALLY not bootable in this release.
-    OIDC tenant resolution is not implemented yet (DEBT-012); ProductionTenantResolutionGuard
-    refuses startup so the dev header tenant resolver can never serve production traffic.
-    Use -Env preprod for a production rehearsal, or dev/test for seeded environments.
+  X prod is configuration-complete (OIDC + RBAC have landed, DEBT-012) but this one-command LOCAL
+    installer intentionally refuses -Env prod outright - a real prod deployment replaces every
+    CHANGE_ME (DB credentials, EIP_OIDC_ISSUER) via its secret manager and enterprise IdP, which is
+    not this script's job. Use -Env preprod for a production rehearsal: ProductionSecretsGuard
+    (DEBT-005) requires real, non-fixture EIP_APP_DB_PASSWORD / EIP_MIGRATOR_DB_PASSWORD /
+    EIP_SECRETS_MASTER_KEY as well as a real EIP_OIDC_ISSUER - this script now generates and
+    persists ephemeral DB/master-key secrets for you on first -Env preprod run (DEBT-022; see
+    .install/preprod.secrets.env), but you must still supply a real, non-CHANGE_ME EIP_OIDC_ISSUER
+    yourself - see config/environments/preprod.env. Use dev/test for seeded environments.
 '@
   exit 2
 }
@@ -153,6 +158,52 @@ Write-Host '==> [4/8] Provisioning the RLS role (eip_app, NOBYPASSRLS)...'
 Get-Content 'infra/docker-compose/postgres/demo-roles.sql' -Raw |
   & docker @ComposeArgs exec -T postgres psql -v ON_ERROR_STOP=1 -U $PgUser -d $PgDb | Out-Null
 
+# preprod (DEBT-022): ProductionSecretsGuard refuses prod/preprod boot while EIP_APP_DB_PASSWORD /
+# EIP_MIGRATOR_DB_PASSWORD / EIP_SECRETS_MASTER_KEY are blank, CHANGE_ME, or a known dev-fixture
+# value - which is exactly what dev/test intentionally inject below. So for a preprod rehearsal
+# only, generate REAL ephemeral secrets on first run, persist them to a gitignored state file so a
+# later stop/start reuses the same values instead of rotating credentials under a running install,
+# and apply the generated passwords to the actual Postgres roles (dev/test are unaffected).
+$AppDbPassword = 'eip_app_dev_pw'
+$MigratorDbPassword = $PgPassword
+$PreprodSecretsMasterKey = ''
+$PreprodSecretsFile = "$StateDir/preprod.secrets.env"
+if ($Env -eq 'preprod') {
+  Write-Host '==> [4b/8] Provisioning ephemeral preprod secrets...'
+  function New-Secret {
+    # 32 random bytes, base64 - same shape as EipSecretsProperties.DEV_ONLY_MASTER_KEY
+    if (Get-Command openssl -ErrorAction SilentlyContinue) {
+      return (& openssl rand -base64 32).Trim()
+    }
+    $bytes = New-Object byte[](32)
+    [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+    return [Convert]::ToBase64String($bytes)
+  }
+  if (Test-Path $PreprodSecretsFile) {
+    $secretsConf = Read-EnvFile $PreprodSecretsFile
+    $EipAppDbPassword = $secretsConf['EIP_APP_DB_PASSWORD']
+    $EipMigratorDbPassword = $secretsConf['EIP_MIGRATOR_DB_PASSWORD']
+    $EipSecretsMasterKey = $secretsConf['EIP_SECRETS_MASTER_KEY']
+  } else {
+    $EipAppDbPassword = New-Secret
+    $EipMigratorDbPassword = New-Secret
+    $EipSecretsMasterKey = New-Secret
+    @(
+      "EIP_APP_DB_PASSWORD=$EipAppDbPassword",
+      "EIP_MIGRATOR_DB_PASSWORD=$EipMigratorDbPassword",
+      "EIP_SECRETS_MASTER_KEY=$EipSecretsMasterKey"
+    ) | Out-File $PreprodSecretsFile -Encoding ascii
+  }
+  $AppDbPassword = $EipAppDbPassword
+  $MigratorDbPassword = $EipMigratorDbPassword
+  $PreprodSecretsMasterKey = $EipSecretsMasterKey
+  & docker @ComposeArgs exec -T postgres psql -v ON_ERROR_STOP=1 -U $PgUser -d $PgDb `
+    -c "ALTER ROLE eip_app WITH PASSWORD '$AppDbPassword';" | Out-Null
+  & docker @ComposeArgs exec -T postgres psql -v ON_ERROR_STOP=1 -U $PgUser -d $PgDb `
+    -c "ALTER ROLE $PgUser WITH PASSWORD '$MigratorDbPassword';" | Out-Null
+  Write-Host "    OK: ephemeral secrets ready - $PreprodSecretsFile (values never printed)"
+}
+
 # --- [5/8] backend ------------------------------------------------------------------------------
 Write-Host "==> [5/8] Building + starting eip-app (profile: $SpringProfile) on :$BackendPort..."
 Push-Location backend
@@ -163,13 +214,14 @@ $Jar = Get-ChildItem 'backend/eip-app/build/libs/*.jar' | Where-Object { $_.Name
 $backendEnv = @{
   EIP_DB_URL                 = "jdbc:postgresql://localhost:$PgPort/$PgDb"
   EIP_APP_DB_USER            = 'eip_app'
-  EIP_APP_DB_PASSWORD        = 'eip_app_dev_pw'
+  EIP_APP_DB_PASSWORD        = $AppDbPassword
   EIP_MIGRATOR_DB_USER       = $PgUser
-  EIP_MIGRATOR_DB_PASSWORD   = $PgPassword
+  EIP_MIGRATOR_DB_PASSWORD   = $MigratorDbPassword
   EIP_OTLP_TRACES_ENDPOINT   = "http://localhost:$(Get-Conf 'OTLP_HTTP_PORT' '4318')/v1/traces"
   SERVER_PORT                = $BackendPort
   SPRING_PROFILES_ACTIVE     = $SpringProfile
 }
+if ($Env -eq 'preprod') { $backendEnv['EIP_SECRETS_MASTER_KEY'] = $PreprodSecretsMasterKey }
 foreach ($kv in $backendEnv.GetEnumerator()) { [Environment]::SetEnvironmentVariable($kv.Key, $kv.Value) }
 $backend = Start-Process -FilePath 'java' -ArgumentList @('-jar', $Jar.FullName) `
   -RedirectStandardOutput "$StateDir/backend.log" -RedirectStandardError "$StateDir/backend.err.log" -PassThru -WindowStyle Hidden
@@ -248,6 +300,11 @@ Write-Host "     MinIO        http://localhost:$(Get-Conf 'MINIO_CONSOLE_PORT' '
 if (-not $CoreOnly) {
   Write-Host "     Prometheus   http://localhost:$(Get-Conf 'PROMETHEUS_PORT' '9090')"
   Write-Host "     Grafana      http://localhost:$(Get-Conf 'GRAFANA_PORT' '3001')   (admin / admin_dev_pw)"
+}
+if ($Env -eq 'preprod') {
+  Write-Host "     Secrets      $PreprodSecretsFile   (ephemeral rehearsal secrets, generated locally"
+  Write-Host '                  - never printed; NOT for a real prod deployment, which must supply its'
+  Write-Host '                  own via config/environments/prod.env / your secret manager)'
 }
 Write-Host ''
 Write-Host '     Stop:        .\scripts\install\stop.ps1        (keeps data)'
