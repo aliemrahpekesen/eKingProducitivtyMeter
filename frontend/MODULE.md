@@ -10,7 +10,7 @@ Single-page admin console and dashboards for EIP. Authoritative structure: [Fron
 
 ## Layout (current)
 
-- `src/api` — `types.ts` (hand-written to mirror the committed OpenAPI contract exactly — the CI-generated `src/api/generated` client is deferred, [DEBT-016](../work/debt-register.md)), `client.ts` (fetch + `X-EIP-Tenant` + problem+json), `hooks.ts` (TanStack Query).
+- `src/api` — `generated.ts` (openapi-typescript output, generated from the committed `backend/eip-app/openapi/eip-openapi-v1.json` snapshot; never hand-edited), `types.ts` (thin re-export of `generated.ts`'s `components['schemas']` under this codebase's established names — see the file header for the full mapping and the handful of documented field-level overrides), `client.ts` (fetch + `X-EIP-Tenant` + problem+json), `hooks.ts` (TanStack Query). API types are generated via `pnpm generate:api` — never hand-edit `src/api/generated.ts` or the re-exports in `src/api/types.ts`; CI's `generate:api:check` step fails the build on drift ([DEBT-016](../work/debt-register.md) resolved for the frontend codegen pipeline).
 - `src/app` — shell (`App.tsx`), TanStack Query + dev tenant providers (`TenantProvider`/`tenantContext`).
 - `src/components` — `SessionCard`, `ConnectorList` (cursor-paginated), `FrictionCard` (hero + metric explainer), `DemoBanner`/`DemoBadge`, `states`, `TenantBar`.
 - `src/lib`, `src/test`, `src/styles.css`. Target additions (`src/design`, `src/features`, `src/forms`, `src/i18n`, `e2e`) land in later phases per FrontendPlan §12.
@@ -24,7 +24,7 @@ Single-page admin console and dashboards for EIP. Authoritative structure: [Fron
 ## Invariants
 
 - `strict: true`; no `any`, no `@ts-ignore` ([CodingStandards §4](../engineering-operating-system/CodingStandards.md)).
-- API types mirror the committed OpenAPI contract and add no field the contract does not define; server state lives in TanStack Query only ([FrontendPlan §12](../docs/engineering/FrontendPlan.md)). The CI-generated OpenAPI client replaces the hand-written types — [DEBT-016](../work/debt-register.md).
+- API types are generated from the committed OpenAPI contract (`pnpm generate:api`, CI-checked for drift) and add no field the contract does not define; server state lives in TanStack Query only ([FrontendPlan §12](../docs/engineering/FrontendPlan.md)).
 - `pnpm` is the only package manager; the lockfile is committed ([CodingStandards §8](../engineering-operating-system/CodingStandards.md)).
 - Formatting is Prettier (`format:check` in CI, G1); no auth/tenant trust beyond the dev `X-EIP-Tenant` header (replaced by OIDC in SPRINT-02).
 
