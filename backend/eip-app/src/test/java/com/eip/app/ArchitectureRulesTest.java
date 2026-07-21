@@ -63,7 +63,11 @@ class ArchitectureRulesTest {
             // @RequiresPermission/@PermissionExempt (annotations, not logic) and the pure
             // Permission enum they reference — is a controller-layer concern like any other DTO.
             "com.eip.app.security..",
-            "com.eip.tenancy.rbac..")
+            "com.eip.tenancy.rbac..",
+            // DEBT-011: springdoc's OpenAPI annotations (@ApiResponse(s)/@Content/@Schema) document
+            // per-endpoint error responses declaratively, exactly like @RequiresPermission above —
+            // metadata read by the OpenAPI generator, never business logic the controller executes.
+            "io.swagger.v3.oas.annotations..")
         .because("controllers call application/query ports and return API DTOs, nothing else")
         .check(CLASSES);
   }

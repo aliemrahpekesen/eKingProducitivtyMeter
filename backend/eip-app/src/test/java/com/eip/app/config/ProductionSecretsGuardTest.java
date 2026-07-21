@@ -23,6 +23,8 @@ class ProductionSecretsGuardTest {
   private static final String REAL_APP_PASSWORD = "S3cure-Pr0d-App-Pw!";
   private static final String REAL_MIGRATOR_PASSWORD = "S3cure-Pr0d-Migrator-Pw!";
   private static final String REAL_MASTER_KEY = "cHJvZC1yZWFsLW1hc3Rlci1rZXktMzItYnl0ZXMtbG9uZyE=";
+  private static final String REAL_CURSOR_SIGNING_KEY =
+      "cHJvZC1yZWFsLWN1cnNvci1zaWduaW5nLWtleS0zMi1ieXRlcyE=";
 
   private final ProductionSecretsGuard guard = new ProductionSecretsGuard();
   private final SpringApplication application = new SpringApplication();
@@ -33,6 +35,7 @@ class ProductionSecretsGuardTest {
     environment.setProperty("EIP_APP_DB_PASSWORD", REAL_APP_PASSWORD);
     environment.setProperty("EIP_MIGRATOR_DB_PASSWORD", REAL_MIGRATOR_PASSWORD);
     environment.setProperty("EIP_SECRETS_MASTER_KEY", REAL_MASTER_KEY);
+    environment.setProperty("EIP_API_CURSOR_SIGNING_KEY", REAL_CURSOR_SIGNING_KEY);
     return environment;
   }
 
@@ -68,6 +71,17 @@ class ProductionSecretsGuardTest {
     assertThatThrownBy(() -> guard.postProcessEnvironment(environment, application))
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("EIP_SECRETS_MASTER_KEY");
+  }
+
+  @Test
+  void prod_with_the_dev_only_cursor_signing_key_fixture_fails() {
+    MockEnvironment environment = withAllRealSecrets("prod");
+    environment.setProperty(
+        "EIP_API_CURSOR_SIGNING_KEY", ApiCursorSigningProperties.DEV_ONLY_CURSOR_SIGNING_KEY);
+
+    assertThatThrownBy(() -> guard.postProcessEnvironment(environment, application))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("EIP_API_CURSOR_SIGNING_KEY");
   }
 
   @Test
@@ -127,6 +141,8 @@ class ProductionSecretsGuardTest {
       environment.setProperty("EIP_APP_DB_PASSWORD", "eip_app_dev_pw");
       environment.setProperty("EIP_MIGRATOR_DB_PASSWORD", "eip_dev_pw");
       environment.setProperty("EIP_SECRETS_MASTER_KEY", EipSecretsProperties.DEV_ONLY_MASTER_KEY);
+      environment.setProperty(
+          "EIP_API_CURSOR_SIGNING_KEY", ApiCursorSigningProperties.DEV_ONLY_CURSOR_SIGNING_KEY);
 
       assertThatCode(() -> guard.postProcessEnvironment(environment, application))
           .doesNotThrowAnyException();
@@ -139,6 +155,8 @@ class ProductionSecretsGuardTest {
     environment.setProperty("EIP_APP_DB_PASSWORD", "eip_app_dev_pw");
     environment.setProperty("EIP_MIGRATOR_DB_PASSWORD", "eip_dev_pw");
     environment.setProperty("EIP_SECRETS_MASTER_KEY", "CHANGE_ME");
+    environment.setProperty(
+        "EIP_API_CURSOR_SIGNING_KEY", ApiCursorSigningProperties.DEV_ONLY_CURSOR_SIGNING_KEY);
 
     assertThatThrownBy(() -> guard.postProcessEnvironment(environment, application))
         .isInstanceOf(IllegalStateException.class)
@@ -149,6 +167,7 @@ class ProductionSecretsGuardTest {
                   .contains("EIP_APP_DB_PASSWORD")
                   .contains("EIP_MIGRATOR_DB_PASSWORD")
                   .contains("EIP_SECRETS_MASTER_KEY")
+                  .contains("EIP_API_CURSOR_SIGNING_KEY")
                   .doesNotContain("eip_app_dev_pw")
                   .doesNotContain("eip_dev_pw");
             });

@@ -6,7 +6,12 @@ package com.eip.app.api;
 
 import com.eip.app.application.TriggerWebhookSyncUseCase;
 import com.eip.app.application.TriggerWebhookSyncUseCase.WebhookOutcome;
+import com.eip.app.config.OpenApiConfig;
 import com.eip.app.security.PermissionExempt;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpStatus;
@@ -37,6 +42,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class WebhookController {
 
   private static final String TOKEN_HEADER = "X-EIP-Webhook-Token";
+  private static final String PROBLEM_REF = "#/components/schemas/" + OpenApiConfig.PROBLEM_SCHEMA;
 
   private final TriggerWebhookSyncUseCase webhooks;
 
@@ -56,6 +62,30 @@ public class WebhookController {
    */
   @PostMapping("/{tenantId}/{connectorId}")
   @PermissionExempt
+  @ApiResponses({
+    @ApiResponse(
+        responseCode = "202",
+        description = "Accepted and dispatched, or debounced (a trigger arrived moments ago).",
+        content =
+            @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = WebhookStatusView.class))),
+    @ApiResponse(
+        responseCode = "401",
+        description = "The X-EIP-Webhook-Token header is missing or does not match the connector.",
+        content =
+            @Content(mediaType = "application/problem+json", schema = @Schema(ref = PROBLEM_REF))),
+    @ApiResponse(
+        responseCode = "404",
+        description = "No connector with this id exists for this tenant.",
+        content =
+            @Content(mediaType = "application/problem+json", schema = @Schema(ref = PROBLEM_REF))),
+    @ApiResponse(
+        responseCode = "429",
+        description = "This connector is throttled after too many rejected attempts; retry later.",
+        content =
+            @Content(mediaType = "application/problem+json", schema = @Schema(ref = PROBLEM_REF))),
+  })
   public ResponseEntity<Object> trigger(
       @PathVariable UUID tenantId,
       @PathVariable UUID connectorId,

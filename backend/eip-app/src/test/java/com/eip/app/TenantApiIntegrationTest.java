@@ -5,6 +5,7 @@
 package com.eip.app;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.matchesPattern;
 import static org.hamcrest.Matchers.not;
@@ -94,10 +95,15 @@ class TenantApiIntegrationTest {
       st.execute(insertOrg(orgB, tenantB, "Org B", "org-b"));
       // Tenant A gets three connectors (deterministic name order A < B < C) to exercise paging;
       // tenant B gets one, so cross-tenant isolation is a strong discriminator (3 vs 1, not 1 vs
-      // 1).
-      st.execute(insertConnector(tenantA, "jira", "A Jira (simulation)"));
-      st.execute(insertConnector(tenantA, "bitbucket", "B Bitbucket (simulation)"));
-      st.execute(insertConnector(tenantA, "sonarqube", "C Sonar (simulation)"));
+      // 1). created_at is set in the REVERSE of name order (A newest, C oldest) so a
+      // `sort=createdAt`
+      // request proves it actually reorders results rather than coincidentally matching name order.
+      st.execute(insertConnector(tenantA, "jira", "A Jira (simulation)", "2024-01-03T00:00:00Z"));
+      st.execute(
+          insertConnector(
+              tenantA, "bitbucket", "B Bitbucket (simulation)", "2024-01-02T00:00:00Z"));
+      st.execute(
+          insertConnector(tenantA, "sonarqube", "C Sonar (simulation)", "2024-01-01T00:00:00Z"));
       st.execute(insertConnector(tenantB, "bitbucket", "Bitbucket B (simulation)"));
 
       // Engineering Friction: each tenant gets its own business unit + friction definition + teams.
@@ -187,6 +193,92 @@ class TenantApiIntegrationTest {
         .andExpect(status().isBadRequest())
         .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
         .andExpect(jsonPath("$.title").value("Invalid cursor"));
+  }
+
+  @Test
+  void connectors_endpoint_honors_every_whitelisted_sort_value() throws Exception {
+    // Default (sort omitted) and explicit "name" both order ascending by name: A, B, C.
+    mvc.perform(get("/api/v1/connectors").header(HeaderTenantResolver.HEADER, tenantA.toString()))
+        .andExpect(jsonPath("$.items[0].name").value("A Jira (simulation)"))
+        .andExpect(jsonPath("$.items[2].name").value("C Sonar (simulation)"));
+    mvc.perform(
+            get("/api/v1/connectors")
+                .param("sort", "name")
+                .header(HeaderTenantResolver.HEADER, tenantA.toString()))
+        .andExpect(jsonPath("$.items[0].name").value("A Jira (simulation)"))
+        .andExpect(jsonPath("$.items[2].name").value("C Sonar (simulation)"));
+
+    // -name: descending by name, C, B, A.
+    mvc.perform(
+            get("/api/v1/connectors")
+                .param("sort", "-name")
+                .header(HeaderTenantResolver.HEADER, tenantA.toString()))
+        .andExpect(jsonPath("$.items[0].name").value("C Sonar (simulation)"))
+        .andExpect(jsonPath("$.items[2].name").value("A Jira (simulation)"));
+
+    // createdAt: ascending by created_at, which is the REVERSE of name order (seed data) — C, B, A.
+    mvc.perform(
+            get("/api/v1/connectors")
+                .param("sort", "createdAt")
+                .header(HeaderTenantResolver.HEADER, tenantA.toString()))
+        .andExpect(jsonPath("$.items[0].name").value("C Sonar (simulation)"))
+        .andExpect(jsonPath("$.items[2].name").value("A Jira (simulation)"));
+
+    // -createdAt: descending by created_at, so back to name order — A, B, C.
+    mvc.perform(
+            get("/api/v1/connectors")
+                .param("sort", "-createdAt")
+                .header(HeaderTenantResolver.HEADER, tenantA.toString()))
+        .andExpect(jsonPath("$.items[0].name").value("A Jira (simulation)"))
+        .andExpect(jsonPath("$.items[2].name").value("C Sonar (simulation)"));
+  }
+
+  @Test
+  void connectors_endpoint_rejects_an_unknown_sort_value() throws Exception {
+    mvc.perform(
+            get("/api/v1/connectors")
+                .param("sort", "bogus")
+                .header(HeaderTenantResolver.HEADER, tenantA.toString()))
+        .andExpect(status().isBadRequest())
+        .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+        .andExpect(jsonPath("$.detail").value(containsString("bogus")))
+        .andExpect(jsonPath("$.detail").value(containsString("createdAt")));
+  }
+
+  @Test
+  void connectors_endpoint_rejects_a_cursor_whose_sort_does_not_match_the_request()
+      throws Exception {
+    String page1 =
+        mvc.perform(
+                get("/api/v1/connectors")
+                    .param("limit", "2")
+                    .param("sort", "-name")
+                    .header(HeaderTenantResolver.HEADER, tenantA.toString()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.hasMore").value(true))
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+    String cursor = JsonPath.read(page1, "$.nextCursor");
+
+    // The cursor was issued under sort=-name; requesting page 2 with a different sort is a 400.
+    mvc.perform(
+            get("/api/v1/connectors")
+                .param("limit", "2")
+                .param("cursor", cursor)
+                .param("sort", "name")
+                .header(HeaderTenantResolver.HEADER, tenantA.toString()))
+        .andExpect(status().isBadRequest())
+        .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+
+    // The same cursor with the ORIGINAL sort still works.
+    mvc.perform(
+            get("/api/v1/connectors")
+                .param("limit", "2")
+                .param("cursor", cursor)
+                .param("sort", "-name")
+                .header(HeaderTenantResolver.HEADER, tenantA.toString()))
+        .andExpect(status().isOk());
   }
 
   @Test
@@ -419,6 +511,24 @@ class TenantApiIntegrationTest {
         + "', '"
         + name
         + "', 'REGISTERED', true)";
+  }
+
+  /**
+   * Same as {@link #insertConnector(UUID, String, String)}, with an explicit {@code created_at}.
+   */
+  private static String insertConnector(UUID tenantId, String type, String name, String createdAt) {
+    return "INSERT INTO core.connector (id, tenant_id, type, name, status, simulation, created_at) "
+        + "VALUES ('"
+        + UUID.randomUUID()
+        + "', '"
+        + tenantId
+        + "', '"
+        + type
+        + "', '"
+        + name
+        + "', 'REGISTERED', true, '"
+        + createdAt
+        + "')";
   }
 
   private static String insertBusinessUnit(UUID id, UUID tenantId, UUID orgId, String name) {

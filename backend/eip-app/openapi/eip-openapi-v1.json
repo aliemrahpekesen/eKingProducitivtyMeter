@@ -24,6 +24,44 @@
                 }
               }
             }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -47,6 +85,63 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/AiPolicyView"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Request validation failed (bad param, cursor, or sort).",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/validation" : {
+                    "value" : {
+                      "title" : "Request validation failed (bad param, cursor, or sort).",
+                      "type" : "/problems/validation",
+                      "status" : 400
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
+                  }
                 }
               }
             }
@@ -92,12 +187,61 @@
           }
         },
         "responses" : {
-          "200" : {
-            "description" : "OK",
+          "202" : {
+            "description" : "Accepted and dispatched, or debounced (a trigger arrived moments ago).",
             "content" : {
-              "*/*" : {
+              "application/json" : {
                 "schema" : {
-                  "type" : "object"
+                  "$ref" : "#/components/schemas/WebhookStatusView"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "No connector with this id exists for this tenant.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "The X-EIP-Webhook-Token header is missing or does not match the connector.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "429" : {
+            "description" : "This connector is throttled after too many rejected attempts; retry later.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Request validation failed (bad param, cursor, or sort).",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/validation" : {
+                    "value" : {
+                      "title" : "Request validation failed (bad param, cursor, or sort).",
+                      "type" : "/problems/validation",
+                      "status" : 400
+                    }
+                  }
                 }
               }
             }
@@ -136,6 +280,63 @@
                 }
               }
             }
+          },
+          "400" : {
+            "description" : "Request validation failed (bad param, cursor, or sort).",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/validation" : {
+                    "value" : {
+                      "title" : "Request validation failed (bad param, cursor, or sort).",
+                      "type" : "/problems/validation",
+                      "status" : 400
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -162,6 +363,63 @@
                 }
               }
             }
+          },
+          "400" : {
+            "description" : "Request validation failed (bad param, cursor, or sort).",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/validation" : {
+                    "value" : {
+                      "title" : "Request validation failed (bad param, cursor, or sort).",
+                      "type" : "/problems/validation",
+                      "status" : 400
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -180,12 +438,108 @@
           }
         } ],
         "responses" : {
+          "409" : {
+            "description" : "AI explanations are not enabled for this tenant (ADR-024, opt-in).",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
           "200" : {
             "description" : "OK",
             "content" : {
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ExplanationView"
+                }
+              }
+            }
+          },
+          "502" : {
+            "description" : "The configured LLM provider was unreachable/timed out, or the generated narrative failed numeric verification and was discarded.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Request validation failed (bad param, cursor, or sort).",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/validation" : {
+                    "value" : {
+                      "title" : "Request validation failed (bad param, cursor, or sort).",
+                      "type" : "/problems/validation",
+                      "status" : 400
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "The requested resource does not exist.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/not-found" : {
+                    "value" : {
+                      "title" : "The requested resource does not exist.",
+                      "type" : "/problems/not-found",
+                      "status" : 404
+                    }
+                  }
                 }
               }
             }
@@ -208,12 +562,89 @@
           "required" : true
         },
         "responses" : {
+          "409" : {
+            "description" : "AI explanations are not enabled for this tenant (ADR-024, opt-in).",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "502" : {
+            "description" : "The configured LLM provider was unreachable, timed out, or rejected.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
           "200" : {
             "description" : "OK",
             "content" : {
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ExplanationView"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Request validation failed (bad param, cursor, or sort).",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/validation" : {
+                    "value" : {
+                      "title" : "Request validation failed (bad param, cursor, or sort).",
+                      "type" : "/problems/validation",
+                      "status" : 400
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
+                  }
                 }
               }
             }
@@ -234,6 +665,44 @@
                   "type" : "array",
                   "items" : {
                     "$ref" : "#/components/schemas/TenantView"
+                  }
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
                   }
                 }
               }
@@ -261,6 +730,63 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/TenantView"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Request validation failed (bad param, cursor, or sort).",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/validation" : {
+                    "value" : {
+                      "title" : "Request validation failed (bad param, cursor, or sort).",
+                      "type" : "/problems/validation",
+                      "status" : 400
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
+                  }
                 }
               }
             }
@@ -296,6 +822,63 @@
                 }
               }
             }
+          },
+          "400" : {
+            "description" : "Request validation failed (bad param, cursor, or sort).",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/validation" : {
+                    "value" : {
+                      "title" : "Request validation failed (bad param, cursor, or sort).",
+                      "type" : "/problems/validation",
+                      "status" : 400
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -313,6 +896,44 @@
                   "type" : "array",
                   "items" : {
                     "$ref" : "#/components/schemas/ServiceTokenView"
+                  }
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
                   }
                 }
               }
@@ -343,6 +964,63 @@
                 }
               }
             }
+          },
+          "400" : {
+            "description" : "Request validation failed (bad param, cursor, or sort).",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/validation" : {
+                    "value" : {
+                      "title" : "Request validation failed (bad param, cursor, or sort).",
+                      "type" : "/problems/validation",
+                      "status" : 400
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -358,6 +1036,44 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/PipelineResult"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
+                  }
                 }
               }
             }
@@ -393,6 +1109,63 @@
                 }
               }
             }
+          },
+          "400" : {
+            "description" : "Request validation failed (bad param, cursor, or sort).",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/validation" : {
+                    "value" : {
+                      "title" : "Request validation failed (bad param, cursor, or sort).",
+                      "type" : "/problems/validation",
+                      "status" : 400
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -410,6 +1183,44 @@
                   "type" : "array",
                   "items" : {
                     "$ref" : "#/components/schemas/ConnectorAdminView"
+                  }
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
                   }
                 }
               }
@@ -440,6 +1251,63 @@
                 }
               }
             }
+          },
+          "400" : {
+            "description" : "Request validation failed (bad param, cursor, or sort).",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/validation" : {
+                    "value" : {
+                      "title" : "Request validation failed (bad param, cursor, or sort).",
+                      "type" : "/problems/validation",
+                      "status" : 400
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -467,6 +1335,82 @@
                 }
               }
             }
+          },
+          "400" : {
+            "description" : "Request validation failed (bad param, cursor, or sort).",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/validation" : {
+                    "value" : {
+                      "title" : "Request validation failed (bad param, cursor, or sort).",
+                      "type" : "/problems/validation",
+                      "status" : 400
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "The requested resource does not exist.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/not-found" : {
+                    "value" : {
+                      "title" : "The requested resource does not exist.",
+                      "type" : "/problems/not-found",
+                      "status" : 404
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -491,6 +1435,92 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/PipelineResult"
+                }
+              }
+            }
+          },
+          "502" : {
+            "description" : "The sync failed against the upstream source (unreachable/auth/non-2xx).",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Request validation failed (bad param, cursor, or sort).",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/validation" : {
+                    "value" : {
+                      "title" : "Request validation failed (bad param, cursor, or sort).",
+                      "type" : "/problems/validation",
+                      "status" : 400
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "The requested resource does not exist.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/not-found" : {
+                    "value" : {
+                      "title" : "The requested resource does not exist.",
+                      "type" : "/problems/not-found",
+                      "status" : 404
+                    }
+                  }
                 }
               }
             }
@@ -531,6 +1561,82 @@
                 }
               }
             }
+          },
+          "400" : {
+            "description" : "Request validation failed (bad param, cursor, or sort).",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/validation" : {
+                    "value" : {
+                      "title" : "Request validation failed (bad param, cursor, or sort).",
+                      "type" : "/problems/validation",
+                      "status" : 400
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "The requested resource does not exist.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/not-found" : {
+                    "value" : {
+                      "title" : "The requested resource does not exist.",
+                      "type" : "/problems/not-found",
+                      "status" : 404
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -563,6 +1669,63 @@
                 }
               }
             }
+          },
+          "400" : {
+            "description" : "Request validation failed (bad param, cursor, or sort).",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/validation" : {
+                    "value" : {
+                      "title" : "Request validation failed (bad param, cursor, or sort).",
+                      "type" : "/problems/validation",
+                      "status" : 400
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -578,6 +1741,44 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/SessionView"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
+                  }
                 }
               }
             }
@@ -626,6 +1827,82 @@
                 }
               }
             }
+          },
+          "400" : {
+            "description" : "Request validation failed (bad param, cursor, or sort).",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/validation" : {
+                    "value" : {
+                      "title" : "Request validation failed (bad param, cursor, or sort).",
+                      "type" : "/problems/validation",
+                      "status" : 400
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "The requested resource does not exist.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/not-found" : {
+                    "value" : {
+                      "title" : "The requested resource does not exist.",
+                      "type" : "/problems/not-found",
+                      "status" : 404
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -650,6 +1927,82 @@
               "*/*" : {
                 "schema" : {
                   "type" : "string"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Request validation failed (bad param, cursor, or sort).",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/validation" : {
+                    "value" : {
+                      "title" : "Request validation failed (bad param, cursor, or sort).",
+                      "type" : "/problems/validation",
+                      "status" : 400
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "The requested resource does not exist.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/not-found" : {
+                    "value" : {
+                      "title" : "The requested resource does not exist.",
+                      "type" : "/problems/not-found",
+                      "status" : 404
+                    }
+                  }
                 }
               }
             }
@@ -681,6 +2034,63 @@
                 }
               }
             }
+          },
+          "400" : {
+            "description" : "Request validation failed (bad param, cursor, or sort).",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/validation" : {
+                    "value" : {
+                      "title" : "Request validation failed (bad param, cursor, or sort).",
+                      "type" : "/problems/validation",
+                      "status" : 400
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -702,6 +2112,44 @@
                 }
               }
             }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -719,6 +2167,44 @@
                   "type" : "array",
                   "items" : {
                     "$ref" : "#/components/schemas/TeamRecommendationsView"
+                  }
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
                   }
                 }
               }
@@ -750,6 +2236,82 @@
                 }
               }
             }
+          },
+          "400" : {
+            "description" : "Request validation failed (bad param, cursor, or sort).",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/validation" : {
+                    "value" : {
+                      "title" : "Request validation failed (bad param, cursor, or sort).",
+                      "type" : "/problems/validation",
+                      "status" : 400
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "The requested resource does not exist.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/not-found" : {
+                    "value" : {
+                      "title" : "The requested resource does not exist.",
+                      "type" : "/problems/not-found",
+                      "status" : 404
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -765,6 +2327,44 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/FrictionSummaryView"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
+                  }
                 }
               }
             }
@@ -792,6 +2392,13 @@
             "format" : "int32",
             "default" : 50
           }
+        }, {
+          "name" : "sort",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
         } ],
         "responses" : {
           "200" : {
@@ -800,6 +2407,63 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/PageViewConnectorView"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Request validation failed (bad param, cursor, or sort).",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/validation" : {
+                    "value" : {
+                      "title" : "Request validation failed (bad param, cursor, or sort).",
+                      "type" : "/problems/validation",
+                      "status" : 400
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
+                  }
                 }
               }
             }
@@ -830,6 +2494,82 @@
                 }
               }
             }
+          },
+          "400" : {
+            "description" : "Request validation failed (bad param, cursor, or sort).",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/validation" : {
+                    "value" : {
+                      "title" : "Request validation failed (bad param, cursor, or sort).",
+                      "type" : "/problems/validation",
+                      "status" : 400
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "The requested resource does not exist.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/not-found" : {
+                    "value" : {
+                      "title" : "The requested resource does not exist.",
+                      "type" : "/problems/not-found",
+                      "status" : 404
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -845,6 +2585,44 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/AiStatusResponse"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
+                  }
                 }
               }
             }
@@ -865,6 +2643,44 @@
                   "type" : "array",
                   "items" : {
                     "$ref" : "#/components/schemas/OrganizationView"
+                  }
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
                   }
                 }
               }
@@ -890,6 +2706,44 @@
                 }
               }
             }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -910,6 +2764,82 @@
         "responses" : {
           "204" : {
             "description" : "No Content"
+          },
+          "400" : {
+            "description" : "Request validation failed (bad param, cursor, or sort).",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/validation" : {
+                    "value" : {
+                      "title" : "Request validation failed (bad param, cursor, or sort).",
+                      "type" : "/problems/validation",
+                      "status" : 400
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "title" : "No tenant/caller could be authenticated.",
+                      "type" : "/problems/unauthenticated",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "type" : "/problems/permission-denied",
+                      "status" : 403
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "The requested resource does not exist.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/not-found" : {
+                    "value" : {
+                      "title" : "The requested resource does not exist.",
+                      "type" : "/problems/not-found",
+                      "status" : 404
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -917,6 +2847,32 @@
   },
   "components" : {
     "schemas" : {
+      "ProblemDetail" : {
+        "type" : "object",
+        "properties" : {
+          "type" : {
+            "type" : "string",
+            "format" : "uri"
+          },
+          "title" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "integer"
+          },
+          "detail" : {
+            "type" : "string"
+          },
+          "instance" : {
+            "type" : "string",
+            "format" : "uri"
+          },
+          "traceId" : {
+            "type" : "string",
+            "description" : "OpenTelemetry trace id of the request that produced this error."
+          }
+        }
+      },
       "UpdateAiPolicyRequest" : {
         "type" : "object",
         "properties" : {
@@ -970,6 +2926,14 @@
           "maxTokens" : {
             "type" : "integer",
             "format" : "int32"
+          }
+        }
+      },
+      "WebhookStatusView" : {
+        "type" : "object",
+        "properties" : {
+          "status" : {
+            "type" : "string"
           }
         }
       },

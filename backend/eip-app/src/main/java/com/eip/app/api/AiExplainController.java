@@ -10,6 +10,7 @@ import com.eip.ai.api.NarrateReportUseCase;
 import com.eip.ai.api.ReportNarrativeInput;
 import com.eip.ai.api.ReportNarrativeTeam;
 import com.eip.ai.api.ReportNarrativeTotals;
+import com.eip.app.config.OpenApiConfig;
 import com.eip.app.security.RequiresPermission;
 import com.eip.reports.api.GetReportQuery;
 import com.eip.reports.api.ReportDocument;
@@ -17,6 +18,10 @@ import com.eip.reports.api.ReportDocumentView;
 import com.eip.reports.api.ReportTeamSection;
 import com.eip.reports.api.ReportTotals;
 import com.eip.tenancy.rbac.Permission;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import java.util.UUID;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -39,6 +44,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1")
 public class AiExplainController {
+
+  private static final String PROBLEM_REF = "#/components/schemas/" + OpenApiConfig.PROBLEM_SCHEMA;
 
   private final ExplainInsightsUseCase explain;
   private final NarrateReportUseCase narrate;
@@ -66,6 +73,25 @@ public class AiExplainController {
    */
   @PostMapping("/insights/explain")
   @RequiresPermission(Permission.AI_AGENT_INVOKE)
+  @ApiResponses({
+    // Explicit 200: springdoc does not auto-infer the success response from the return type once
+    // any @ApiResponse is present on the method, so it must be declared alongside the error ones.
+    @ApiResponse(
+        responseCode = "200",
+        description = "OK",
+        content =
+            @Content(mediaType = "*/*", schema = @Schema(implementation = ExplanationView.class))),
+    @ApiResponse(
+        responseCode = "409",
+        description = "AI explanations are not enabled for this tenant (ADR-024, opt-in).",
+        content =
+            @Content(mediaType = "application/problem+json", schema = @Schema(ref = PROBLEM_REF))),
+    @ApiResponse(
+        responseCode = "502",
+        description = "The configured LLM provider was unreachable, timed out, or rejected.",
+        content =
+            @Content(mediaType = "application/problem+json", schema = @Schema(ref = PROBLEM_REF))),
+  })
   public ExplanationView explain(@RequestBody ExplainRequest request) {
     return explain.explain(request.weeks());
   }
@@ -78,6 +104,26 @@ public class AiExplainController {
    */
   @PostMapping("/reports/{id}/narrative")
   @RequiresPermission(Permission.AI_AGENT_INVOKE)
+  @ApiResponses({
+    // Explicit 200 — see explain()'s javadoc comment for why this must be declared explicitly.
+    @ApiResponse(
+        responseCode = "200",
+        description = "OK",
+        content =
+            @Content(mediaType = "*/*", schema = @Schema(implementation = ExplanationView.class))),
+    @ApiResponse(
+        responseCode = "409",
+        description = "AI explanations are not enabled for this tenant (ADR-024, opt-in).",
+        content =
+            @Content(mediaType = "application/problem+json", schema = @Schema(ref = PROBLEM_REF))),
+    @ApiResponse(
+        responseCode = "502",
+        description =
+            "The configured LLM provider was unreachable/timed out, or the generated narrative"
+                + " failed numeric verification and was discarded.",
+        content =
+            @Content(mediaType = "application/problem+json", schema = @Schema(ref = PROBLEM_REF))),
+  })
   public ExplanationView narrative(@PathVariable UUID id) {
     return narrate.narrate(toNarrativeInput(report.get(id)));
   }

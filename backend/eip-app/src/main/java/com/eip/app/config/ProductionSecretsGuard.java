@@ -43,8 +43,8 @@ public class ProductionSecretsGuard implements EnvironmentPostProcessor {
    * operator sets one of {@link #GUARDED_VARS} to something non-blank by mistake: {@code
    * infra/docker-compose/.env.example}'s {@code POSTGRES_PASSWORD}, {@code
    * KEYCLOAK_ADMIN_PASSWORD}, and {@code MINIO_ROOT_PASSWORD}; {@code scripts/install/install.sh}'s
-   * hardcoded local {@code EIP_APP_DB_PASSWORD}; and {@link
-   * EipSecretsProperties#DEV_ONLY_MASTER_KEY}.
+   * hardcoded local {@code EIP_APP_DB_PASSWORD}; {@link EipSecretsProperties#DEV_ONLY_MASTER_KEY};
+   * and {@link ApiCursorSigningProperties#DEV_ONLY_CURSOR_SIGNING_KEY} (DEBT-010).
    */
   static final Set<String> DEV_FIXTURE_VALUES =
       Set.of(
@@ -52,15 +52,21 @@ public class ProductionSecretsGuard implements EnvironmentPostProcessor {
           "eip_app_dev_pw",
           "admin_dev_pw",
           "eip_minio_dev_pw",
-          EipSecretsProperties.DEV_ONLY_MASTER_KEY);
+          EipSecretsProperties.DEV_ONLY_MASTER_KEY,
+          ApiCursorSigningProperties.DEV_ONLY_CURSOR_SIGNING_KEY);
 
   /**
    * Secret-bearing environment variables checked for {@code prod}/{@code preprod} (DEBT-005): the
    * RLS-enforced app role's DB password, the privileged Flyway migrator role's DB password ({@code
-   * application.yaml}), and the envelope-encryption master key ({@link EipSecretsProperties}).
+   * application.yaml}), the envelope-encryption master key ({@link EipSecretsProperties}), and the
+   * pagination-cursor HMAC signing key ({@link ApiCursorSigningProperties}, DEBT-010).
    */
   static final List<String> GUARDED_VARS =
-      List.of("EIP_APP_DB_PASSWORD", "EIP_MIGRATOR_DB_PASSWORD", "EIP_SECRETS_MASTER_KEY");
+      List.of(
+          "EIP_APP_DB_PASSWORD",
+          "EIP_MIGRATOR_DB_PASSWORD",
+          "EIP_SECRETS_MASTER_KEY",
+          "EIP_API_CURSOR_SIGNING_KEY");
 
   @Override
   public void postProcessEnvironment(

@@ -7,6 +7,7 @@ package com.eip.app.api;
 import com.eip.app.application.LoadSampleDataUseCase;
 import com.eip.app.application.RunFrictionPipelineUseCase.PipelineResult;
 import com.eip.app.application.SyncConnectorUseCase;
+import com.eip.app.config.OpenApiConfig;
 import com.eip.app.security.RequiresPermission;
 import com.eip.ingestion.api.ManageConnectorsUseCase;
 import com.eip.ingestion.api.ManageConnectorsUseCase.ConnectorAdminView;
@@ -14,6 +15,10 @@ import com.eip.ingestion.api.ManageConnectorsUseCase.ConnectorTypeView;
 import com.eip.ingestion.api.ManageConnectorsUseCase.RegisterConnectorCommand;
 import com.eip.ingestion.api.ManageConnectorsUseCase.TestConnectionResult;
 import com.eip.tenancy.rbac.Permission;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import java.util.List;
@@ -47,6 +52,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/admin")
 public class AdminConnectorController {
+
+  private static final String PROBLEM_REF = "#/components/schemas/" + OpenApiConfig.PROBLEM_SCHEMA;
 
   private final ManageConnectorsUseCase connectors;
   private final LoadSampleDataUseCase sampleData;
@@ -136,6 +143,20 @@ public class AdminConnectorController {
    */
   @PostMapping("/connectors/{connectorId}/sync")
   @RequiresPermission(Permission.CONNECTOR_CONFIGURE)
+  @ApiResponses({
+    // Explicit 200: springdoc does not auto-infer the success response from the return type once
+    // any @ApiResponse is present on the method, so it must be declared alongside the error one.
+    @ApiResponse(
+        responseCode = "200",
+        description = "OK",
+        content =
+            @Content(mediaType = "*/*", schema = @Schema(implementation = PipelineResult.class))),
+    @ApiResponse(
+        responseCode = "502",
+        description = "The sync failed against the upstream source (unreachable/auth/non-2xx).",
+        content =
+            @Content(mediaType = "application/problem+json", schema = @Schema(ref = PROBLEM_REF))),
+  })
   public PipelineResult sync(@PathVariable UUID connectorId) {
     return syncConnector.sync(connectorId);
   }

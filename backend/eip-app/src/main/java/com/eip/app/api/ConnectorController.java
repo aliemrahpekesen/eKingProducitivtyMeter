@@ -43,15 +43,20 @@ public class ConnectorController {
    *     page
    * @param limit page size, clamped to [1, {@value ListConnectorsQuery#MAX_LIMIT}] (default {@value
    *     ListConnectorsQuery#DEFAULT_LIMIT})
-   * @return a page of the tenant's connectors, ordered by {@code (name, id)}
+   * @param sort the whitelisted sort — {@code name} (default) | {@code -name} | {@code createdAt} |
+   *     {@code -createdAt}, a leading {@code -} meaning descending (DEBT-010, APIDesign §1.4); an
+   *     unrecognized value is a 400, and requesting a page with a different {@code sort} than the
+   *     one its cursor was issued under is also a 400
+   * @return a page of the tenant's connectors, ordered by the resolved sort
    */
   @GetMapping("/connectors")
   @RequiresPermission(Permission.DASHBOARD_VIEW)
   public PageView<ConnectorView> connectors(
       @RequestParam(name = "cursor", required = false) @Nullable String cursor,
       @RequestParam(name = "limit", defaultValue = "" + ListConnectorsQuery.DEFAULT_LIMIT)
-          int limit) {
-    return connectors.list(cursor, limit);
+          int limit,
+      @RequestParam(name = "sort", required = false) @Nullable String sort) {
+    return connectors.list(cursor, limit, sort);
   }
 
   /**
