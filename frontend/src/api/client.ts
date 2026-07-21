@@ -117,6 +117,31 @@ export async function apiGet<T>(path: string, tenantId: string): Promise<T> {
   return (await response.json()) as T;
 }
 
+/** PUT — mirrors apiPost's auth/error handling; used by the admin-only AI policy endpoint. */
+export async function apiPut<T>(path: string, tenantId: string, body?: unknown): Promise<T> {
+  const headers: Record<string, string> = {
+    Accept: 'application/json, application/problem+json',
+    'Content-Type': 'application/json',
+    ...authHeaders(tenantId, true),
+  };
+  const response = await fetch(`${BASE}${path}`, {
+    method: 'PUT',
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!response.ok) {
+    reportIfUnauthorized(response.status);
+    let problem: ProblemDetail | undefined;
+    try {
+      problem = (await response.json()) as ProblemDetail;
+    } catch {
+      problem = undefined;
+    }
+    throw new ApiError(response.status, problem);
+  }
+  return (await response.json()) as T;
+}
+
 /**
  * GET returning raw text — used for the self-contained HTML report export (GET .../html), which is
  * not JSON and is opened as a Blob, never parsed.

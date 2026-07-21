@@ -6,6 +6,7 @@ import { render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   useAdminConnectors,
+  useAiPolicy,
   useConnectorTypes,
   useCreateTenant,
   useLoadSampleData,
@@ -16,6 +17,7 @@ import {
   useSyncConnector,
   useTenants,
   useTestConnector,
+  useUpdateAiPolicy,
 } from '../api/hooks';
 import { AuthContext, type AuthContextValue } from '../auth/authContext';
 import { App } from './App';
@@ -33,6 +35,8 @@ vi.mock('../api/hooks', () => ({
   useSyncConnector: vi.fn(),
   useLoadSampleData: vi.fn(),
   useSession: vi.fn(),
+  useAiPolicy: vi.fn(),
+  useUpdateAiPolicy: vi.fn(),
 }));
 
 const okQuery = (data: unknown) => ({ data, isLoading: false, isError: false }) as never;
@@ -55,6 +59,8 @@ function armAdminHooks(): void {
   vi.mocked(useSyncConnector).mockReturnValue(idleMutation);
   vi.mocked(useLoadSampleData).mockReturnValue(idleMutation);
   vi.mocked(useSession).mockReturnValue(okQuery(undefined));
+  vi.mocked(useAiPolicy).mockReturnValue(okQuery(undefined));
+  vi.mocked(useUpdateAiPolicy).mockReturnValue(idleMutation);
 }
 
 function renderApp(auth: AuthContextValue, tenantId = 't-1'): void {

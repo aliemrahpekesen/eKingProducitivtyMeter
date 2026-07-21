@@ -277,3 +277,35 @@ export interface ReportDocumentView {
   report: ReportView;
   document: ReportDocument;
 }
+
+// ── M6-B optional AI explanation layer (frontend) ──────────────────────────────────────────────
+// AI is optional, per-tenant, OFF by default. It only ever EXPLAINS deterministic numbers already
+// computed elsewhere (trends, recommendations, reports) — it is never a new metric source and
+// never surfaces individual-level detail (NFR-071). Every AI output carries the API's own
+// `disclaimer` string, rendered verbatim, never paraphrased.
+
+export interface AiPolicyView {
+  enabled: boolean;
+  provider: 'ollama' | 'openai-compatible' | null;
+  baseUrl: string | null;
+  model: string | null;
+  /** Whether a secret is stored server-side. The secret itself is write-only — never returned. */
+  hasSecret: boolean;
+  temperature: number;
+  maxTokens: number;
+}
+
+/** GET /api/v1/ai/status — any dashboard viewer (not admin-only), unlike AiPolicyView. */
+export interface AiStatusView {
+  enabled: boolean;
+}
+
+export interface ExplanationView {
+  narrative: string;
+  provider: string;
+  model: string;
+  /** Numbers the narrative cited, verified against the deterministic source before being shown. */
+  citedNumbers: string[];
+  generatedAt: string;
+  disclaimer: string;
+}

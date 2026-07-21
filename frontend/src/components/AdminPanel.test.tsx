@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { TenantContext } from '../app/tenantContext';
 import {
   useAdminConnectors,
+  useAiPolicy,
   useConnectorTypes,
   useCreateTenant,
   useLoadSampleData,
@@ -12,6 +13,7 @@ import {
   useSyncConnector,
   useTenants,
   useTestConnector,
+  useUpdateAiPolicy,
 } from '../api/hooks';
 import { AdminPanel } from './AdminPanel';
 
@@ -26,6 +28,8 @@ vi.mock('../api/hooks', () => ({
   useSetConnectorStatus: vi.fn(),
   useSyncConnector: vi.fn(),
   useLoadSampleData: vi.fn(),
+  useAiPolicy: vi.fn(),
+  useUpdateAiPolicy: vi.fn(),
 }));
 
 const okQuery = (data: unknown) => ({ data, isLoading: false, isError: false }) as never;
@@ -35,8 +39,36 @@ const idleMutation = {
   isError: false,
   isSuccess: false,
 } as never;
+// Kept separate from `idleMutation` (shared across the connector/tenant hooks above) so its
+// `mutate` calls can be asserted on in isolation, without other buttons' clicks polluting them.
+const updateAiPolicySpy = vi.fn();
+const updateAiPolicyMutation = {
+  mutate: updateAiPolicySpy,
+  isPending: false,
+  isError: false,
+  isSuccess: false,
+} as never;
 
-function arm(): void {
+function arm(
+  aiPolicy: {
+    enabled: boolean;
+    provider: 'ollama' | 'openai-compatible' | null;
+    baseUrl: string | null;
+    model: string | null;
+    hasSecret: boolean;
+    temperature: number;
+    maxTokens: number;
+  } = {
+    enabled: false,
+    provider: null,
+    baseUrl: null,
+    model: null,
+    hasSecret: false,
+    temperature: 0.2,
+    maxTokens: 512,
+  },
+): void {
+  updateAiPolicySpy.mockClear();
   vi.mocked(useTenants).mockReturnValue(okQuery([{ id: 't-1', name: 'Acme', slug: 'acme' }]));
   vi.mocked(useStructure).mockReturnValue(
     okQuery([
@@ -81,6 +113,8 @@ function arm(): void {
   vi.mocked(useSetConnectorStatus).mockReturnValue(idleMutation);
   vi.mocked(useSyncConnector).mockReturnValue(idleMutation);
   vi.mocked(useLoadSampleData).mockReturnValue(idleMutation);
+  vi.mocked(useAiPolicy).mockReturnValue(okQuery(aiPolicy));
+  vi.mocked(useUpdateAiPolicy).mockReturnValue(updateAiPolicyMutation);
 }
 
 describe('AdminPanel', () => {
@@ -129,5 +163,89 @@ describe('AdminPanel', () => {
       </TenantContext.Provider>,
     );
     expect(screen.getByText('Select or create a tenant')).toBeInTheDocument();
+  });
+
+  describe('AI explanations card (M6-B)', () => {
+    it('renders the policy honestly: off by default, deterministic-only status line', () => {
+      arm();
+      render(
+        <TenantContext.Provider value={{ tenantId: 't-1', setTenantId: () => {} }}>
+          <AdminPanel />
+        </TenantContext.Provider>,
+      );
+
+      expect(screen.getByRole('heading', { name: 'AI explanations' })).toBeInTheDocument();
+      expect(screen.getByText('Off — deterministic only')).toBeInTheDocument();
+      expect(screen.getByLabelText(/Enable AI explanations/)).not.toBeChecked();
+      // Defaults come straight from the fetched policy.
+      expect(screen.getByLabelText(/Temperature/)).toHaveValue(0.2);
+      expect(screen.getByLabelText(/Max tokens/)).toHaveValue(512);
+    });
+
+    it('sends the PUT payload built from the form when Save is clicked', () => {
+      arm();
+      render(
+        <TenantContext.Provider value={{ tenantId: 't-1', setTenantId: () => {} }}>
+          <AdminPanel />
+        </TenantContext.Provider>,
+      );
+
+      fireEvent.click(screen.getByLabelText(/Enable AI explanations/));
+      fireEvent.change(screen.getByLabelText(/Provider/), { target: { value: 'ollama' } });
+      fireEvent.change(screen.getByLabelText(/Endpoint URL/), {
+        target: { value: 'http://localhost:11434' },
+      });
+      fireEvent.change(screen.getByLabelText(/Model/), { target: { value: 'llama3.1' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      expect(updateAiPolicySpy).toHaveBeenCalledWith(
+        {
+          enabled: true,
+          provider: 'ollama',
+          baseUrl: 'http://localhost:11434',
+          model: 'llama3.1',
+          temperature: 0.2,
+          maxTokens: 512,
+        },
+        expect.anything(),
+      );
+    });
+
+    it('disables Save with a validation hint when enabling without provider/baseUrl/model', () => {
+      arm();
+      render(
+        <TenantContext.Provider value={{ tenantId: 't-1', setTenantId: () => {} }}>
+          <AdminPanel />
+        </TenantContext.Provider>,
+      );
+
+      fireEvent.click(screen.getByLabelText(/Enable AI explanations/));
+
+      expect(screen.getByText('Pick a provider to enable AI explanations.')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    });
+
+    it('never echoes the stored secret into the API key input — shows a hint instead', () => {
+      arm({
+        enabled: true,
+        provider: 'openai-compatible',
+        baseUrl: 'https://api.example.com',
+        model: 'gpt-4o-mini',
+        hasSecret: true,
+        temperature: 0.2,
+        maxTokens: 512,
+      });
+      render(
+        <TenantContext.Provider value={{ tenantId: 't-1', setTenantId: () => {} }}>
+          <AdminPanel />
+        </TenantContext.Provider>,
+      );
+
+      expect(screen.getByLabelText(/API key/)).toHaveValue('');
+      expect(screen.getByText('secret stored')).toBeInTheDocument();
+      expect(
+        screen.getByText(/On — provider openai-compatible, model gpt-4o-mini/),
+      ).toBeInTheDocument();
+    });
   });
 });

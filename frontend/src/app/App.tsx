@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSession } from '../api/hooks';
 import { useAuth, type AuthMode } from '../auth/authContext';
 import { AdminPanel } from '../components/AdminPanel';
+import { AiExplainCard } from '../components/AiExplainCard';
 import { ConnectorList } from '../components/ConnectorList';
 import { DemoBanner } from '../components/DemoBanner';
 import { FrictionCard } from '../components/FrictionCard';
@@ -97,6 +98,7 @@ export function App(): JSX.Element {
         {tab === 'overview' ? (
           <>
             <SessionCard />
+            <AiExplainCard />
             <FrictionCard />
             <TrendsBoard />
             <RecommendationsCard />

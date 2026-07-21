@@ -1,12 +1,15 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ReportDocumentView } from '../api/types';
-import { useReport } from '../api/hooks';
+import { ApiError } from '../api/client';
+import type { ExplanationView, ReportDocumentView } from '../api/types';
+import { useAiStatus, useReport, useReportNarrative } from '../api/hooks';
 import { TenantContext } from '../app/tenantContext';
 import { ReportDetail } from './ReportDetail';
 
 vi.mock('../api/hooks', () => ({
   useReport: vi.fn(),
+  useAiStatus: vi.fn(),
+  useReportNarrative: vi.fn(),
 }));
 
 // This suite only smoke-tests the React shell (totals, team sections, recommendations, export
@@ -17,8 +20,38 @@ vi.mock('echarts', () => ({
 }));
 
 const mockedUseReport = vi.mocked(useReport);
+const mockedUseAiStatus = vi.mocked(useAiStatus);
+const mockedUseReportNarrative = vi.mocked(useReportNarrative);
 
 type ReportResult = ReturnType<typeof useReport>;
+type AiStatusResult = ReturnType<typeof useAiStatus>;
+type NarrativeResult = ReturnType<typeof useReportNarrative>;
+
+const aiDisabled = {
+  data: { enabled: false },
+  isLoading: false,
+  isError: false,
+} as unknown as AiStatusResult;
+const aiEnabled = {
+  data: { enabled: true },
+  isLoading: false,
+  isError: false,
+} as unknown as AiStatusResult;
+const idleNarrative = {
+  mutate: vi.fn(),
+  isPending: false,
+  isError: false,
+  isSuccess: false,
+} as unknown as NarrativeResult;
+
+const narrativeView: ExplanationView = {
+  narrative: 'Platform carried the most review wait this period.',
+  provider: 'ollama',
+  model: 'llama3.1',
+  citedNumbers: ['avgFrictionScore=61', 'reviewWaitPct=25'],
+  generatedAt: '2026-07-15T09:00:05Z',
+  disclaimer: 'AI-generated explanation — verify against the numbers above.',
+};
 
 class ResizeObserverStub {
   observe(): void {}
@@ -127,6 +160,9 @@ describe('ReportDetail', () => {
         removeEventListener: vi.fn(),
       })),
     );
+    // Default: AI off for the tenant — the per-test AI narrative suite below overrides this.
+    mockedUseAiStatus.mockReturnValue(aiDisabled);
+    mockedUseReportNarrative.mockReturnValue(idleNarrative);
   });
 
   it('shows a loading state', () => {
@@ -281,5 +317,94 @@ describe('ReportDetail', () => {
 
     await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
     expect(screen.getByText('Render failed')).toBeInTheDocument();
+  });
+
+  describe('AI narrative (M6-B)', () => {
+    it('hides the AI narrative button when AI is off for the tenant', () => {
+      mockedUseReport.mockReturnValue({
+        data: documentView,
+        isLoading: false,
+        isError: false,
+      } as unknown as ReportResult);
+
+      renderDetail();
+
+      expect(screen.queryByRole('button', { name: 'AI narrative' })).not.toBeInTheDocument();
+    });
+
+    it('shows the AI narrative button and posts to the narrative endpoint when AI is on', () => {
+      mockedUseReport.mockReturnValue({
+        data: documentView,
+        isLoading: false,
+        isError: false,
+      } as unknown as ReportResult);
+      mockedUseAiStatus.mockReturnValue(aiEnabled);
+      const mutate = vi.fn();
+      mockedUseReportNarrative.mockReturnValue({
+        mutate,
+        isPending: false,
+        isError: false,
+        isSuccess: false,
+      } as unknown as NarrativeResult);
+
+      renderDetail();
+      fireEvent.click(screen.getByRole('button', { name: 'AI narrative' }));
+
+      expect(mutate).toHaveBeenCalledWith();
+    });
+
+    it('renders the narrative above the totals, no-print, labeled AI-generated with the disclaimer verbatim', () => {
+      mockedUseReport.mockReturnValue({
+        data: documentView,
+        isLoading: false,
+        isError: false,
+      } as unknown as ReportResult);
+      mockedUseAiStatus.mockReturnValue(aiEnabled);
+      mockedUseReportNarrative.mockReturnValue({
+        mutate: vi.fn(),
+        data: narrativeView,
+        isPending: false,
+        isError: false,
+        isSuccess: true,
+      } as unknown as NarrativeResult);
+
+      renderDetail();
+
+      expect(screen.getByText('AI-generated')).toBeInTheDocument();
+      expect(screen.getByText(narrativeView.narrative)).toBeInTheDocument();
+      expect(screen.getByText(narrativeView.disclaimer)).toBeInTheDocument();
+      expect(screen.getByText('Numbers verified: 2')).toBeInTheDocument();
+      // Deterministic document stays the record — the narrative panel is marked no-print.
+      expect(screen.getByText('AI-generated').closest('.no-print')).not.toBeNull();
+    });
+
+    it('shows a rejected-502 error honestly, with the problem detail and a working retry', () => {
+      mockedUseReport.mockReturnValue({
+        data: documentView,
+        isLoading: false,
+        isError: false,
+      } as unknown as ReportResult);
+      mockedUseAiStatus.mockReturnValue(aiEnabled);
+      const mutate = vi.fn();
+      mockedUseReportNarrative.mockReturnValue({
+        mutate,
+        isPending: false,
+        isError: true,
+        error: new ApiError(502, {
+          title: 'AI narrative rejected',
+          detail: 'narrative failed numeric verification — discarded',
+        }),
+        isSuccess: false,
+      } as unknown as NarrativeResult);
+
+      renderDetail();
+
+      expect(
+        screen.getByText('narrative failed numeric verification — discarded'),
+      ).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+      expect(mutate).toHaveBeenCalledWith();
+    });
   });
 });

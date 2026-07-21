@@ -1,10 +1,13 @@
 // TanStack Query hooks over the /api/v1 read surface. Queries are disabled until a tenant is set,
 // and never retry (a 401 for a missing/invalid tenant should surface immediately, not spin).
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiGet, apiPost } from './client';
+import { apiGet, apiPost, apiPut } from './client';
 import type {
+  AiPolicyView,
+  AiStatusView,
   ConnectorAdminView,
   ConnectorTypeView,
+  ExplanationView,
   FrictionEvidenceView,
   FrictionSummaryView,
   OrganizationView,
@@ -238,5 +241,61 @@ export function useGenerateReport(tenantId: string) {
         weeks: input.weeks,
       }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['reports'] }),
+  });
+}
+
+// ── M6-B optional AI explanation layer (frontend) ──────────────────────────────────────────────
+// AI is optional, per-tenant, OFF by default — see api/types.ts. useAiPolicy is admin-only (reads/
+// writes provider config + secret write-only); useAiStatus is the cheap enabled/disabled read any
+// dashboard viewer can call to decide whether to show an "Explain with AI" affordance at all.
+
+export function useAiPolicy(tenantId: string) {
+  return useQuery({
+    queryKey: ['ai', 'policy', tenantId],
+    queryFn: () => apiGet<AiPolicyView>('/api/v1/ai/policy', tenantId),
+    enabled: tenantId.length > 0,
+    retry: false,
+  });
+}
+
+export function useUpdateAiPolicy(tenantId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      enabled: boolean;
+      provider?: string;
+      baseUrl?: string;
+      model?: string;
+      secret?: string;
+      temperature?: number;
+      maxTokens?: number;
+    }) => apiPut<AiPolicyView>('/api/v1/ai/policy', tenantId, input),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['ai'] }),
+  });
+}
+
+export function useAiStatus(tenantId: string) {
+  return useQuery({
+    queryKey: ['ai', 'status', tenantId],
+    queryFn: () => apiGet<AiStatusView>('/api/v1/ai/status', tenantId),
+    enabled: tenantId.length > 0,
+    retry: false,
+  });
+}
+
+export function useExplainInsights(tenantId: string) {
+  return useMutation({
+    mutationFn: (input: { weeks: number }) =>
+      apiPost<ExplanationView>('/api/v1/insights/explain', tenantId, input),
+  });
+}
+
+export function useReportNarrative(tenantId: string, reportId: string) {
+  return useMutation({
+    mutationFn: () =>
+      apiPost<ExplanationView>(
+        `/api/v1/reports/${encodeURIComponent(reportId)}/narrative`,
+        tenantId,
+      ),
   });
 }

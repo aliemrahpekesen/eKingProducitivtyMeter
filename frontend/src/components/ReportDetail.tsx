@@ -5,12 +5,13 @@
 import { useMemo, useState } from 'react';
 import type { EChartsOption, LineSeriesOption } from 'echarts';
 import { apiGetText } from '../api/client';
-import { useReport } from '../api/hooks';
+import { useAiStatus, useReport, useReportNarrative } from '../api/hooks';
 import type { ReportDocument, ReportTeamSection, ReportTotals } from '../api/types';
 import { useTenant } from '../app/tenantContext';
 import { DARK_PALETTE, LIGHT_PALETTE } from '../lib/chartData';
 import { hoursOneDecimal, isoDateOnly } from '../lib/format';
 import { useECharts, usePrefersDark } from '../lib/useECharts';
+import { AiExplainError, AiExplanationResult } from './AiExplanation';
 import { RecommendationItem } from './RecommendationsCard';
 import { EmptyState, ErrorState, Loading } from './states';
 
@@ -54,6 +55,14 @@ function ReportBody({
 }): JSX.Element {
   const [exportError, setExportError] = useState<unknown>(null);
   const [opening, setOpening] = useState(false);
+  const aiStatus = useAiStatus(tenantId);
+  const narrative = useReportNarrative(tenantId, reportId);
+  const [narrativeDismissed, setNarrativeDismissed] = useState(false);
+
+  const handleExplain = (): void => {
+    setNarrativeDismissed(false);
+    narrative.mutate();
+  };
 
   // Anchors can't set the X-EIP-Tenant header, so the HTML export is fetched via the existing
   // client (respecting the tenant header) and opened as a Blob URL rather than a direct href.
@@ -100,10 +109,37 @@ function ReportBody({
           <button type="button" className="btn" onClick={() => window.print()}>
             Print
           </button>
+          {aiStatus.data?.enabled === true ? (
+            <button
+              type="button"
+              className="btn"
+              disabled={narrative.isPending}
+              onClick={handleExplain}
+            >
+              {narrative.isPending ? 'Generating…' : 'AI narrative'}
+            </button>
+          ) : null}
         </div>
       </header>
 
       {exportError !== null ? <ErrorState error={exportError} /> : null}
+
+      {/* AI narrative is an optional explanation layer over the deterministic totals/sections
+          below — it is NEVER part of the printed/exported report (the deterministic document stays
+          the record), hence no-print here even though the rest of this view prints. */}
+      {narrative.isSuccess && !narrativeDismissed && narrative.data !== undefined ? (
+        <div className="no-print">
+          <AiExplanationResult
+            explanation={narrative.data}
+            onDismiss={() => setNarrativeDismissed(true)}
+          />
+        </div>
+      ) : null}
+      {narrative.isError && !narrativeDismissed ? (
+        <div className="no-print">
+          <AiExplainError error={narrative.error} onRetry={handleExplain} />
+        </div>
+      ) : null}
 
       <TotalsRow totals={doc.totals} />
 
