@@ -300,6 +300,53 @@
         }
       }
     },
+    "/api/v1/admin/service-tokens" : {
+      "get" : {
+        "tags" : [ "service-token-controller" ],
+        "operationId" : "list",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/ServiceTokenView"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post" : {
+        "tags" : [ "service-token-controller" ],
+        "operationId" : "create_1",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateServiceTokenRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "description" : "Created",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ServiceTokenCreatedView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/sample-data" : {
       "post" : {
         "tags" : [ "admin-connector-controller" ],
@@ -353,7 +400,7 @@
     "/api/v1/admin/connectors" : {
       "get" : {
         "tags" : [ "admin-connector-controller" ],
-        "operationId" : "list",
+        "operationId" : "list_1",
         "responses" : {
           "200" : {
             "description" : "OK",
@@ -846,6 +893,26 @@
           }
         }
       }
+    },
+    "/api/v1/admin/service-tokens/{id}" : {
+      "delete" : {
+        "tags" : [ "service-token-controller" ],
+        "operationId" : "revoke",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          }
+        }
+      }
     }
   },
   "components" : {
@@ -1030,6 +1097,53 @@
           },
           "name" : {
             "type" : "string"
+          }
+        }
+      },
+      "CreateServiceTokenRequest" : {
+        "required" : [ "name", "role" ],
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "role" : {
+            "type" : "string"
+          },
+          "permissionSubset" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "expiresInDays" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "platformScoped" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "ServiceTokenCreatedView" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "token" : {
+            "type" : "string"
+          },
+          "prefix" : {
+            "type" : "string"
+          },
+          "role" : {
+            "type" : "string"
+          },
+          "expiresAt" : {
+            "type" : "string",
+            "format" : "date-time"
           }
         }
       },
@@ -1809,6 +1923,45 @@
           },
           "name" : {
             "type" : "string"
+          }
+        }
+      },
+      "ServiceTokenView" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "prefix" : {
+            "type" : "string"
+          },
+          "role" : {
+            "type" : "string"
+          },
+          "permissionSubset" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "expiresAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "lastUsedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "revoked" : {
+            "type" : "boolean"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
           }
         }
       },

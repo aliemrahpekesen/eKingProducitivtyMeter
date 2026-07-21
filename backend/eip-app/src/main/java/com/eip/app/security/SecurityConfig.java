@@ -19,6 +19,7 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
 
 /**
@@ -26,7 +27,10 @@ import org.springframework.security.web.SecurityFilterChain;
  * {@code header} mode preserves today's behavior at this layer (permitAll — the tenant filter and
  * {@link PermissionEnforcementInterceptor} still run, so RBAC is genuinely exercised). {@code oidc}
  * mode requires a valid JWT (issuer/signature/expiry, plus the {@code eip_tenant} claim via {@link
- * EipTenantClaimValidator}) for everything except the explicit whitelist.
+ * EipTenantClaimValidator}) for everything except the explicit whitelist. {@link
+ * ServiceTokenAuthenticationFilter} is wired in BOTH modes, positioned before where {@link
+ * BearerTokenAuthenticationFilter} would run (present or not) — see that filter's class javadoc for
+ * why the ordering matters.
  */
 @Configuration
 @EnableWebSecurity
@@ -40,6 +44,7 @@ public class SecurityConfig {
   private final EipSecurityProperties properties;
   private final ProblemAuthenticationEntryPoint authenticationEntryPoint;
   private final ProblemAccessDeniedHandler accessDeniedHandler;
+  private final ServiceTokenAuthenticationFilter serviceTokenAuthenticationFilter;
 
   /**
    * Creates the security configuration.
@@ -47,14 +52,17 @@ public class SecurityConfig {
    * @param properties the active {@code eip.security.mode}
    * @param authenticationEntryPoint the 401 problem+json renderer
    * @param accessDeniedHandler the 403 problem+json renderer
+   * @param serviceTokenAuthenticationFilter the mode-independent service-token auth path
    */
   public SecurityConfig(
       EipSecurityProperties properties,
       ProblemAuthenticationEntryPoint authenticationEntryPoint,
-      ProblemAccessDeniedHandler accessDeniedHandler) {
+      ProblemAccessDeniedHandler accessDeniedHandler,
+      ServiceTokenAuthenticationFilter serviceTokenAuthenticationFilter) {
     this.properties = properties;
     this.authenticationEntryPoint = authenticationEntryPoint;
     this.accessDeniedHandler = accessDeniedHandler;
+    this.serviceTokenAuthenticationFilter = serviceTokenAuthenticationFilter;
   }
 
   /**
@@ -75,6 +83,7 @@ public class SecurityConfig {
             e ->
                 e.authenticationEntryPoint(authenticationEntryPoint)
                     .accessDeniedHandler(accessDeniedHandler))
+        .addFilterBefore(serviceTokenAuthenticationFilter, BearerTokenAuthenticationFilter.class)
         .authorizeHttpRequests(
             auth -> {
               auth.requestMatchers(PERMIT_ALL_PATTERNS).permitAll();

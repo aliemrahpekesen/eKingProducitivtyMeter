@@ -72,8 +72,9 @@ Response shape names refer to OpenAPI component schemas. All list endpoints supp
 | GET | `/api/v1/permissions` | Catalog of fine-grained permissions | — | `PermissionCatalog` | `rbac:manage` |
 | GET/POST | `/api/v1/users` | List / provision users (local accounts fallback) | `email`, `status` | `Page<User>` / `User` | `rbac:manage` |
 | GET/PUT | `/api/v1/users/{id}` | Read / update user (roles, status) | If-Match | `User` | `rbac:manage` |
-| POST | `/api/v1/service-tokens` | Issue service token (returned once) | body: `ServiceTokenCreate` (scopes, expiry) | `ServiceTokenIssued` | `rbac:manage` |
-| DELETE | `/api/v1/service-tokens/{id}` | Revoke service token | — | 204 | `rbac:manage` |
+| POST | `/api/v1/admin/service-tokens` | Issue service token (raw value returned exactly once) | body: role, optional permission subset, optional `expiresInDays`, optional `platformScoped` (PLATFORM_ADMIN only) | `ServiceTokenCreatedView` | `user.manage` |
+| GET | `/api/v1/admin/service-tokens` | List service tokens for the caller's scope (tenant-scoped, or platform-scoped when no tenant is bound) | — | `List<ServiceTokenView>` (no raw token/hash), newest first — matches the existing `/admin/tenants`/`/admin/connectors` unpaginated-list convention | `user.manage` |
+| DELETE | `/api/v1/admin/service-tokens/{id}` | Revoke service token | — | 204 | `user.manage` |
 
 ### 4.2 Connectors & Data Sources
 

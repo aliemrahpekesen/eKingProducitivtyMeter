@@ -33,19 +33,27 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * com.eip.app.tenant.TenantContextFilter}, though the two are otherwise independent: this filter
  * governs permissions only, tenant binding stays the tenant filter's job.
  *
- * <p><b>header mode:</b> always resolves an implicit {@code TENANT_ADMIN} principal — a deliberate
- * demo/dev convenience (SecurityModel: header resolution carries no authentication) — regardless of
- * whether {@code X-EIP-Tenant} is present, so platform-scoped requests (e.g. tenant creation, which
- * names no tenant) still pass RBAC the same way every other header-mode request does. The same
- * {@link PermissionEnforcementInterceptor} check executes either way, so RBAC is genuinely
- * exercised in header mode too, not bypassed.
+ * <p><b>service tokens (SecurityModel §3):</b> checked FIRST, regardless of {@code
+ * eip.security.mode} — if {@link ServiceTokenAuthenticationFilter} has authenticated this request,
+ * the security context holds a {@link ServiceTokenAuthentication}, whose already-resolved {@link
+ * EipPrincipal} is used verbatim. This is the same seam the {@code oidc} JWT path populates, just a
+ * different {@code Authentication} implementation — service tokens are mode-independent
+ * (SecurityModel §3: "follow the same request path from the JWT-validation step onward").
  *
- * <p><b>oidc mode:</b> reads the validated {@link Jwt} from the security context — {@code
- * realm_access.roles} intersected with {@link Role} names (unknown roles ignored, never widened
- * into a role EIP doesn't know), tenant from the {@code eip_tenant} custom claim (guaranteed
- * present and a valid UUID by {@link EipTenantClaimValidator}, which runs during token validation,
- * before authentication succeeds). A non-JWT authentication (permitAll paths this filter still runs
- * over, e.g. {@code GET /api/v1/session/auth}) resolves to {@link EipPrincipal#anonymous()}.
+ * <p><b>header mode:</b> (no service token presented) always resolves an implicit {@code
+ * TENANT_ADMIN} principal — a deliberate demo/dev convenience (SecurityModel: header resolution
+ * carries no authentication) — regardless of whether {@code X-EIP-Tenant} is present, so
+ * platform-scoped requests (e.g. tenant creation, which names no tenant) still pass RBAC the same
+ * way every other header-mode request does. The same {@link PermissionEnforcementInterceptor} check
+ * executes either way, so RBAC is genuinely exercised in header mode too, not bypassed.
+ *
+ * <p><b>oidc mode:</b> (no service token presented) reads the validated {@link Jwt} from the
+ * security context — {@code realm_access.roles} intersected with {@link Role} names (unknown roles
+ * ignored, never widened into a role EIP doesn't know), tenant from the {@code eip_tenant} custom
+ * claim (guaranteed present and a valid UUID by {@link EipTenantClaimValidator}, which runs during
+ * token validation, before authentication succeeds). A non-JWT authentication (permitAll paths this
+ * filter still runs over, e.g. {@code GET /api/v1/session/auth}) resolves to {@link
+ * EipPrincipal#anonymous()}.
  */
 @Component
 @Order(9)
@@ -67,12 +75,20 @@ public class EipPrincipalFilter extends OncePerRequestFilter {
   protected void doFilterInternal(
       HttpServletRequest request, HttpServletResponse response, FilterChain chain)
       throws ServletException, IOException {
-    EipPrincipalHolder.set(properties.oidc() ? resolveOidc() : resolveHeader(request));
+    EipPrincipalHolder.set(resolvePrincipal(request));
     try {
       chain.doFilter(request, response);
     } finally {
       EipPrincipalHolder.clear();
     }
+  }
+
+  private EipPrincipal resolvePrincipal(HttpServletRequest request) {
+    Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+    if (auth instanceof ServiceTokenAuthentication serviceTokenAuth) {
+      return serviceTokenAuth.getPrincipal();
+    }
+    return properties.oidc() ? resolveOidc() : resolveHeader(request);
   }
 
   private static EipPrincipal resolveHeader(HttpServletRequest request) {

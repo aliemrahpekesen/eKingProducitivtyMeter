@@ -136,6 +136,14 @@ class BaselineRlsIntegrationTest {
   void every_tenant_owned_unique_constraint_includes_tenant_id() throws SQLException {
     // Scale-out invariant (DatabasePlan §15 / §14): every non-primary UNIQUE index on a
     // tenant-owned table must include tenant_id, so a tenant's rows stay portable as a unit.
+    // core.service_token (V10, ADR-025) is an additional, deliberate exception alongside the
+    // platform-scoped ones below: its only non-primary unique index, ux_service_token_hash, is
+    // token_hash ALONE — a presented token must resolve unambiguously by hash regardless of which
+    // tenant (or platform scope) it belongs to, so a composite (tenant_id, token_hash) index would
+    // be actively WRONG here, not just non-portable: Postgres treats every NULL tenant_id as
+    // distinct for uniqueness purposes, so it would silently allow duplicate hashes across
+    // platform-scoped rows. This table already carries no RLS for the same structural reason (see
+    // R__rls_policies.sql's trailing note).
     String sql =
         "SELECT n.nspname || '.' || t.relname AS tbl, i.relname AS idx, "
             + "       array_agg(a.attname ORDER BY k.ord) AS cols "
@@ -147,7 +155,8 @@ class BaselineRlsIntegrationTest {
             + "JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum "
             + "WHERE ix.indisunique AND NOT ix.indisprimary "
             + "  AND n.nspname IN ('core','work','analytics','audit') "
-            + "  AND t.relname NOT IN ('tenant','worker_heartbeat','analytics_watermark') "
+            + "  AND t.relname NOT IN "
+            + "      ('tenant','worker_heartbeat','analytics_watermark','service_token') "
             + "GROUP BY 1, 2";
     try (Connection admin = superuser();
         PreparedStatement ps = admin.prepareStatement(sql);

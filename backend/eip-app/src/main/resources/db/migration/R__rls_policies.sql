@@ -52,6 +52,11 @@ DECLARE
   ];
   -- Platform-scoped (enumerated no-RLS exceptions, DatabasePlan §2): core.tenant,
   -- core.worker_heartbeat, analytics.analytics_watermark — deliberately absent from this list.
+  -- core.service_token (V10, SecurityModel §3, DEBT-012 residual) is ALSO deliberately absent: it
+  -- mixes tenant-scoped and platform-scoped rows in one table (tenant_id NULL == platform-scoped)
+  -- and its hash-lookup authentication path runs before any tenant is known, so a uniform
+  -- tenant_isolation policy cannot apply — see that migration's header comment and ADR-025 for the
+  -- full rationale; the application layer enforces tenant/platform scoping explicitly instead.
 BEGIN
   FOREACH t IN ARRAY tenant_scoped_tables LOOP
     EXECUTE format('ALTER TABLE %s ENABLE ROW LEVEL SECURITY', t);

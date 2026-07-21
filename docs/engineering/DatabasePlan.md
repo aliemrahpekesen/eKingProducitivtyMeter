@@ -30,6 +30,7 @@ Schema-level summary: `work`/`scm`/`cicd`/`quality`/`ops` are the canonical sche
 | `core.member` | eip-tenancy | yes | — | PII columns `display_name`, `primary_email` — FR-142 erasure targets (§10.1) |
 | `core.member_identity` | eip-tenancy | yes | — | PII columns `email`, `display_name` — FR-142 erasure targets (§10.1) |
 | `core.secret` | eip-tenancy | yes | — | AES-256-GCM envelope encryption (§3) |
+| `core.service_token` | eip-app | **no** (hybrid platform+tenant, app-enforced) | — | SecurityModel §3; SHA-256 hash, `tenant_id NULL` == platform-scoped; enumerated no-RLS exception (ADR-025) despite carrying tenant-scoped rows too — see §2 note below |
 | `core.external_ref` | eip-ingestion | yes | — | Hottest ingestion path (§4); carries `external_key` + `key_aliases` (DomainModel §2.2) |
 | `core.entity_link` | eip-ingestion | yes | — | Correlation edges (DomainModel §2.4, FR-036); §3 DDL, §9 volume row |
 | `core.connector` | eip-connectors | yes | — | |
@@ -69,7 +70,9 @@ Schema-level summary: `work`/`scm`/`cicd`/`quality`/`ops` are the canonical sche
 | `staging.raw_ingest_errors` | eip-ingestion | yes | — | Single raw/normalization dead-letter table (`stage` column distinguishes raw-intake vs normalization failures; same name used in `ConnectorFramework.md`) |
 | `quartz.qrtz_*` | eip-core (infra-owned, accessed via core services only) | no (platform) | — | Quartz clustered JDBC store; tenant scoping lives in job data, not Quartz rows |
 
-**Enumerated no-RLS exceptions** (platform-scoped; any addition requires R-SA + R-DBA sign-off): `core.tenant`, `core.worker_heartbeat`, `analytics.analytics_watermark`, `quartz.qrtz_*`, Flyway history.
+**Enumerated no-RLS exceptions** (platform-scoped; any addition requires R-SA + R-DBA sign-off): `core.tenant`, `core.worker_heartbeat`, `analytics.analytics_watermark`, `quartz.qrtz_*`, Flyway history, **`core.service_token`** (ADR-025 — sign-off outstanding as of that ADR's filing).
+
+`core.service_token` is not purely platform-scoped like the rest of this list — it holds both tenant-scoped rows (`tenant_id` set) and platform-scoped rows (`tenant_id NULL`) in the same table, per SecurityModel §3. It is listed here rather than in the standard `tenant_isolation` policy loop because its authentication lookup (by `token_hash`) runs before any tenant is known — the lookup IS what discovers the tenant — so the standard RLS predicate cannot apply. `ServiceTokenRepository` (`eip-app`) enforces tenant/platform scoping explicitly on every other query path; see ADR-025 for the full rationale and rejected alternatives.
 
 One database, one application role per concern: `eip_app` (DML via RLS), `eip_migrator` (DDL, used only by Flyway), `eip_readonly` (dashboards/BI, RLS-constrained), `eip_maintenance` (partition/retention jobs), plus the dedicated read-only grant for `eip-analytics` canonical reads described above.
 
