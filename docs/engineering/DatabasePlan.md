@@ -480,7 +480,7 @@ Partition management: a scheduled worker in `eip-workers` (Redisson-locked, one 
 - **Expand–contract for zero downtime.** Additive change (new nullable column, new table, dual-write trigger) → deploy code reading both shapes → backfill in batched maintenance job (never in the migration itself if > ~10⁶ rows) → contract migration (drop old column, add NOT NULL) at least one release later. `NOT NULL` additions on large tables use `ADD COLUMN ... DEFAULT` (PG16 is non-rewriting) or `NOT VALID` check + later `VALIDATE`.
 - Transactional DDL everywhere it is possible; `CREATE INDEX CONCURRENTLY` migrations are marked non-transactional and idempotent (`IF NOT EXISTS`).
 - Flyway runs as `eip_migrator` at app startup in dev/demo; in production it runs as an explicit pre-deploy job (K8s Job / compose one-shot) so app pods never hold DDL locks.
-- Baseline: `V1__baseline.sql` contains the full Phase 0 schema (all §3 tables plus the remaining catalog); `V2+` begins with Phase 1 connector additions.
+- Baseline: `V1__baseline.sql` creates all §2 schemas plus the Phase 0 **control-plane** tables (tenancy/security/connector/audit/analytics-metric — the §3 sketches). The connector-populated canonical business tables (`scm`/`cicd`/`quality`/`ops` detail) and later-phase tables (RAG/agent/report) are expand-only additions that land incrementally in `V2+`, with the feature that first populates them, rather than all upfront in `V1`.
 
 ## 8. Read Models for Dashboards (no materialized views)
 
@@ -594,7 +594,7 @@ Backup/restore execution, schedules, and drills are defined in `../operations/Op
 
 ## 14. Acceptance Checklist (Phase 0 DB baseline)
 
-- [ ] `V1__baseline.sql` creates all §2 schemas and §3 tables; Flyway applies cleanly on empty PG16.
+- [ ] `V1__baseline.sql` creates all §2 schemas plus the Phase 0 control-plane tables (§3 sketches); canonical business-domain tables and later-phase (RAG/agent/report) tables land incrementally via `V2+` as their owning features ship. Flyway applies cleanly on empty PG16.
 - [ ] All tenant-scoped tables have RLS enabled + forced; cross-tenant smoke test returns zero rows under `eip_app`.
 - [ ] `vector` extension installed; HNSW index builds on a seeded `ai.rag_chunk_embedding_<modelKey>` sample.
 - [ ] Partitioned tables (`analytics.metric_fact`, `audit.audit_event`, `core.processed_events`, `ai.rag_retrieval_audit`, `staging.raw_*`) have current + 3 future partitions; partition worker creates/drops idempotently.

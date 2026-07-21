@@ -21,9 +21,15 @@ This document is the authoritative ownership map of the EIP monorepo: which engi
 | `/simulation` | R-CNA | R-QAA (golden/test data fitness) | [../docs/infrastructure/LocalDevelopment.md](../docs/infrastructure/LocalDevelopment.md) §7 |
 | `/docs` (except `/docs/adr`) | R-DE | domain architects (technical accuracy of their sections) | [./DocumentationStandards.md](./DocumentationStandards.md) |
 | `/docs/adr` | R-CA | — | [./ADRProcess.md](./ADRProcess.md) |
-| `/engineering-operating-system`, `/CLAUDE.md`, `/CODEOWNERS` | R-CA | — | this bundle |
+| `/engineering-operating-system`, `/CLAUDE.md`, `.github/CODEOWNERS` | R-CA | — | this bundle |
 | `/work` | R-TPM | — | [./SprintExecutionGuide.md](./SprintExecutionGuide.md) |
 | `/backend` build scaffolding (`buildSrc`, `gradle/`, `settings.gradle.kts`) | R-BA | R-DOA (CI integration) | [../docs/engineering/BackendPlan.md](../docs/engineering/BackendPlan.md) §1, [./DependencyManagement.md](./DependencyManagement.md) |
+| `/program`, `/sprints` (top-level; pre-EOS program/sprint-planning artifacts, distinct from `/work/sprints`) | R-TPM | — | program/sprint state — same rationale as `/work` |
+| `/reviews` | R-CA | — | architecture readiness review records |
+| `/CONTRIBUTING.md` | R-DE | — | contributor-facing documentation of record |
+| `/LICENSE` | R-CA | — | governance/legal |
+| `/.editorconfig`, `/.gitignore` | R-DOA | — | dev tooling defaults |
+| `*` (any path matching no other rule) | R-CA | — | ambiguous-ownership default (§6.3 orphaned-code rule) |
 
 ### 1.1 Stream → role mapping
 
@@ -72,6 +78,8 @@ Every backend module and `/frontend` carries a `MODULE.md` created with the modu
 ## 4. CODEOWNERS (Phase 0, ready to commit)
 
 Each role maps to the team alias `@eip/r-<xx>` (lower-cased role ID). Team membership — which agent service accounts and humans hold each role — is administered by the human repository owner; R-CR reviews are enforced separately as a required review, since R-CR reviews every PR and is deliberately absent from CODEOWNERS. GitHub semantics: **last matching rule wins**, so specific paths follow general ones.
+
+The block below is the **original Phase 0 draft**, retained for historical reference. It is no longer byte-identical to the committed `.github/CODEOWNERS`, which has since evolved (added `/program`, `/sprints`, `/reviews`, the loose root files, and a `*` default; reordered for correct last-match-wins semantics — see that file's own header comments for the full reconciliation history, DEBT-006). `.github/CODEOWNERS` is the authoritative content; §1 above is the up-to-date ownership map. Treat this block as illustrative of Phase 0 intent, not as a diffable source of truth.
 
 ```
 # CODEOWNERS — paths → owning engineering roles (see engineering-operating-system/ModuleOwnership.md)
@@ -124,7 +132,7 @@ Notes:
 
 1. Multiple owners on one line = any listed owner's approval satisfies the code-owner requirement; the co-ownership scoping of §2 is enforced by review convention and R-CR verification, not by GitHub.
 2. R-SA is intentionally not path-mapped: security review routes by change class (CC-2 → G3 full checklist + R-SA sign-off), because security-relevant diffs cross paths.
-3. `CODEOWNERS` lives at the repository root per [./RepositoryStructure.md](./RepositoryStructure.md) §1.
+3. `CODEOWNERS` lives at `.github/CODEOWNERS`, not the repository root. GitHub resolves CODEOWNERS identically whether it is placed at the repository root, in `.github/`, or in `docs/`, so the path mappings above are unaffected; the file's own header comments record the reconciliation (DEBT-006).
 
 ## 5. Ownership transfer protocol
 
@@ -149,7 +157,7 @@ An owner who becomes unavailable mid-sprint is substituted by their co-owner; if
 
 Ownership is live from the first commit, not retrofitted:
 
-- [ ] Root `CODEOWNERS` committed exactly as §4 (first 10 PRs of [../docs/implementation/PhaseBasedImplementationPlan.md](../docs/implementation/PhaseBasedImplementationPlan.md)).
+- [ ] `.github/CODEOWNERS` committed per the §4 draft, evolving as needed (first 10 PRs of [../docs/implementation/PhaseBasedImplementationPlan.md](../docs/implementation/PhaseBasedImplementationPlan.md)).
 - [ ] Team aliases `@eip/r-*` created and populated by the human repository owner before the first non-governance PR merges.
 - [ ] Branch protection enables *require review from Code Owners* plus the required checks of [./BranchingStrategy.md](./BranchingStrategy.md) §7.
 - [ ] `codeowners-coverage` check wired into CI (fails on unmatched paths).

@@ -86,7 +86,7 @@ All metrics are produced via Micrometer with OTel/Prometheus export, prefix `eip
 | `eip_rag_index_documents` | gauge | `tenantId, store` | Corpus size; re-index progress observable |
 | `eip_report_generation_duration_seconds` | histogram | `tenantId, report_type` | Report job latency end-to-end |
 | `eip_report_jobs_total` | counter | `tenantId, report_type, outcome=ok\|failed` | Report success rate SLO input |
-| `eip_api_request_duration_seconds` | histogram | `method, route, status` | RED metrics for `/api/v1`; HPA signal for `eip-app`; route is the template, never raw path |
+| `eip_api_request_duration_seconds` | histogram | `method, route, status, tenant_present` | RED metrics for `/api/v1`; HPA signal for `eip-app`; route is the template, never raw path. `tenant_present` is a bounded boolean (never the tenant id) emitted by `eip-app`'s `ApiObservabilityFilter` (§3 label cardinality principle) |
 | `eip_api_requests_inflight` | gauge | `deployable` | Saturation on the API tier |
 | `eip_cache_hit_ratio` | gauge | `cache` | Redis/Caffeine cache effectiveness per named cache |
 | `eip_db_pool_connections_active` | gauge | `pool` | Hikari pool saturation |

@@ -80,7 +80,7 @@ Size limits (CI-enforced):
 
 ## 7. CODEOWNERS semantics
 
-1. The root `CODEOWNERS` file (content in [./ModuleOwnership.md](./ModuleOwnership.md) §4) maps repository paths to engineering role IDs via team aliases `@eip/r-<xx>` (e.g. `@eip/r-ba` = R-BA). Branch protection enables *require review from Code Owners*: a PR touching an owned path cannot merge without the owning role's approval.
+1. `.github/CODEOWNERS` (ownership map in [./ModuleOwnership.md](./ModuleOwnership.md) §1; the §4 content block is the original Phase 0 draft, illustrative only — see that section's note) maps repository paths to engineering role IDs via team aliases `@eip/r-<xx>` (e.g. `@eip/r-ba` = R-BA). Branch protection enables *require review from Code Owners*: a PR touching an owned path cannot merge without the owning role's approval.
 2. CODEOWNERS approval implements the **owning-architect leg** of G4/G8; it never replaces R-CR's independent G8 verdict.
 3. Last-match-wins ordering is significant; more specific paths (e.g. the Flyway migration directory → R-DBA) MUST appear after their parent rules.
 4. The `codeowners-coverage` CI check fails any PR containing a file that matches **no** CODEOWNERS rule (orphaned-code rule, [./ModuleOwnership.md](./ModuleOwnership.md) §6). A PR creating a new top-level path MUST extend CODEOWNERS and [./ModuleOwnership.md](./ModuleOwnership.md) in the same PR.

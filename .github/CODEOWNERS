@@ -12,10 +12,9 @@
 # security review routes by change class (CC-2 → G3 + R-SA sign-off), because security-relevant
 # diffs cross paths (ModuleOwnership §4 note 2).
 #
-# Reconciliations recorded in work/tasks/TASK-0007.md:
-#  - Location: this file is at .github/CODEOWNERS (task instruction); ModuleOwnership §4 note 3 /
-#    RepositoryRules §7.1 name the repo root. GitHub honors both identically; path mappings are
-#    unaffected. Flagged for R-CA (the CODEOWNERS-change approver, RepositoryRules §7.5).
+# Reconciliations recorded in work/tasks/TASK-0007.md (location drift RESOLVED by DEBT-006 — see
+# work/debt-register.md: ModuleOwnership §1/§4 note 3 and RepositoryRules §7.1 now correctly name
+# .github/CODEOWNERS, not the repo root):
 #  - Ordering: §4's listed order places /docs/adr/ before /docs/, which under last-match-wins would
 #    misassign ADRs to R-DE. Reordered general→specific per RepositoryRules §7.3 to honor §1's map.
 #  - Coverage: /program, /sprints, /reviews and the loose root files were added after §4 was

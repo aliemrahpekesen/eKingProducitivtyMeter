@@ -7,7 +7,6 @@ This document is the canonical map of the EIP monorepo: the full target tree, th
 ```
 /
 ├── CLAUDE.md                        # session bootstrap read first by every engineering agent
-├── CODEOWNERS                       # paths → owning roles (ModuleOwnership.md §4)
 ├── README.md                        # repository index and documentation map
 ├── Makefile                         # dev workflow entry points (make dev-up, make test, …)
 ├── .github/workflows/               # CI pipelines implementing G1–G3/G7 + release pipeline
@@ -33,7 +32,7 @@ This document is the canonical map of the EIP monorepo: the full target tree, th
 | Path | Purpose (one line) | Appears | Owner |
 |---|---|---|---|
 | `/CLAUDE.md` | Universal session bootstrap — the operating manual every engineering agent reads first | Phase 0 | R-CA |
-| `/CODEOWNERS` | Maps paths to owning engineering roles (content: [./ModuleOwnership.md](./ModuleOwnership.md) §4) | Phase 0 | R-CA |
+| `/.github/CODEOWNERS` | Maps paths to owning engineering roles (map: [./ModuleOwnership.md](./ModuleOwnership.md) §1; illustrative Phase-0 draft: §4) | Phase 0 | R-CA |
 | `/README.md` | Repository index and documentation map | exists | R-DE |
 | `/Makefile` | Single entry point for dev workflows (`make dev-up`, `make test`, … per [../docs/infrastructure/LocalDevelopment.md](../docs/infrastructure/LocalDevelopment.md) §13) | Phase 0 | R-DOA |
 | `/.github/` | CI workflows implementing gates G1–G3/G7 and the release pipeline | Phase 0 | R-DOA |
