@@ -1,8 +1,9 @@
 # EIP CI pipeline — enforces the QualityGatePolicy merge gates (G1/G2/G3-auto) on every PR to the
 # repository's base branch. Gate → stage map (CodingStandards.md §1): Spotless/Checkstyle/Error
-# Prone/NullAway/Modulith/ArchUnit = G1; JUnit + JaCoCo coverage ratchet = G2; ESLint + tsc = G1
-# (frontend); gitleaks + dependency review = G3-automated; docs-lint (links/ids/counts/canonical
-# greps) = G7. Branch protection making these checks required is in
+# Prone/NullAway/Modulith/ArchUnit = G1; JUnit + JaCoCo coverage ratchet = G2; ESLint + tsc + the
+# openapi-typescript codegen drift check = G1 (frontend); gitleaks + dependency review =
+# G3-automated; docs-lint (links/ids/counts/canonical greps) = G7. Branch protection making these
+# checks required is in
 # .github/rulesets/main-protection.json (applied via .github/README.md).
 #
 # Base branch: this repo has no `main`; its default/base branch is
@@ -66,6 +67,14 @@ jobs:
           pnpm format:check
           pnpm lint
           pnpm typecheck
+      # DEBT-016 RESOLVED: src/api/types.ts is now a thin re-export of openapi-typescript-generated
+      # schemas (src/api/generated.ts), generated from the committed
+      # backend/eip-app/openapi/eip-openapi-v1.json snapshot. This step regenerates into the same
+      # committed path and fails the build on any diff — the frontend-codegen drift gate, mirroring
+      # the additive-only OpenAPI diff gate spirit (DEBT-011, backend-side, tracked separately).
+      - name: OpenAPI→TS codegen drift check — G1
+        working-directory: frontend
+        run: pnpm generate:api:check
       - name: Unit tests (Vitest) — G2
         working-directory: frontend
         run: pnpm test
@@ -96,6 +105,18 @@ jobs:
         uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: high
+          # GHSA-fx2h-pf6j-xcff (vite `server.fs.deny` bypass via Windows alternate-data-stream
+          # paths): a Vite DEV-SERVER-only bypass of a filesystem-access guard, reachable only when
+          # untrusted network clients can reach a running `vite`/`vite dev` process on Windows. This
+          # project's dev server is a local-only tool run by individual engineers, never exposed as
+          # a network service — so the realistic exposure is nil. The fix requires vite 6.4.3+/7.x+,
+          # which pulls @vitejs/plugin-react past a version whose OWN peer range (^8.0.0) outruns the
+          # available vite 7.x line (tested: unmet peer), so taking the major bump now trades one
+          # accepted, scoped, low-exposure finding for a genuine, unresolved peer-dependency break.
+          # Every other finding this scan surfaces (vitest RCE, brace-expansion ReDoS, js-yaml DoS)
+          # was fixed for real (see DEBT-015). Revisit when the vite 7/8 + plugin-react pairing
+          # stabilizes.
+          allow-ghsas: GHSA-fx2h-pf6j-xcff
 
   docs-lint:
     name: docs-lint
