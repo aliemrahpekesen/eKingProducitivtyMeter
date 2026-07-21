@@ -1,7 +1,7 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { TenantContext } from '../app/tenantContext';
-import type { FrictionSummaryView, TeamFrictionView } from '../api/types';
+import type { FrictionEvidenceView, FrictionSummaryView, TeamFrictionView } from '../api/types';
 import { useFrictionEvidence, useFrictionSummary } from '../api/hooks';
 import { FrictionCard } from './FrictionCard';
 
@@ -10,13 +10,15 @@ vi.mock('../api/hooks', () => ({
   useFrictionEvidence: vi.fn(),
 }));
 const mockedUseFriction = vi.mocked(useFrictionSummary);
-vi.mocked(useFrictionEvidence).mockReturnValue({
+const mockedUseEvidence = vi.mocked(useFrictionEvidence);
+mockedUseEvidence.mockReturnValue({
   data: undefined,
   isLoading: false,
   isError: false,
 } as unknown as ReturnType<typeof useFrictionEvidence>);
 
 type FrictionResult = ReturnType<typeof useFrictionSummary>;
+type EvidenceResult = ReturnType<typeof useFrictionEvidence>;
 
 function renderCard(): void {
   render(
@@ -130,5 +132,80 @@ describe('FrictionCard', () => {
 
     expect(screen.getByRole('alert')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+  });
+
+  // DEBT-020 item 5 regression: FrictionSummaryView is @JsonInclude(NON_NULL) on the backend, so
+  // metric/metricVersion/computedAt are OMITTED from the JSON (never sent as `null`) when nothing
+  // has been computed yet — the fixture below omits the keys entirely, exactly like the real
+  // parsed response would. Before the fix, `!== null` was always true for an omitted/`undefined`
+  // field, so this state rendered a bare "Metric" label and crashed reading `metric.name` off
+  // `undefined` in <MetricExplainer>.
+  it('hides the metric line and explainer when the backend omits metric/metricVersion/computedAt', () => {
+    const summaryWithNothingComputedYet: FrictionSummaryView = {
+      teamsReporting: 1,
+      simulation: true,
+      teams: [team('Platform', 91, 'REVIEW_WAIT')],
+    };
+    mockedUseFriction.mockReturnValue({
+      data: summaryWithNothingComputedYet,
+      isLoading: false,
+      isError: false,
+    } as unknown as FrictionResult);
+
+    renderCard();
+
+    expect(screen.queryByText(/^Metric /)).toBeNull();
+    expect(screen.queryByText(/computed/)).toBeNull();
+    expect(screen.queryByText(/is measured/)).toBeNull();
+    expect(screen.getByText(/simulation data/)).toBeInTheDocument();
+  });
+
+  // DEBT-020 item 5 regression: WorkItemEvidenceView is likewise @JsonInclude(NON_NULL) —
+  // pullRequestKey/buildKey/buildStatus/qualityGateKey/qualityGateStatus/workItemKey are OMITTED
+  // (never `null`) when nothing correlated. Before the fix, `buildKey !== null` /
+  // `qualityGateKey !== null` were always true for the omitted/`undefined` fields, rendering
+  // literal "undefined (—)" artifact text.
+  it('renders evidence honestly when the backend omits pullRequestKey/buildKey/qualityGateKey', () => {
+    const evidenceWithNoCorrelatedArtifacts: FrictionEvidenceView = {
+      teamId: 'platform',
+      metricVersion: 'engineering_friction_v0.1',
+      items: [
+        {
+          title: 'Fix flaky checkout test',
+          type: 'TASK',
+          status: 'DONE',
+          cycleTimeSec: 86_400,
+          activeSec: 43_200,
+          blockedSec: 0,
+          reviewWaitSec: 0,
+          waitingSec: 0,
+          reworkCount: 0,
+          transitions: [{ seq: 1, toState: 'DONE', atEpochSec: 1_700_000_000 }],
+        },
+      ],
+    };
+    mockedUseFriction.mockReturnValue({
+      data: summary,
+      isLoading: false,
+      isError: false,
+    } as unknown as FrictionResult);
+    mockedUseEvidence.mockReturnValue({
+      data: evidenceWithNoCorrelatedArtifacts,
+      isLoading: false,
+      isError: false,
+    } as unknown as EvidenceResult);
+
+    renderCard();
+    // jsdom does not simulate the browser's native click-toggles-<details> default action, so the
+    // drawer is opened directly: flip `open` (as the browser would, before dispatching) and fire
+    // the `toggle` event the component's onToggle handler reads `currentTarget.open` from.
+    const details = screen.getAllByText(/Show evidence for/)[0].closest('details');
+    expect(details).not.toBeNull();
+    (details as HTMLDetailsElement).open = true;
+    fireEvent(details as HTMLDetailsElement, new Event('toggle'));
+
+    expect(screen.getByText('Fix flaky checkout test')).toBeInTheDocument();
+    expect(screen.queryByText(/undefined/)).toBeNull();
+    expect(screen.getByText('—')).toBeInTheDocument();
   });
 });

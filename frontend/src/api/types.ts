@@ -1,6 +1,19 @@
 // Types mirror backend/eip-app/openapi/eip-openapi-v1.json exactly (the source of truth). No field
-// is added that the contract does not define. Nullable fields (organizationName, nextCursor, metric)
-// reflect the backend's @Nullable / @JsonInclude(NON_NULL) serialization.
+// is added that the contract does not define.
+//
+// Two distinct backend nullability idioms map to two different TS shapes here — conflating them is
+// a real bug (DEBT-020 item 5): checking `=== null`/`!== null` against a field the backend actually
+// OMITS never fires (the parsed value is `undefined`, never `null`).
+//   - `@Nullable` field, NO `@JsonInclude(NON_NULL)` on the class (e.g. SessionView.organizationName,
+//     AuthConfigView.issuer/clientId, AiPolicyView.provider/baseUrl/model,
+//     ConnectorTypeView.secretLabel): Jackson's default ALWAYS inclusion serializes a real JSON
+//     `null` — typed here as `T | null`, and `=== null`/`!== null` checks against them are correct.
+//   - `@Nullable` field on a class/record annotated `@JsonInclude(Include.NON_NULL)` (PageView's
+//     nextCursor, FrictionSummaryView's metric/metricVersion/computedAt, FrictionEvidenceView's
+//     teamName, its nested WorkItemEvidenceView's workItemKey/pullRequestKey/buildKey/buildStatus/
+//     qualityGateKey/qualityGateStatus, and its nested TransitionEvidenceView's fromState): the field
+//     is OMITTED entirely when null, so it arrives as `undefined` — typed here as an optional
+//     property (`field?: T`), never `T | null`.
 
 export interface SessionView {
   tenantId: string;
@@ -29,7 +42,8 @@ export interface ConnectorView {
 
 export interface PageViewConnectorView {
   items: ConnectorView[];
-  nextCursor?: string | null;
+  /** Omitted (never `null`) when `hasMore` is false — {@code PageView}'s `@JsonInclude(NON_NULL)`. */
+  nextCursor?: string;
   hasMore: boolean;
 }
 
@@ -64,13 +78,13 @@ export interface FrictionMetricView {
 
 export interface TransitionEvidenceView {
   seq: number;
-  fromState: string | null;
+  fromState?: string;
   toState: string;
   atEpochSec: number;
 }
 
 export interface WorkItemEvidenceView {
-  workItemKey: string | null;
+  workItemKey?: string;
   title: string;
   type: string;
   status: string;
@@ -80,25 +94,25 @@ export interface WorkItemEvidenceView {
   reviewWaitSec: number;
   waitingSec: number;
   reworkCount: number;
-  pullRequestKey: string | null;
-  buildKey: string | null;
-  buildStatus: string | null;
-  qualityGateKey: string | null;
-  qualityGateStatus: string | null;
+  pullRequestKey?: string;
+  buildKey?: string;
+  buildStatus?: string;
+  qualityGateKey?: string;
+  qualityGateStatus?: string;
   transitions: TransitionEvidenceView[];
 }
 
 export interface FrictionEvidenceView {
   teamId: string;
-  teamName: string | null;
+  teamName?: string;
   metricVersion: string;
   items: WorkItemEvidenceView[];
 }
 
 export interface FrictionSummaryView {
-  metric: FrictionMetricView | null;
-  metricVersion: string | null;
-  computedAt: string | null;
+  metric?: FrictionMetricView;
+  metricVersion?: string;
+  computedAt?: string;
   simulation: boolean;
   teams: TeamFrictionView[];
   teamsReporting: number;
@@ -234,7 +248,8 @@ export interface ReportView {
 
 export interface PageViewReportView {
   items: ReportView[];
-  nextCursor?: string | null;
+  /** Omitted (never `null`) when `hasMore` is false — {@code ReportPageView}'s `@JsonInclude(NON_NULL)`. */
+  nextCursor?: string;
   hasMore: boolean;
 }
 

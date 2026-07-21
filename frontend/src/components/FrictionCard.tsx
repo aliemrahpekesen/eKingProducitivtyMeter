@@ -107,12 +107,14 @@ function FrictionBody({
       </ol>
 
       <p className="muted friction-meta">
-        {data.metricVersion !== null ? <>Metric {data.metricVersion}</> : null}
-        {data.computedAt !== null ? <> · computed {formatComputedAt(data.computedAt)}</> : null}
+        {data.metricVersion !== undefined ? <>Metric {data.metricVersion}</> : null}
+        {data.computedAt !== undefined ? (
+          <> · computed {formatComputedAt(data.computedAt)}</>
+        ) : null}
         {data.simulation ? <> · simulation data</> : null}
       </p>
 
-      {data.metric !== null ? <MetricExplainer metric={data.metric} /> : null}
+      {data.metric !== undefined ? <MetricExplainer metric={data.metric} /> : null}
     </>
   );
 }
@@ -163,11 +165,11 @@ function TeamEvidence({ tenantId, teamId }: { tenantId: string; teamId: string }
 function EvidenceItem({ item }: { item: WorkItemEvidenceView }): JSX.Element {
   const artifacts = [
     item.pullRequestKey,
-    item.buildKey !== null ? `${item.buildKey} (${item.buildStatus ?? '—'})` : null,
-    item.qualityGateKey !== null
+    item.buildKey !== undefined ? `${item.buildKey} (${item.buildStatus ?? '—'})` : undefined,
+    item.qualityGateKey !== undefined
       ? `${item.qualityGateKey} (${item.qualityGateStatus ?? '—'})`
-      : null,
-  ].filter((a): a is string => a !== null);
+      : undefined,
+  ].filter((a): a is string => a !== undefined);
 
   return (
     <li className="evidence-item">
