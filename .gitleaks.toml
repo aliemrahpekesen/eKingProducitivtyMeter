@@ -1,5 +1,5 @@
 # Gitleaks configuration (G3 secret scan — .github/workflows/ci.yml `security` job).
-# Extends the default ruleset; the allowlist below names the ONLY two sanctioned, documented
+# Extends the default ruleset; the allowlist below names the ONLY sanctioned, documented
 # non-secrets in this repository. Anything else that trips a rule is a real finding — fix it,
 # never widen this list without a security review (SecurityModel §10).
 
@@ -16,4 +16,8 @@ regexes = [
   # ProductionSecretsGuardTest's "looks like a real prod key" pass-case fixture (base64 of
   # "prod-real-master-key-32-bytes-..."), asserting the guard ACCEPTS non-fixture values.
   '''cHJvZC1yZWFsLW1hc3Rlci1rZXktMzItYnl0ZXMt[A-Za-z0-9+/=]*''',
+  # The DEV-ONLY pagination-cursor HMAC signing key default (base64 of
+  # "EIP-DEV-ONLY-CURSOR-SIGN-KEY-32!", DEBT-010). Documented in ApiCursorSigningProperties;
+  # prod/preprod boot REFUSES this exact value (ProductionSecretsGuard), same construction as above.
+  '''RUlQLURFVi1PTkxZLUNVUlNPUi1TSUdOLUtFWS0zMiE=''',
 ]
