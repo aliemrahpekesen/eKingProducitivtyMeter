@@ -20,6 +20,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/roles/{role}/permissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_1"];
+        put: operations["put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/webhooks/{tenantId}/{connectorId}": {
         parameters: {
             query?: never;
@@ -283,7 +299,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_1"];
+        get: operations["get_2"];
         put?: never;
         post?: never;
         delete?: never;
@@ -520,6 +536,22 @@ export interface components {
             temperature: number;
             /** Format: int32 */
             maxTokens: number;
+        };
+        OverrideRequest: {
+            permission: string;
+            granted?: boolean;
+        };
+        UpdateRolePermissionsRequest: {
+            overrides: components["schemas"]["OverrideRequest"][];
+        };
+        OverrideView: {
+            permission: string;
+            granted: boolean;
+        };
+        RolePermissionsView: {
+            role: string;
+            effectivePermissions: string[];
+            overrides: components["schemas"]["OverrideView"][];
         };
         WebhookStatusView: {
             status: string;
@@ -1002,6 +1034,126 @@ export interface operations {
             };
             /** @description The caller lacks the permission this endpoint requires. */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                role: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["RolePermissionsView"];
+                };
+            };
+            /** @description Request validation failed (bad param, cursor, or sort). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description No tenant/caller could be authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description The caller lacks the permission this endpoint requires. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description The requested resource does not exist. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                role: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateRolePermissionsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["RolePermissionsView"];
+                };
+            };
+            /** @description Request validation failed (bad param, cursor, or sort). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description No tenant/caller could be authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description The caller lacks the permission this endpoint requires. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description The requested resource does not exist. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2031,7 +2183,7 @@ export interface operations {
             };
         };
     };
-    get_1: {
+    get_2: {
         parameters: {
             query?: never;
             header?: never;

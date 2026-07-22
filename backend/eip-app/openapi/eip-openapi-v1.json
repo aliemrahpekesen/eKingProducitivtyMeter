@@ -149,6 +149,218 @@
         }
       }
     },
+    "/api/v1/admin/roles/{role}/permissions" : {
+      "get" : {
+        "tags" : [ "admin-role-permission-controller" ],
+        "operationId" : "get_1",
+        "parameters" : [ {
+          "name" : "role",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RolePermissionsView"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Request validation failed (bad param, cursor, or sort).",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/validation" : {
+                    "value" : {
+                      "type" : "/problems/validation",
+                      "title" : "Request validation failed (bad param, cursor, or sort).",
+                      "status" : 400
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "type" : "/problems/unauthenticated",
+                      "title" : "No tenant/caller could be authenticated.",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "type" : "/problems/permission-denied",
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "status" : 403
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "The requested resource does not exist.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/not-found" : {
+                    "value" : {
+                      "type" : "/problems/not-found",
+                      "title" : "The requested resource does not exist.",
+                      "status" : 404
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "put" : {
+        "tags" : [ "admin-role-permission-controller" ],
+        "operationId" : "put",
+        "parameters" : [ {
+          "name" : "role",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/UpdateRolePermissionsRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RolePermissionsView"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Request validation failed (bad param, cursor, or sort).",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/validation" : {
+                    "value" : {
+                      "type" : "/problems/validation",
+                      "title" : "Request validation failed (bad param, cursor, or sort).",
+                      "status" : 400
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "No tenant/caller could be authenticated.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/unauthenticated" : {
+                    "value" : {
+                      "type" : "/problems/unauthenticated",
+                      "title" : "No tenant/caller could be authenticated.",
+                      "status" : 401
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "The caller lacks the permission this endpoint requires.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/permission-denied" : {
+                    "value" : {
+                      "type" : "/problems/permission-denied",
+                      "title" : "The caller lacks the permission this endpoint requires.",
+                      "status" : 403
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "The requested resource does not exist.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                },
+                "examples" : {
+                  "/problems/not-found" : {
+                    "value" : {
+                      "type" : "/problems/not-found",
+                      "title" : "The requested resource does not exist.",
+                      "status" : 404
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/webhooks/{tenantId}/{connectorId}" : {
       "post" : {
         "tags" : [ "webhook-controller" ],
@@ -197,22 +409,22 @@
               }
             }
           },
-          "202" : {
-            "description" : "Accepted and dispatched, or debounced (a trigger arrived moments ago).",
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/WebhookStatusView"
-                }
-              }
-            }
-          },
           "404" : {
             "description" : "No connector with this id exists for this tenant.",
             "content" : {
               "application/problem+json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "202" : {
+            "description" : "Accepted and dispatched, or debounced (a trigger arrived moments ago).",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/WebhookStatusView"
                 }
               }
             }
@@ -448,22 +660,22 @@
               }
             }
           },
-          "502" : {
-            "description" : "The configured LLM provider was unreachable/timed out, or the generated narrative failed numeric verification and was discarded.",
-            "content" : {
-              "application/problem+json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ProblemDetail"
-                }
-              }
-            }
-          },
           "200" : {
             "description" : "OK",
             "content" : {
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ExplanationView"
+                }
+              }
+            }
+          },
+          "502" : {
+            "description" : "The configured LLM provider was unreachable/timed out, or the generated narrative failed numeric verification and was discarded.",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
                 }
               }
             }
@@ -1807,7 +2019,7 @@
     "/api/v1/reports/{id}" : {
       "get" : {
         "tags" : [ "reports-controller" ],
-        "operationId" : "get_1",
+        "operationId" : "get_2",
         "parameters" : [ {
           "name" : "id",
           "in" : "path",
@@ -2926,6 +3138,61 @@
           "maxTokens" : {
             "type" : "integer",
             "format" : "int32"
+          }
+        }
+      },
+      "OverrideRequest" : {
+        "required" : [ "permission" ],
+        "type" : "object",
+        "properties" : {
+          "permission" : {
+            "type" : "string"
+          },
+          "granted" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "UpdateRolePermissionsRequest" : {
+        "required" : [ "overrides" ],
+        "type" : "object",
+        "properties" : {
+          "overrides" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/OverrideRequest"
+            }
+          }
+        }
+      },
+      "OverrideView" : {
+        "type" : "object",
+        "properties" : {
+          "permission" : {
+            "type" : "string"
+          },
+          "granted" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "RolePermissionsView" : {
+        "type" : "object",
+        "properties" : {
+          "role" : {
+            "type" : "string"
+          },
+          "effectivePermissions" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "overrides" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/OverrideView"
+            }
           }
         }
       },
