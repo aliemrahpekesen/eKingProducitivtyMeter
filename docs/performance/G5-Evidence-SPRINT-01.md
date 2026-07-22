@@ -132,8 +132,11 @@ contention; it does not demonstrate the 100k events/h sustained budget (see gaps
 
 1. **100k events/h sustained + 3× burst is NOT demonstrated.** The NFR requires sustained-hour
    ingest on the reference environment with realistic connector payload shapes. Blockers to a
-   real run: `staging.raw_*` is unpartitioned (DEBT-008 / DEBT-017 residual) and normalization
-   re-reads full streams per run — both fine at demo scale, both expected to dominate at 100k/h.
+   real run: `staging.raw_*` is now RANGE-partitioned (V12 closed the DEBT-017/DEBT-008
+   partitioning-schema sub-item — see DatabasePlan §6), but normalization still re-reads full
+   streams per run — fine at demo scale, expected to dominate at 100k/h. Partitioning alone does
+   not demonstrate the sustained-throughput budget; it only removes one scale blocker (unbounded
+   staging-table bloat) ahead of the still-unbuilt reference-environment run described below.
    The reference run must measure: sustained ingest rate over ≥ 1 h, staging table bloat/vacuum
    behaviour, normalize wall time growth vs. total history, outbox relay lag
    (`eip_outbox_published_total` rate vs. insert rate), and consumer recompute lag under the new

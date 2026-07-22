@@ -5,6 +5,7 @@
 package com.eip.ingestion.persistence;
 
 import com.eip.connectors.spi.RawRecord;
+import java.sql.Timestamp;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -21,6 +22,20 @@ import org.springframework.stereotype.Repository;
  * independent of record count. The {@code WHERE ... IS DISTINCT FROM} guard makes the upsert a
  * database-level no-op for unchanged payloads (no {@code ingested_at} churn), even though callers
  * already pre-classify.
+ *
+ * <p>{@code staging.raw_*} tables are RANGE-partitioned on {@code first_ingested_at} (V12, DEBT-017
+ * partitioning sub-item) — a column deliberately SEPARATE from {@code ingested_at}. Every unique
+ * constraint on a partitioned table must include the partition key, and {@code ingested_at} is
+ * refreshed to {@code now()} on every content-changing re-ingest; widening the constraint with that
+ * column would silently defeat conflict detection (a fresh value never matches the stored one) and
+ * — even where it happened to match — PostgreSQL flatly refuses an {@code ON CONFLICT DO UPDATE}
+ * that would move a row to a different partition. {@code first_ingested_at} is instead set once and
+ * never advanced, so a row's partition never changes after creation. For the conflict arbiter to
+ * still match on repeat ingests of an already-seen natural key, {@link #upsertAll} loads each
+ * affected row's existing {@code first_ingested_at} first (one extra bounded SELECT, mirroring
+ * {@link #contentHashes}) and resupplies it explicitly — genuinely new natural keys pass {@code
+ * null} and get the column {@code DEFAULT now()} instead. See V12's migration header for the full
+ * design rationale.
  */
 @Repository
 public class StagingRawRepository {
@@ -60,9 +75,10 @@ public class StagingRawRepository {
       """
       INSERT INTO %s
         (tenant_id, connector_id, stream, natural_key, source_system, source_instance,
-         external_id, op, fetch_kind, payload, content_hash)
-      VALUES (current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?)
-      ON CONFLICT (tenant_id, connector_id, stream, natural_key) DO UPDATE SET
+         external_id, op, fetch_kind, payload, content_hash, first_ingested_at)
+      VALUES (current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?,
+              COALESCE(?, now()))
+      ON CONFLICT (tenant_id, connector_id, stream, natural_key, first_ingested_at) DO UPDATE SET
         source_system = EXCLUDED.source_system, source_instance = EXCLUDED.source_instance,
         external_id = EXCLUDED.external_id, op = EXCLUDED.op, fetch_kind = EXCLUDED.fetch_kind,
         payload = EXCLUDED.payload, content_hash = EXCLUDED.content_hash, ingested_at = now()
@@ -156,7 +172,11 @@ public class StagingRawRepository {
    * @param changes the pre-classified inserts/updates (unchanged records are not sent)
    */
   public void upsertAll(String table, UUID connectorId, List<RawUpsert> changes) {
+    if (changes.isEmpty()) {
+      return;
+    }
     String bare = table.substring(table.indexOf('.') + 1);
+    Map<String, Timestamp> existingFirstIngestedAt = existingFirstIngestedAt(table, connectorId);
     jdbcTemplate.batchUpdate(
         UPSERT.formatted(table, bare),
         changes,
@@ -173,7 +193,36 @@ public class StagingRawRepository {
           ps.setString(8, r.fetchKind().name().toLowerCase(Locale.ROOT));
           ps.setString(9, change.canonicalJson());
           ps.setBytes(10, change.contentHash());
+          ps.setTimestamp(11, existingFirstIngestedAt.get(streamKey(r.stream(), r.naturalKey())));
         });
+  }
+
+  /**
+   * Loads the connector's existing {@code first_ingested_at} per natural key, keyed {@code
+   * stream|naturalKey} — one extra bounded SELECT (mirrors {@link #contentHashes}) so {@link
+   * #upsertAll} can resupply each already-seen row's stable partition anchor explicitly on every
+   * re-ingest, instead of letting it default to a fresh value the widened {@code ON CONFLICT}
+   * arbiter (V12) would never match against the stored row (see the class-level javadoc).
+   *
+   * @param table the fully qualified raw table
+   * @param connectorId the owning connector
+   * @return existing {@code first_ingested_at} by stream + natural key; a natural key absent from
+   *     this map has never been seen before and gets the column {@code DEFAULT now()} instead
+   */
+  private Map<String, Timestamp> existingFirstIngestedAt(String table, UUID connectorId) {
+    Map<String, Timestamp> firstIngestedAt = new HashMap<>();
+    jdbc.sql(
+            "SELECT stream, natural_key, first_ingested_at FROM "
+                + table
+                + " WHERE connector_id = :connectorId")
+        .param("connectorId", connectorId)
+        .query(
+            (rs, rowNum) -> {
+              firstIngestedAt.put(streamKey(rs.getString(1), rs.getString(2)), rs.getTimestamp(3));
+              return Boolean.TRUE;
+            })
+        .list();
+    return firstIngestedAt;
   }
 
   /**
