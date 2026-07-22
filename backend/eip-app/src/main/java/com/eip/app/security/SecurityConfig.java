@@ -42,6 +42,7 @@ public class SecurityConfig {
   };
 
   private final EipSecurityProperties properties;
+  private final EipOidcClaimProperties oidcClaimProperties;
   private final ProblemAuthenticationEntryPoint authenticationEntryPoint;
   private final ProblemAccessDeniedHandler accessDeniedHandler;
   private final ServiceTokenAuthenticationFilter serviceTokenAuthenticationFilter;
@@ -50,16 +51,20 @@ public class SecurityConfig {
    * Creates the security configuration.
    *
    * @param properties the active {@code eip.security.mode}
+   * @param oidcClaimProperties the deployment-level tenant/roles claim-name overrides (DEBT-012
+   *     residual)
    * @param authenticationEntryPoint the 401 problem+json renderer
    * @param accessDeniedHandler the 403 problem+json renderer
    * @param serviceTokenAuthenticationFilter the mode-independent service-token auth path
    */
   public SecurityConfig(
       EipSecurityProperties properties,
+      EipOidcClaimProperties oidcClaimProperties,
       ProblemAuthenticationEntryPoint authenticationEntryPoint,
       ProblemAccessDeniedHandler accessDeniedHandler,
       ServiceTokenAuthenticationFilter serviceTokenAuthenticationFilter) {
     this.properties = properties;
+    this.oidcClaimProperties = oidcClaimProperties;
     this.authenticationEntryPoint = authenticationEntryPoint;
     this.accessDeniedHandler = accessDeniedHandler;
     this.serviceTokenAuthenticationFilter = serviceTokenAuthenticationFilter;
@@ -121,14 +126,16 @@ public class SecurityConfig {
   @ConditionalOnProperty(prefix = "eip.security", name = "mode", havingValue = "oidc")
   public JwtDecoder jwtDecoder(
       @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri}") String issuerUri) {
-    return new LazyJwtDecoder(() -> buildDecoder(issuerUri));
+    String tenantClaim = oidcClaimProperties.tenantClaim();
+    return new LazyJwtDecoder(() -> buildDecoder(issuerUri, tenantClaim));
   }
 
-  private static JwtDecoder buildDecoder(String issuerUri) {
+  private static JwtDecoder buildDecoder(String issuerUri, String tenantClaim) {
     NimbusJwtDecoder decoder = NimbusJwtDecoder.withIssuerLocation(issuerUri).build();
     OAuth2TokenValidator<Jwt> validators =
         new DelegatingOAuth2TokenValidator<>(
-            JwtValidators.createDefaultWithIssuer(issuerUri), new EipTenantClaimValidator());
+            JwtValidators.createDefaultWithIssuer(issuerUri),
+            new EipTenantClaimValidator(tenantClaim));
     decoder.setJwtValidator(validators);
     return decoder;
   }

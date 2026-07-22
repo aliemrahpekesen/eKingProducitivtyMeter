@@ -12,7 +12,9 @@ import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
 import org.springframework.security.oauth2.jwt.Jwt;
 
 /**
- * Validates that a JWT carries the {@value #TENANT_CLAIM} custom claim as a well-formed UUID
+ * Validates that a JWT carries its configured tenant claim ({@link #TENANT_CLAIM} by default,
+ * overridable deployment-wide via {@link EipOidcClaimProperties#tenantClaim()} — DEBT-012 residual,
+ * see that class's javadoc for why this is deployment-level, not per-tenant) as a well-formed UUID
  * (SecurityModel §4: the OIDC tenant claim). Composed with the standard issuer/timestamp validators
  * on the {@code oidc}-mode {@link org.springframework.security.oauth2.jwt.JwtDecoder} bean, so a
  * token failing this check never reaches an authenticated {@link
@@ -20,19 +22,32 @@ import org.springframework.security.oauth2.jwt.Jwt;
  * resource-server filter raises the failure through the resource-server's {@code
  * AuthenticationEntryPoint} (SecurityModel: "token carries no tenant" 401), and {@code
  * com.eip.app.tenant.OidcTenantResolver}/{@link EipPrincipalFilter} can then trust the claim is
- * present and valid whenever authentication has succeeded.
+ * present and valid whenever authentication has succeeded — both read the SAME configured claim
+ * name this validator checked, so they can never disagree with each other.
  */
 public final class EipTenantClaimValidator implements OAuth2TokenValidator<Jwt> {
 
-  /** The custom JWT claim carrying the caller's tenant id (SecurityModel §4). */
+  /** The default JWT claim carrying the caller's tenant id (SecurityModel §4). */
   public static final String TENANT_CLAIM = "eip_tenant";
 
   private static final OAuth2Error NO_TENANT_ERROR =
       new OAuth2Error("invalid_token", "token carries no tenant", null);
 
+  private final String claimName;
+
+  /**
+   * Creates the validator.
+   *
+   * @param claimName the configured tenant-claim name ({@link
+   *     EipOidcClaimProperties#tenantClaim()})
+   */
+  public EipTenantClaimValidator(String claimName) {
+    this.claimName = claimName;
+  }
+
   @Override
   public OAuth2TokenValidatorResult validate(Jwt token) {
-    @Nullable String claim = token.getClaimAsString(TENANT_CLAIM);
+    @Nullable String claim = token.getClaimAsString(claimName);
     if (claim == null || claim.isBlank() || !isUuid(claim)) {
       return OAuth2TokenValidatorResult.failure(NO_TENANT_ERROR);
     }

@@ -16,13 +16,32 @@ import org.springframework.security.oauth2.jwt.Jwt;
 /** Unit-tests {@link EipTenantClaimValidator} in isolation, without a Spring context. */
 class EipTenantClaimValidatorTest {
 
-  private final EipTenantClaimValidator validator = new EipTenantClaimValidator();
+  private final EipTenantClaimValidator validator =
+      new EipTenantClaimValidator(EipTenantClaimValidator.TENANT_CLAIM);
 
   @Test
   void succeeds_when_the_claim_is_a_well_formed_uuid() {
     OAuth2TokenValidatorResult result = validator.validate(jwt(UUID.randomUUID().toString()));
 
     assertThat(result.hasErrors()).isFalse();
+  }
+
+  @Test
+  void a_non_default_configured_claim_name_is_honored() {
+    // DEBT-012 residual (part 2): a deployment overriding eip.security.oidc.tenant-claim gets a
+    // validator constructed with that name — proving the claim name is genuinely threaded through,
+    // not hardcoded, at the unit level (the full end-to-end proof lives in the oidc integration
+    // test).
+    EipTenantClaimValidator custom = new EipTenantClaimValidator("custom_tenant_claim");
+    UUID tenantId = UUID.randomUUID();
+
+    OAuth2TokenValidatorResult underDefaultName =
+        custom.validate(jwt(Map.of(EipTenantClaimValidator.TENANT_CLAIM, tenantId.toString())));
+    assertThat(underDefaultName.hasErrors()).isTrue(); // wrong claim name — not found
+
+    OAuth2TokenValidatorResult underConfiguredName =
+        custom.validate(jwt(Map.of("custom_tenant_claim", tenantId.toString())));
+    assertThat(underConfiguredName.hasErrors()).isFalse();
   }
 
   @Test

@@ -48,7 +48,8 @@ DECLARE
     'analytics.rm_team_friction_current', -- TASK-0016 INC-2 (computed friction read model)
     'reports.generated_report',      -- TASK-0022 M4 Wave R1 (deterministic report engine)
     'core.tenant_ai_policy',         -- M6-A (ADR-024, per-tenant AI explanation layer policy)
-    'ai.llm_call_audit'              -- M6-A (ADR-024, hash-only LLM call audit ledger)
+    'ai.llm_call_audit',             -- M6-A (ADR-024, hash-only LLM call audit ledger)
+    'core.tenant_role_permission_override' -- V11 (ADR-026, DEBT-012 residual: tenant role overrides)
   ];
   -- Platform-scoped (enumerated no-RLS exceptions, DatabasePlan §2): core.tenant,
   -- core.worker_heartbeat, analytics.analytics_watermark — deliberately absent from this list.

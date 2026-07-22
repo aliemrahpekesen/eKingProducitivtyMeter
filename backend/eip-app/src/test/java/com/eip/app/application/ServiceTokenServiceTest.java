@@ -158,7 +158,11 @@ class ServiceTokenServiceTest {
   void create_platformScopedSucceedsForAPlatformAdminCaller() {
     EipPrincipalHolder.set(
         new EipPrincipal(
-            null, Set.of(Role.PLATFORM_ADMIN), Role.PLATFORM_ADMIN.permissions(), "test-admin"));
+            null,
+            Set.of(Role.PLATFORM_ADMIN),
+            Role.PLATFORM_ADMIN.permissions(),
+            "test-admin",
+            Set.of()));
     try {
       CreateServiceTokenResult result =
           service.create(

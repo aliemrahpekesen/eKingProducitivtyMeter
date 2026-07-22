@@ -22,13 +22,25 @@ import org.jspecify.annotations.Nullable;
  *     (that remains {@link com.eip.tenancy.context.TenantContextHolder}'s job via the {@link
  *     com.eip.app.tenant.TenantResolver} seam; this field is informational only)
  * @param roles the caller's resolved roles (unknown JWT realm roles are ignored, never widened)
- * @param permissions the union of {@code roles}' {@link Role#permissions()} — what {@link
+ * @param permissions the union of {@code roles}' {@link Role#permissions()} (adjusted by any
+ *     tenant-editable role-permission overrides, SecurityModel §4) — what {@link
  *     PermissionEnforcementInterceptor} actually checks
  * @param subject the caller's subject (JWT {@code sub}, or a fixed demo label in header mode) — for
  *     logs/audit only, never trusted as a tenant or permission source
+ * @param scopedTeamIds resource-level team scope (SecurityModel §4 layer 2): empty means
+ *     unrestricted (every existing caller's behavior, unchanged — the default every
+ *     non-manager-scope principal resolves to); non-empty restricts the caller to those teams'
+ *     data, enforced by the application/composition layer (not by permission checks, which stay
+ *     role-based). Only ever populated for a manager-scope role holder presenting the {@code
+ *     eip_teams} JWT claim ({@link EipPrincipalFilter}) — see that class's javadoc for the exact
+ *     gating rule.
  */
 public record EipPrincipal(
-    @Nullable UUID tenantId, Set<Role> roles, Set<Permission> permissions, String subject) {
+    @Nullable UUID tenantId,
+    Set<Role> roles,
+    Set<Permission> permissions,
+    String subject,
+    Set<UUID> scopedTeamIds) {
 
   /** Subject label for the header-mode demo convenience principal. */
   public static final String HEADER_MODE_SUBJECT = "header-mode-demo";
@@ -44,7 +56,7 @@ public record EipPrincipal(
    * @return an anonymous, permission-less principal
    */
   public static EipPrincipal anonymous() {
-    return new EipPrincipal(null, Set.of(), Set.of(), ANONYMOUS_SUBJECT);
+    return new EipPrincipal(null, Set.of(), Set.of(), ANONYMOUS_SUBJECT, Set.of());
   }
 
   /**

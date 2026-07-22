@@ -141,8 +141,16 @@ public class ServiceTokenAuthenticationFilter extends OncePerRequestFilter {
                 .collect(
                     java.util.stream.Collectors.toCollection(
                         () -> EnumSet.noneOf(Permission.class)));
+    // scopedTeamIds is always empty for a service token (DEBT-012 residual, part 2): meaningfully
+    // exposing a per-token team scope requires a field on ServiceTokenController's creation
+    // request,
+    // and that file is an existing controller outside this change's "new controller only" write-set
+    // boundary for com.eip.app.api — see the implementing task's final report/ADR-026 for the
+    // explicit deferral rather than a silent half-wiring (a schema column with no way to ever set
+    // it
+    // would be dead weight).
     return new EipPrincipal(
-        record.tenantId(), Set.of(role), permissions, "service-token:" + record.id());
+        record.tenantId(), Set.of(role), permissions, "service-token:" + record.id(), Set.of());
   }
 
   private static Optional<String> extractServiceToken(HttpServletRequest request) {
