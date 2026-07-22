@@ -53,19 +53,29 @@ jobs:
       # `--rerun` forces the export test to execute again even though the "Build + unit" step above
       # already ran it once without the export env var (Gradle does not treat env vars as task inputs,
       # so without `--rerun` this would be wrongly reported up-to-date and skip regenerating the file).
+      #
+      # STRUCTURAL (jq -S, key-order-independent) comparison, not a raw text diff: springdoc's
+      # generated JSON object-key order is not guaranteed stable across JVM runs (observed directly —
+      # a fresh CI JVM produced a differently-ordered but byte-for-byte-equivalent document versus a
+      # long-lived local Gradle daemon, false-failing a plain `git diff`). `jq -S` recursively sorts
+      # object keys before comparing, so the gate only fires on a REAL content difference.
       - name: OpenAPI additive-only diff gate (drift check) — G1
         working-directory: backend
         env:
           EIP_OPENAPI_EXPORT: '1'
         run: |
+          cp eip-app/openapi/eip-openapi-v1.json /tmp/openapi-committed.json
           ./gradlew --no-daemon :eip-app:test --rerun \
             --tests "com.eip.app.TenantApiIntegrationTest.openapi_contract_is_generated_for_the_v1_surface"
-          if ! git diff --exit-code -- eip-app/openapi/eip-openapi-v1.json; then
+          if ! diff -q \
+              <(jq -S . /tmp/openapi-committed.json) \
+              <(jq -S . eip-app/openapi/eip-openapi-v1.json) > /dev/null; then
             echo "::error::backend/eip-app/openapi/eip-openapi-v1.json is stale (committed snapshot" \
               "no longer matches what the current code generates). Run: EIP_OPENAPI_EXPORT=1" \
               "./gradlew -p backend :eip-app:test --tests" \
               "\"com.eip.app.TenantApiIntegrationTest.openapi_contract_is_generated_for_the_v1_surface\"" \
               "and commit the regenerated snapshot."
+            diff <(jq -S . /tmp/openapi-committed.json) <(jq -S . eip-app/openapi/eip-openapi-v1.json) || true
             exit 1
           fi
 

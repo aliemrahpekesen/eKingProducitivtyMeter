@@ -156,13 +156,17 @@ public class OpenApiConfig {
    * @return the reusable problem+json {@code ApiResponse}
    */
   public static ApiResponse problemResponse(String description, String problemType, int status) {
-    Example example =
-        new Example()
-            .value(
-                Map.of(
-                    "type", problemType,
-                    "title", description,
-                    "status", status));
+    // LinkedHashMap, not Map.of(): Map.of()'s iteration order for 2+ entries is randomized per JVM
+    // run (a hash-flooding mitigation), which would make the generated OpenAPI snapshot's example
+    // key order vary between builds -- silently breaking the additive-only diff gate (DEBT-011)
+    // every time CI happens to start a JVM with a different random seed than the one that last
+    // regenerated the committed file. A LinkedHashMap's order is exactly the insertion order below,
+    // every run, on every JVM.
+    Map<String, Object> exampleValue = new java.util.LinkedHashMap<>();
+    exampleValue.put("type", problemType);
+    exampleValue.put("title", description);
+    exampleValue.put("status", status);
+    Example example = new Example().value(exampleValue);
     return new ApiResponse()
         .description(description)
         .content(
