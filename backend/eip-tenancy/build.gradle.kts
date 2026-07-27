@@ -16,6 +16,15 @@ dependencies {
     implementation(libs.spring.jdbc)
     implementation(libs.spring.context) // @Service/@Repository admin layer (ADR-022 M1)
 
+    // DEBT-024 Wave 3A (audit hash-chain): Jackson canonicalizes audit rows to deterministic JSON
+    // for hashing (mirrors eip-ingestion's RawPayloadCodec); Micrometer records write/chain/verify
+    // counters and the chain-lag gauge; micrometer-tracing's Tracer (API only — eip-app's OTel
+    // bridge supplies the bean) is how AuditService reads the current span's traceId, mirroring
+    // com.eip.app.security.ProblemResponses/ApiExceptionHandler's exact idiom.
+    implementation(libs.jackson.databind)
+    implementation("io.micrometer:micrometer-core")
+    implementation("io.micrometer:micrometer-tracing")
+
     // Spring Modulith package metadata (annotations only, compile-time; verified application-wide
     // from eip-app's ApplicationModules test — BackendPlan §3).
     compileOnly(platform(libs.spring.modulith.bom))

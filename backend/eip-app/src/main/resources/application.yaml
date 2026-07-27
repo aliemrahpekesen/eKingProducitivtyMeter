@@ -75,6 +75,17 @@ eip:
   reports:
     scheduled-enabled: true
     schedule-cron: "0 0 6 * * MON"
+  # Hash-chained audit log (DEBT-024 Wave 3A, SecurityModel §11): the async per-tenant chainer
+  # assigns prev_hash/hash on rows the write path inserted unchained, and the verifier re-walks
+  # each tenant's chain recomputing hashes to catch tampering. enabled defaults ON; set to false to
+  # disable both schedulers entirely (e.g. a test that drives chaining/verification explicitly and
+  # would otherwise race the scheduled passes).
+  audit:
+    enabled: true
+    chainer-delay-ms: 5000
+    chainer-batch-size: 500
+    verify-cron: "0 0 * * * *"
+    verify-max-rows: 50000
 
 springdoc:
   api-docs:
