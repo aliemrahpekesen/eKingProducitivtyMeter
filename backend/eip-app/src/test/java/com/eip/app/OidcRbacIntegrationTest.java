@@ -7,6 +7,10 @@ package com.eip.app;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.not;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -20,6 +24,7 @@ import com.eip.app.tenant.HeaderTenantResolver;
 import com.jayway.jsonpath.JsonPath;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.List;
@@ -27,6 +32,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
 import org.flywaydb.core.Flyway;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -88,6 +94,10 @@ class OidcRbacIntegrationTest {
     registry.add("spring.datasource.username", () -> "eip_app");
     registry.add("spring.datasource.password", () -> "eip_app_pw");
     registry.add("spring.flyway.enabled", () -> "false");
+    // Disable the async audit chainer/verifier schedulers — this test drives only the synchronous
+    // access.denied WRITE path (AuditService.record, not gated by this flag); the schedulers add
+    // noise and are covered by AuditChainIntegrationTest instead.
+    registry.add("eip.audit.enabled", () -> "false");
   }
 
   private static void prepareDatabase() {
@@ -103,7 +113,7 @@ class OidcRbacIntegrationTest {
       st.execute("CREATE ROLE eip_app LOGIN PASSWORD 'eip_app_pw' NOBYPASSRLS");
       for (String schema :
           new String[] {
-            "core", "work", "scm", "cicd", "quality", "analytics", "staging", "reports"
+            "core", "work", "scm", "cicd", "quality", "analytics", "staging", "reports", "audit"
           }) {
         st.execute("GRANT USAGE ON SCHEMA " + schema + " TO eip_app");
         st.execute(
@@ -240,6 +250,70 @@ class OidcRbacIntegrationTest {
         .andExpect(status().isForbidden())
         .andExpect(jsonPath("$.title").value("Permission denied"))
         .andExpect(jsonPath("$.detail", containsString("ai.agent.invoke")));
+  }
+
+  /**
+   * DEBT-024 residual: a permission denial for an authenticated (tenant-resolvable) caller writes
+   * exactly one {@code access.denied} audit row — the denial itself is unaffected, and the recorded
+   * detail is PII-free (permission wire id + route TEMPLATE, never a resolved id or the tenant id).
+   * The {@code an_endpoint_declaring_no_permission_is_denied_by_default} (@Order 8) path is a
+   * different deny branch with no required permission to report and deliberately writes no row, so
+   * this asserts an exact +1 against its own single denial rather than a global count.
+   */
+  @Test
+  @Order(11)
+  void a_permission_denial_writes_one_pii_free_access_denied_audit_row() throws Exception {
+    int before = accessDeniedRowCount();
+    mvc.perform(
+            post("/api/v1/reports")
+                .with(jwt().jwt(rolesAndTenant("VIEWER", tenantA)))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"type\":\"EXEC_SUMMARY\",\"weeks\":12}"))
+        .andExpect(status().isForbidden()); // the 403 still happens exactly as before
+
+    assertEquals(
+        before + 1,
+        accessDeniedRowCount(),
+        "the denied request must write exactly one access.denied audit row");
+    String latest = latestAccessDeniedRow();
+    assertNotNull(latest, "an access.denied row must exist");
+    assertTrue(latest.startsWith("FAILURE|"), "outcome is FAILURE: " + latest);
+    assertTrue(latest.contains("report.generate"), "the required permission wire id: " + latest);
+    assertTrue(latest.contains("/api/v1/reports"), "the PII-free route template: " + latest);
+    assertFalse(
+        latest.contains(tenantA.toString()), "no raw tenant id leaks into detail: " + latest);
+  }
+
+  /** Count of tenantA's {@code access.denied} audit rows, read as the superuser (bypasses RLS). */
+  private static int accessDeniedRowCount() throws SQLException {
+    try (Connection admin =
+            DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+        Statement st = admin.createStatement();
+        ResultSet rs =
+            st.executeQuery(
+                "SELECT count(*) FROM audit.audit_event WHERE tenant_id = '"
+                    + tenantA
+                    + "' AND action = 'access.denied'")) {
+      rs.next();
+      return rs.getInt(1);
+    }
+  }
+
+  /** tenantA's newest {@code access.denied} row as {@code "<outcome>|<detail json>"}, or null. */
+  private static @Nullable String latestAccessDeniedRow() throws SQLException {
+    try (Connection admin =
+            DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+        Statement st = admin.createStatement();
+        ResultSet rs =
+            st.executeQuery(
+                "SELECT outcome, detail::text AS detail FROM audit.audit_event"
+                    + " WHERE tenant_id = '"
+                    + tenantA
+                    + "' AND action = 'access.denied' ORDER BY occurred_at DESC, id DESC LIMIT 1")) {
+      return rs.next() ? rs.getString("outcome") + "|" + rs.getString("detail") : null;
+    }
   }
 
   /**
