@@ -237,7 +237,7 @@ class ScmCicdQualityDeleteLifecycleIntegrationTest {
                 "sourceBranch", "feature/x",
                 "status", "OPEN",
                 "createdAt", "2026-01-01T00:00:00Z");
-    return new RawRecord(
+    return RawRecord.ofFlat(
         "pull_request", key, "bitbucket", "test", "bitbucket:" + key, op, FetchKind.FULL, payload);
   }
 
@@ -251,7 +251,7 @@ class ScmCicdQualityDeleteLifecycleIntegrationTest {
                 "outcome", "APPROVED",
                 "requestedAt", "2026-01-01T00:00:00Z",
                 "completedAt", "2026-01-01T01:00:00Z");
-    return new RawRecord(
+    return RawRecord.ofFlat(
         "code_review", key, "bitbucket", "test", "bitbucket:" + key, op, FetchKind.FULL, payload);
   }
 
@@ -264,7 +264,7 @@ class ScmCicdQualityDeleteLifecycleIntegrationTest {
                 "status", "SUCCESS",
                 "startedAt", "2026-01-01T00:00:00Z",
                 "finishedAt", "2026-01-01T00:10:00Z");
-    return new RawRecord("build", key, "ci", "test", "ci:" + key, op, FetchKind.FULL, payload);
+    return RawRecord.ofFlat("build", key, "ci", "test", "ci:" + key, op, FetchKind.FULL, payload);
   }
 
   private static RawRecord qualityGateRecord(String key, Op op) {
@@ -275,7 +275,7 @@ class ScmCicdQualityDeleteLifecycleIntegrationTest {
                 "key", key,
                 "status", "PASSED",
                 "evaluatedAt", "2026-01-01T00:00:00Z");
-    return new RawRecord(
+    return RawRecord.ofFlat(
         "quality_gate", key, "sonarqube", "test", "sonarqube:" + key, op, FetchKind.FULL, payload);
   }
 

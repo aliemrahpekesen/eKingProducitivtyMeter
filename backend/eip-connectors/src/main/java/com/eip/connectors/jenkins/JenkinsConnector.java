@@ -172,7 +172,7 @@ public final class JenkinsConnector implements Connector {
       context
           .rawSink()
           .emit(
-              new RawRecord(
+              RawRecord.ofFlat(
                   "build",
                   key,
                   TYPE,

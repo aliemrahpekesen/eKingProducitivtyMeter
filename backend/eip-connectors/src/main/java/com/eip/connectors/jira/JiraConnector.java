@@ -214,7 +214,7 @@ public final class JiraConnector implements Connector {
     context
         .rawSink()
         .emit(
-            new RawRecord(
+            RawRecord.ofFlat(
                 "work_item", key, "jira", instance(context), "jira:" + id, Op.UPSERT, kind, item));
 
     // Changelog → canonical transitions, chronological. The search response embeds the first
@@ -245,7 +245,7 @@ public final class JiraConnector implements Connector {
         context
             .rawSink()
             .emit(
-                new RawRecord(
+                RawRecord.ofFlat(
                     "work_item_transition",
                     key + "#" + history.path("id").asText(seq + ""),
                     "jira",

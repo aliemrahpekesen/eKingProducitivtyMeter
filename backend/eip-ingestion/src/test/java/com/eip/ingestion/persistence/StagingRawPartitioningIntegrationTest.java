@@ -13,6 +13,7 @@ import com.eip.connectors.spi.RawRecord;
 import com.eip.ingestion.persistence.StagingRawRepository.RawUpsert;
 import com.eip.tenancy.context.TenantContext;
 import com.eip.tenancy.tx.TenantTransactionRunner;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.file.Paths;
 import java.sql.Connection;
@@ -20,6 +21,7 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -211,6 +213,34 @@ class StagingRawPartitioningIntegrationTest {
     assertThat(rawRowCount(tenant, table, naturalKey)).isEqualTo(1L);
   }
 
+  /**
+   * DEBT-018 residual (ConnectorFramework §3): a nested-JSON payload — a {@link RawRecord} the
+   * canonical constructor accepts directly, no current connector emits this shape yet — survives
+   * the real {@code ?::jsonb} write and {@code payload::text} read of {@link
+   * StagingRawRepository#upsertAll} / the {@code payloadOf} read path with its structure intact:
+   * the nested map, its list value, and a sibling scalar all round-trip losslessly.
+   */
+  @Test
+  void nested_json_payload_round_trips_through_staging_jsonb() throws Exception {
+    TenantContext tenant = TenantContext.of(TENANT_A);
+    String table = StagingRawRepository.rawTable("jira");
+    String naturalKey = "NESTED-1";
+
+    Map<String, Object> nested = new LinkedHashMap<>();
+    Map<String, Object> a = new LinkedHashMap<>();
+    a.put("b", List.of(1, 2));
+    nested.put("a", a);
+    nested.put("c", "x");
+
+    upsert(tenant, table, naturalKey, nested);
+
+    JsonNode roundTripped = new ObjectMapper().readTree(payloadOf(tenant, table, naturalKey));
+    assertThat(roundTripped.path("a").path("b").isArray()).isTrue();
+    assertThat(roundTripped.path("a").path("b").get(0).asInt()).isEqualTo(1);
+    assertThat(roundTripped.path("a").path("b").get(1).asInt()).isEqualTo(2);
+    assertThat(roundTripped.path("c").asText()).isEqualTo("x");
+  }
+
   @Test
   void identical_arbiter_key_duplicate_insert_is_rejected() throws SQLException {
     try (Connection admin =
@@ -240,7 +270,7 @@ class StagingRawPartitioningIntegrationTest {
   }
 
   private void upsert(
-      TenantContext tenant, String table, String naturalKey, Map<String, String> payload) {
+      TenantContext tenant, String table, String naturalKey, Map<String, Object> payload) {
     RawRecord record =
         new RawRecord(
             "work_item",

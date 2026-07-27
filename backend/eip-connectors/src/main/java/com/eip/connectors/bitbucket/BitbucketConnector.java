@@ -174,7 +174,7 @@ public final class BitbucketConnector implements Connector {
     context
         .rawSink()
         .emit(
-            new RawRecord(
+            RawRecord.ofFlat(
                 "pull_request",
                 key,
                 TYPE,
@@ -236,7 +236,7 @@ public final class BitbucketConnector implements Connector {
       context
           .rawSink()
           .emit(
-              new RawRecord(
+              RawRecord.ofFlat(
                   "code_review",
                   reviewKey,
                   TYPE,

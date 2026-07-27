@@ -21,8 +21,15 @@ dependencies {
     implementation(libs.jackson.databind)
 
     // Spring Modulith package metadata (annotations only; application-wide verification in eip-app).
+    // testCompileOnly mirrors compileOnly (matching eip-connectors): eip-connectors' package-info
+    // carries @ApplicationModule, so a test source that resolves any com.eip.connectors.* type by
+    // its fully-qualified name (not an import) forces eager package-info resolution — without
+    // spring-modulith-core on the TEST classpath javac emits "unknown enum constant Type.OPEN",
+    // fatal under -Werror. compileOnly alone left that gap; this closes it (DEBT-018 sweep finding).
     compileOnly(platform(libs.spring.modulith.bom))
     compileOnly(libs.spring.modulith.core)
+    testCompileOnly(platform(libs.spring.modulith.bom))
+    testCompileOnly(libs.spring.modulith.core)
 
     // Module integration tests run the real staging + normalization SQL against Testcontainers
     // PostgreSQL under the NOBYPASSRLS role, migrated with the app's Flyway scripts (schema truth

@@ -177,7 +177,7 @@ public final class GitHubConnector implements Connector {
     context
         .rawSink()
         .emit(
-            new RawRecord(
+            RawRecord.ofFlat(
                 "pull_request",
                 key,
                 TYPE,
@@ -234,7 +234,7 @@ public final class GitHubConnector implements Connector {
       context
           .rawSink()
           .emit(
-              new RawRecord(
+              RawRecord.ofFlat(
                   "code_review",
                   reviewKey,
                   TYPE,
@@ -282,7 +282,7 @@ public final class GitHubConnector implements Connector {
       context
           .rawSink()
           .emit(
-              new RawRecord(
+              RawRecord.ofFlat(
                   "work_item",
                   key,
                   TYPE,
@@ -334,7 +334,7 @@ public final class GitHubConnector implements Connector {
       context
           .rawSink()
           .emit(
-              new RawRecord(
+              RawRecord.ofFlat(
                   "build",
                   key,
                   TYPE,

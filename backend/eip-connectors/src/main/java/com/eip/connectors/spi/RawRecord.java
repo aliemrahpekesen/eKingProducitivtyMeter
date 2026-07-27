@@ -4,6 +4,7 @@
  */
 package com.eip.connectors.spi;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 
@@ -22,8 +23,13 @@ import java.util.Objects;
  *       bitbucket}, {@code ci}, {@code sonarqube}); survives into {@code core.external_ref}.
  *   <li>{@code externalId} — the source's immutable native id (AD-14); the identity anchor a later
  *       key rename cannot break.
- *   <li>{@code payload} — the source fields as a flat string map (v0.1). Serialized to the {@code
- *       jsonb} staging column; the map's key set is the raw schema for this stream.
+ *   <li>{@code payload} — the source's own fields, arbitrary nested JSON (ConnectorFramework §3):
+ *       top-level entries plus any nested value may be a {@link String}, {@link Number}, {@link
+ *       Boolean}, a nested {@link Map}, a {@link java.util.List}, or {@code null} — anything
+ *       Jackson can serialize straight to the {@code jsonb} staging column. No connector emits a
+ *       nested payload yet (v0.1): every current connector still builds a flat, single-level map
+ *       and constructs its records through {@link #ofFlat}, which widens that flat map into this
+ *       type without the connector itself changing shape.
  * </ul>
  *
  * @param stream logical source stream name
@@ -33,7 +39,8 @@ import java.util.Objects;
  * @param externalId immutable native id
  * @param op assert-exists (upsert) or removed (delete)
  * @param fetchKind how the record was fetched
- * @param payload flat source-field map (defensively copied, unmodifiable)
+ * @param payload source-field map, arbitrary nesting (defensively copied, unmodifiable; see {@link
+ *     #ofFlat} for the common flat case)
  */
 public record RawRecord(
     String stream,
@@ -43,7 +50,7 @@ public record RawRecord(
     String externalId,
     Op op,
     FetchKind fetchKind,
-    Map<String, String> payload) {
+    Map<String, Object> payload) {
 
   public RawRecord {
     stream = requireText(stream, "stream");
@@ -53,7 +60,44 @@ public record RawRecord(
     externalId = requireText(externalId, "externalId");
     Objects.requireNonNull(op, "op");
     Objects.requireNonNull(fetchKind, "fetchKind");
-    payload = Map.copyOf(payload); // NPE on null map or null entry; unmodifiable snapshot
+    payload = Map.copyOf(payload); // NPE on null map or null top-level key/value; unmodifiable
+  }
+
+  /**
+   * Creates a record from a flat, single-level payload — the shape every connector in this release
+   * still emits. Widens the flat string map into the canonical {@link #payload()} type so existing
+   * flat producers need no change beyond calling this factory instead of the canonical constructor
+   * directly.
+   *
+   * @param stream logical source stream name
+   * @param naturalKey source-native stable key within the stream
+   * @param sourceSystem provenance system of record
+   * @param sourceInstance provenance instance discriminator (e.g. {@code sim})
+   * @param externalId immutable native id
+   * @param op assert-exists (upsert) or removed (delete)
+   * @param fetchKind how the record was fetched
+   * @param flatPayload flat source-field map, widened into the canonical payload type
+   * @return the constructed record
+   */
+  public static RawRecord ofFlat(
+      String stream,
+      String naturalKey,
+      String sourceSystem,
+      String sourceInstance,
+      String externalId,
+      Op op,
+      FetchKind fetchKind,
+      Map<String, String> flatPayload) {
+    Objects.requireNonNull(flatPayload, "payload");
+    return new RawRecord(
+        stream,
+        naturalKey,
+        sourceSystem,
+        sourceInstance,
+        externalId,
+        op,
+        fetchKind,
+        new LinkedHashMap<>(flatPayload));
   }
 
   private static String requireText(String value, String field) {

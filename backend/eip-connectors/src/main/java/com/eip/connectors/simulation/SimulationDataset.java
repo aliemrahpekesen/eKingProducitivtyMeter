@@ -171,7 +171,7 @@ public final class SimulationDataset {
 
   private static RawRecord raw(
       String stream, String sourceSystem, String naturalKey, Map<String, String> payload) {
-    return new RawRecord(
+    return RawRecord.ofFlat(
         stream,
         naturalKey,
         sourceSystem,

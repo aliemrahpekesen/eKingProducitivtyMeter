@@ -171,7 +171,7 @@ public final class SonarQubeConnector implements Connector {
     context
         .rawSink()
         .emit(
-            new RawRecord(
+            RawRecord.ofFlat(
                 "quality_gate",
                 key,
                 TYPE,
@@ -216,7 +216,7 @@ public final class SonarQubeConnector implements Connector {
       context
           .rawSink()
           .emit(
-              new RawRecord(
+              RawRecord.ofFlat(
                   "quality_gate",
                   key,
                   TYPE,

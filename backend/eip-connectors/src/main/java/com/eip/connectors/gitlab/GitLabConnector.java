@@ -192,7 +192,7 @@ public final class GitLabConnector implements Connector {
     context
         .rawSink()
         .emit(
-            new RawRecord(
+            RawRecord.ofFlat(
                 "pull_request",
                 key,
                 TYPE,
@@ -245,7 +245,7 @@ public final class GitLabConnector implements Connector {
       context
           .rawSink()
           .emit(
-              new RawRecord(
+              RawRecord.ofFlat(
                   "build",
                   key,
                   TYPE,

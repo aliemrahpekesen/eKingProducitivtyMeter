@@ -127,7 +127,7 @@ class JiraConnectorTest {
     List<String> plat1States =
         transitions.stream()
             .filter(t -> "PLAT-1".equals(t.payload().get("workItemKey")))
-            .map(t -> t.payload().get("toState"))
+            .map(t -> (String) t.payload().get("toState"))
             .toList();
     assertThat(plat1States)
         .containsExactly("IN_PROGRESS", "BLOCKED", "IN_PROGRESS", "IN_REVIEW", "DONE");

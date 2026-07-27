@@ -133,14 +133,14 @@ class SimulationDatasetTest {
   }
 
   private static List<String> keys(List<RawRecord> records) {
-    return records.stream().map(r -> r.payload().get("key")).collect(Collectors.toList());
+    return records.stream().map(r -> (String) r.payload().get("key")).collect(Collectors.toList());
   }
 
   // Sanity that a bad payload map still round-trips a defensive copy.
   @Test
   void payload_is_an_unmodifiable_defensive_copy() {
     RawRecord any = records.get(0);
-    Map<String, String> payload = any.payload();
+    Map<String, Object> payload = any.payload();
     org.junit.jupiter.api.Assertions.assertThrows(
         UnsupportedOperationException.class, () -> payload.put("x", "y"));
   }

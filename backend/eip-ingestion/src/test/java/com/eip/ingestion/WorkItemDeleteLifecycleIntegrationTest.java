@@ -199,7 +199,7 @@ class WorkItemDeleteLifecycleIntegrationTest {
   }
 
   private static RawRecord upsertRecord() {
-    return new RawRecord(
+    return RawRecord.ofFlat(
         "work_item",
         NATURAL_KEY,
         "jira",
@@ -220,7 +220,7 @@ class WorkItemDeleteLifecycleIntegrationTest {
     // A delete assertion carries no field content; its payload is deliberately different from the
     // upsert's above so the staging upsert's content-hash guard (computed from payload only)
     // actually lets the op column flip from 'upsert' to 'delete' on the same natural key.
-    return new RawRecord(
+    return RawRecord.ofFlat(
         "work_item", NATURAL_KEY, "jira", "test", EXTERNAL_ID, Op.DELETE, FetchKind.FULL, Map.of());
   }
 

@@ -122,7 +122,8 @@ class BitbucketConnectorSyncTest {
     assertThat(pr43.payload()).containsEntry("status", "OPEN");
 
     assertThat(reviews).allMatch(r -> "acme-repo#42".equals(r.payload().get("pullRequestKey")));
-    List<String> outcomes = reviews.stream().map(r -> r.payload().get("outcome")).sorted().toList();
+    List<String> outcomes =
+        reviews.stream().map(r -> (String) r.payload().get("outcome")).sorted().toList();
     assertThat(outcomes).containsExactly("APPROVED", "CHANGES_REQUESTED");
     assertThat(reviews)
         .allSatisfy(
