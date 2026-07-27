@@ -43,8 +43,12 @@ class ServiceTokenServiceTest {
   private static final UUID TENANT_A = UUID.randomUUID();
 
   private final InMemoryServiceTokenStore store = new InMemoryServiceTokenStore();
+  // tx/audit are null: this is a fast, DB-less unit test (TestingStrategy §2) — the
+  // TenantTransactionRunner the audit write needs cannot be faked without a real datasource, so
+  // audit recording is disabled here and proven separately by ServiceTokenAuthIntegrationTest
+  // against a real, Spring-wired database (DEBT-024 Wave 3B; see ServiceTokenService's javadoc).
   private final ServiceTokenService service =
-      new ServiceTokenService(store, new ServiceTokenGenerator(), FIXED_CLOCK);
+      new ServiceTokenService(store, new ServiceTokenGenerator(), FIXED_CLOCK, null, null);
 
   @AfterEach
   void clearContext() {

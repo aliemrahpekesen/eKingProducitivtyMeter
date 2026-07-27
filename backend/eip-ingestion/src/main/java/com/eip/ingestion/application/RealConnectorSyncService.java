@@ -77,8 +77,14 @@ public class RealConnectorSyncService implements RunConnectorSyncUseCase {
 
   @Override
   public IngestionResult sync(UUID connectorId, SyncMode mode) {
+    // Read-WRITE (callCurrent), not readCurrent: resolving a registration reveals the connector
+    // secret when one is stored, and SecretsService#reveal now records a `secret.revealed`
+    // audit_event row (DEBT-024) — an audited reveal is a WRITE operation, so its enclosing
+    // transaction must permit writes or Postgres rejects the audit INSERT (the audit path would
+    // silently swallow it under a read-only tx). This tx still commits before any connector fetch,
+    // so no fetch holds a DB transaction.
     Resolved resolved =
-        tx.readCurrent(
+        tx.callCurrent(
             () -> {
               var row =
                   connectors

@@ -26,6 +26,20 @@ import org.springframework.web.servlet.HandlerInterceptor;
  * rather than writing a response directly — thrown from {@link HandlerInterceptor#preHandle}, this
  * propagates through Spring MVC's normal exception resolution exactly like a controller-thrown
  * exception, so no new problem+json wiring is needed.
+ *
+ * <p><strong>{@code access.denied} audit retrofit deliberately deferred (DEBT-024 Wave
+ * 3B).</strong> SecurityModel §11's broader taxonomy names {@code access.denied}, but it is NOT in
+ * DEBT-024's explicit Wave 3B retrofit list (secret reveal, tenant/role mutations, service-token
+ * lifecycle) — only those four sites were instrumented this wave. Wiring it here is materially more
+ * entangled than the four sites that were done: {@link #preHandle} runs pre-handler, with NO active
+ * transaction (the audit write path requires one, {@code AuditService}/{@code
+ * RecordAuditEventUseCase} javadoc) and, for an unauthenticated caller, no tenant bound either
+ * (only {@link EipPrincipal#tenantId()} would even be available to bind, and it is {@code null} for
+ * the 401-ish/anonymous case this method also guards) — a correct retrofit would need to (a) only
+ * attempt the write when a tenant IS resolvable, wrapped in its own {@code
+ * TenantTransactionRunner#run}, and (b) never let that write's failure mask the more important
+ * {@link PermissionDeniedException} already being thrown. Left for a follow-up wave rather than
+ * forced in here.
  */
 @Component
 public class PermissionEnforcementInterceptor implements HandlerInterceptor {

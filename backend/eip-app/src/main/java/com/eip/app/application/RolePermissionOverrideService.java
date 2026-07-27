@@ -6,11 +6,19 @@ package com.eip.app.application;
 
 import com.eip.app.persistence.RolePermissionOverrideRepository.OverrideRow;
 import com.eip.app.persistence.RolePermissionOverrideStore;
+import com.eip.app.security.EipPrincipal;
+import com.eip.app.security.EipPrincipalHolder;
 import com.eip.core.error.ValidationException;
+import com.eip.tenancy.audit.api.AuditActorType;
+import com.eip.tenancy.audit.api.AuditCategory;
+import com.eip.tenancy.audit.api.AuditEvent;
+import com.eip.tenancy.audit.api.AuditOutcome;
+import com.eip.tenancy.audit.api.RecordAuditEventUseCase;
 import com.eip.tenancy.context.TenantContext;
 import com.eip.tenancy.rbac.Permission;
 import com.eip.tenancy.rbac.Role;
 import com.eip.tenancy.tx.TenantTransactionRunner;
+import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
@@ -39,6 +47,7 @@ public class RolePermissionOverrideService implements EffectivePermissionResolve
 
   private final TenantTransactionRunner tx;
   private final RolePermissionOverrideStore repository;
+  private final RecordAuditEventUseCase audit;
 
   /**
    * Creates the service.
@@ -46,11 +55,16 @@ public class RolePermissionOverrideService implements EffectivePermissionResolve
    * @param tx the tenant-bound transaction boundary
    * @param repository the persistence adapter (the {@link RolePermissionOverrideStore} seam, not
    *     the concrete {@code RolePermissionOverrideRepository}, so tests can substitute a fake)
+   * @param audit the audit write path (DEBT-024 Wave 3B: {@code role.permission.overridden} on
+   *     every {@link #applyOverrides} call)
    */
   public RolePermissionOverrideService(
-      TenantTransactionRunner tx, RolePermissionOverrideStore repository) {
+      TenantTransactionRunner tx,
+      RolePermissionOverrideStore repository,
+      RecordAuditEventUseCase audit) {
     this.tx = tx;
     this.repository = repository;
+    this.audit = audit;
   }
 
   @Override
@@ -106,8 +120,50 @@ public class RolePermissionOverrideService implements EffectivePermissionResolve
             repository.upsert(role.name(), parsed.get(i).name(), commands.get(i).granted());
           }
           List<OverrideRow> overrides = repository.findForRoles(List.of(role.name()));
+          audit.record(
+              new AuditEvent(
+                  AuditCategory.ADMIN,
+                  "role.permission.overridden",
+                  AuditOutcome.SUCCESS,
+                  resolveActorType(),
+                  null,
+                  Map.of("role", role.name(), "changes", changeDetail(parsed, commands))));
           return toView(role, overrides);
         });
+  }
+
+  /**
+   * Builds the audit {@code detail.changes} entries: wire-id permission + granted flag pairs, in
+   * request order. Enum wire ids only — never a free-text description of what changed.
+   */
+  private static List<Map<String, Object>> changeDetail(
+      List<Permission> parsed, List<OverrideCommand> commands) {
+    List<Map<String, Object>> changes = new ArrayList<>(commands.size());
+    for (int i = 0; i < commands.size(); i++) {
+      changes.add(
+          Map.of("permission", parsed.get(i).wireId(), "granted", commands.get(i).granted()));
+    }
+    return changes;
+  }
+
+  /**
+   * Best-effort actor-type resolution from the caller's bound principal (SecurityModel §11) —
+   * mirrors {@code ServiceTokenService}'s identical helper (duplicated rather than shared: neither
+   * class is the other's dependency, and this is the only overlap between them). {@link
+   * EipPrincipal} carries no member-UUID accessor yet (only {@link EipPrincipal#subject()},
+   * documented as logs/audit-only) — {@link AuditActorType#USER} therefore cannot be populated with
+   * a real {@code actorMemberId} until a member-id resolution path (e.g. a {@code
+   * core.member.oidc_subject} lookup) is wired into the principal model, a natural DEBT-024
+   * follow-up. A service-token-authenticated caller IS distinguishable today and is tagged
+   * accordingly; every other caller (header/oidc human admin, or none at all) is tagged {@link
+   * AuditActorType#SYSTEM}.
+   */
+  private static AuditActorType resolveActorType() {
+    return EipPrincipalHolder.current()
+        .map(EipPrincipal::subject)
+        .filter(subject -> subject.startsWith("service-token:"))
+        .map(subject -> AuditActorType.SERVICE_TOKEN)
+        .orElse(AuditActorType.SYSTEM);
   }
 
   /**

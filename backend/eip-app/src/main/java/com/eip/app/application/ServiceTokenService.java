@@ -11,16 +11,23 @@ import com.eip.app.security.EipPrincipalHolder;
 import com.eip.core.error.PermissionDeniedException;
 import com.eip.core.error.ResourceNotFoundException;
 import com.eip.core.error.ValidationException;
+import com.eip.tenancy.audit.api.AuditActorType;
+import com.eip.tenancy.audit.api.AuditCategory;
+import com.eip.tenancy.audit.api.AuditEvent;
+import com.eip.tenancy.audit.api.AuditOutcome;
+import com.eip.tenancy.audit.api.RecordAuditEventUseCase;
 import com.eip.tenancy.context.TenantContext;
 import com.eip.tenancy.context.TenantContextHolder;
 import com.eip.tenancy.rbac.Permission;
 import com.eip.tenancy.rbac.Role;
 import com.eip.tenancy.rbac.ServiceTokenGenerator;
+import com.eip.tenancy.tx.TenantTransactionRunner;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
@@ -37,10 +44,14 @@ import org.springframework.stereotype.Service;
  * discipline {@code SecretsService} establishes for connector secrets, SecurityModel §6).
  *
  * <p>Every create/revoke is logged as a structured event (SLF4J + MDC, matching {@code
- * ApiObservabilityFilter}'s convention) rather than written to {@code audit.audit_event}: that
- * table exists in the schema (V1) but no write path exists anywhere in this codebase yet, and
- * building one is out of this class's scope — see the task's final report / DEBT-012 register entry
- * for that gap.
+ * ApiObservabilityFilter}'s convention) AND, for a tenant-scoped token, written to {@code
+ * audit.audit_event} (DEBT-024 Wave 3B) — {@code core.service_token} itself is deliberately NOT
+ * RLS-backed (ADR-025), so neither method runs inside an ambient tenant-bound transaction; the
+ * audit write opens its own short one, scoped to the token's tenant. A platform-scoped token
+ * (create's {@code platformScoped=true} path, or revoke of one) has no tenant to bind — {@code
+ * audit.audit_event} is inherently tenant-partitioned, so no row is written for that path in v0.1
+ * (SecurityModel §11's broader platform-scoped taxonomy is a future module's concern, not this
+ * one's).
  */
 @Service
 public class ServiceTokenService {
@@ -56,6 +67,8 @@ public class ServiceTokenService {
   private final ServiceTokenStore repository;
   private final ServiceTokenGenerator generator;
   private final Clock clock;
+  private final @Nullable TenantTransactionRunner tx;
+  private final @Nullable RecordAuditEventUseCase audit;
 
   /**
    * Creates the service.
@@ -64,12 +77,23 @@ public class ServiceTokenService {
    *     {@code ServiceTokenRepository}, so tests can substitute a hand-rolled fake)
    * @param generator the raw-token generator/hasher
    * @param clock the clock expiry is computed from (testable — BackendPlan §2.5)
+   * @param tx binds RLS to a tenant-scoped token's own tenant for the audit write (this service has
+   *     no ambient tenant-bound transaction otherwise — {@code core.service_token} isn't
+   *     RLS-backed); {@code null} disables audit recording (used by {@code ServiceTokenServiceTest}
+   *     's fast, DB-less unit tests — Spring's own injection always supplies a real instance)
+   * @param audit the audit write path, or {@code null} to disable audit recording
    */
   public ServiceTokenService(
-      ServiceTokenStore repository, ServiceTokenGenerator generator, Clock clock) {
+      ServiceTokenStore repository,
+      ServiceTokenGenerator generator,
+      Clock clock,
+      @Nullable TenantTransactionRunner tx,
+      @Nullable RecordAuditEventUseCase audit) {
     this.repository = repository;
     this.generator = generator;
     this.clock = clock;
+    this.tx = tx;
+    this.audit = audit;
   }
 
   /**
@@ -96,6 +120,7 @@ public class ServiceTokenService {
         repository.insert(
             tenantId, command.name(), prefix, hash, role.name(), permissionSubset, null, expiresAt);
     logEvent("auth.token.issued", id, tenantId, role.name());
+    recordAudit(tenantId, "auth.token.issued", Map.of("tokenId", id, "role", role.name()));
     return new CreateServiceTokenResult(id, rawToken, prefix, expiresAt);
   }
 
@@ -135,7 +160,9 @@ public class ServiceTokenService {
     if (updated == 0) {
       throw new ResourceNotFoundException("service token not found: " + id);
     }
-    logEvent("auth.token.revoked", id, tenant.map(TenantContext::tenantId).orElse(null), null);
+    @Nullable UUID scopeTenantId = tenant.map(TenantContext::tenantId).orElse(null);
+    logEvent("auth.token.revoked", id, scopeTenantId, null);
+    recordAudit(scopeTenantId, "auth.token.revoked", Map.of("tokenId", id));
   }
 
   private void requirePlatformAdmin() {
@@ -143,6 +170,54 @@ public class ServiceTokenService {
     if (!principal.roles().contains(Role.PLATFORM_ADMIN)) {
       throw new PermissionDeniedException("platform-scoped service tokens require PLATFORM_ADMIN");
     }
+  }
+
+  /**
+   * Records a service-token lifecycle audit event, best-effort (DEBT-024 Wave 3B). Silently skipped
+   * when {@code tenantId} is {@code null} (a platform-scoped token — {@code audit.audit_event} is
+   * tenant-partitioned, so a platform-scoped action has no tenant to bind RLS to) or when this
+   * instance was built without audit wiring (see the constructor javadoc).
+   *
+   * @param tenantId the token's owning tenant, or {@code null} for platform-scoped
+   * @param action the dotted event id
+   * @param detail PII-free, UUID/enum-only detail
+   */
+  private void recordAudit(@Nullable UUID tenantId, String action, Map<String, Object> detail) {
+    if (tx == null || audit == null || tenantId == null) {
+      return;
+    }
+    tx.run(
+        TenantContext.of(tenantId),
+        () ->
+            audit.record(
+                new AuditEvent(
+                    AuditCategory.AUTH,
+                    action,
+                    AuditOutcome.SUCCESS,
+                    resolveActorType(),
+                    null,
+                    detail)));
+  }
+
+  /**
+   * Best-effort actor-type resolution from the caller's bound principal (SecurityModel §11). {@link
+   * EipPrincipal} carries no member-UUID accessor yet (only {@link EipPrincipal#subject()},
+   * documented as logs/audit-only) — {@link AuditActorType#USER} therefore cannot be populated with
+   * a real {@code actorMemberId} until a member-id resolution path (e.g. a {@code
+   * core.member.oidc_subject} lookup) is wired into the principal model, a natural DEBT-024
+   * follow-up. A service-token-authenticated caller IS distinguishable today ({@code
+   * ServiceTokenAuthenticationFilter}'s {@code "service-token:"}-prefixed subject) and is tagged
+   * accordingly; every other caller (header/oidc human admin, or none at all) is tagged {@link
+   * AuditActorType#SYSTEM}.
+   *
+   * @return the resolved actor type
+   */
+  private static AuditActorType resolveActorType() {
+    return EipPrincipalHolder.current()
+        .map(EipPrincipal::subject)
+        .filter(subject -> subject.startsWith("service-token:"))
+        .map(subject -> AuditActorType.SERVICE_TOKEN)
+        .orElse(AuditActorType.SYSTEM);
   }
 
   private @Nullable UUID resolveTenantId(@Nullable Boolean platformScoped) {

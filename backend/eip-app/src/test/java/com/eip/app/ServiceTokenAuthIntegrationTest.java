@@ -4,6 +4,7 @@
  */
 package com.eip.app;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -13,11 +14,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.eip.app.tenant.HeaderTenantResolver;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jayway.jsonpath.JsonPath;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
@@ -93,6 +100,9 @@ class ServiceTokenAuthIntegrationTest {
                 + schema
                 + " TO eip_app");
       }
+      // DEBT-024 Wave 3B: service-token issue/revoke now also write audit.audit_event.
+      st.execute("GRANT USAGE ON SCHEMA audit TO eip_app");
+      st.execute("GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA audit TO eip_app");
       st.execute(
           "INSERT INTO core.tenant (id, name, slug) VALUES ('"
               + TENANT_A
@@ -227,6 +237,57 @@ class ServiceTokenAuthIntegrationTest {
         .andExpect(status().isForbidden())
         .andExpect(jsonPath("$.title").value("Permission denied"))
         .andExpect(jsonPath("$.detail", containsString("dashboard.view")));
+  }
+
+  @Test
+  @Order(8)
+  void issueAndRevokeEachWriteAnAuditRowWithNoTokenValueLeak() throws Exception {
+    // tokenId/rawToken were captured back in Order(1); the token was revoked in Order(4) — by
+    // this point in the ordered sequence both lifecycle events have happened exactly once.
+    List<String[]> rows = queryAuditEvents(tokenId);
+    assertThat(rows)
+        .extracting(r -> r[0])
+        .containsExactly("auth.token.issued", "auth.token.revoked");
+    for (String[] row : rows) {
+      String outcome = row[1];
+      String detailJson = row[2];
+      assertThat(outcome).isEqualTo("SUCCESS");
+      JsonNode detail = readJson(detailJson);
+      assertThat(detail.get("tokenId").asText()).isEqualTo(tokenId);
+      assertThat(detail.get("category").asText()).isEqualTo("auth");
+      // Never the raw bearer value or anything derived from it.
+      assertThat(detailJson).doesNotContain(rawToken);
+    }
+  }
+
+  private static JsonNode readJson(String json) {
+    try {
+      return new ObjectMapper().readTree(json);
+    } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+      throw new IllegalStateException("failed to parse audit detail json: " + json, e);
+    }
+  }
+
+  private static List<String[]> queryAuditEvents(String tokenId) throws SQLException {
+    List<String[]> rows = new ArrayList<>();
+    try (Connection admin =
+            DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+        PreparedStatement ps =
+            admin.prepareStatement(
+                "SELECT action, outcome, detail::text AS detail_json FROM audit.audit_event"
+                    + " WHERE detail->>'tokenId' = ? ORDER BY occurred_at")) {
+      ps.setString(1, tokenId);
+      try (ResultSet rs = ps.executeQuery()) {
+        while (rs.next()) {
+          rows.add(
+              new String[] {
+                rs.getString("action"), rs.getString("outcome"), rs.getString("detail_json")
+              });
+        }
+      }
+    }
+    return rows;
   }
 
   private static void backdateExpiry(String id) throws SQLException {

@@ -4,6 +4,7 @@
  */
 package com.eip.app.config;
 
+import com.eip.tenancy.audit.api.RecordAuditEventUseCase;
 import com.eip.tenancy.secrets.SecretsService;
 import java.util.Base64;
 import org.springframework.context.annotation.Bean;
@@ -19,11 +20,13 @@ public class SecretsConfiguration {
    *
    * @param jdbc the shared JDBC client (joins tenant-bound transactions)
    * @param properties validated key material configuration
+   * @param audit the audit write path (DEBT-024 Wave 3B: {@code secret.revealed} on every reveal)
    * @return the service
    */
   @Bean
-  public SecretsService secretsService(JdbcClient jdbc, EipSecretsProperties properties) {
+  public SecretsService secretsService(
+      JdbcClient jdbc, EipSecretsProperties properties, RecordAuditEventUseCase audit) {
     return new SecretsService(
-        jdbc, Base64.getDecoder().decode(properties.masterKey()), properties.kekVersion());
+        jdbc, Base64.getDecoder().decode(properties.masterKey()), properties.kekVersion(), audit);
   }
 }
