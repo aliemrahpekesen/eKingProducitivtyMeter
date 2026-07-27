@@ -8,6 +8,7 @@ import {
   useCreateTenant,
   useLoadSampleData,
   useRegisterConnector,
+  useSession,
   useSetConnectorStatus,
   useStructure,
   useSyncConnector,
@@ -30,6 +31,9 @@ vi.mock('../api/hooks', () => ({
   useLoadSampleData: vi.fn(),
   useAiPolicy: vi.fn(),
   useUpdateAiPolicy: vi.fn(),
+  // <Can> (gating the mutating controls) reads effectivePermissions from useSession — grant the
+  // full admin set so the gated buttons render and the existing assertions still hold.
+  useSession: vi.fn(),
 }));
 
 const okQuery = (data: unknown) => ({ data, isLoading: false, isError: false }) as never;
@@ -115,6 +119,13 @@ function arm(
   vi.mocked(useLoadSampleData).mockReturnValue(idleMutation);
   vi.mocked(useAiPolicy).mockReturnValue(okQuery(aiPolicy));
   vi.mocked(useUpdateAiPolicy).mockReturnValue(updateAiPolicyMutation);
+  vi.mocked(useSession).mockReturnValue(
+    okQuery({
+      tenantId: 't-1',
+      organizationName: 'Acme Corp',
+      effectivePermissions: ['tenant.manage', 'connector.configure', 'ai.policy.manage'],
+    }),
+  );
 }
 
 describe('AdminPanel', () => {

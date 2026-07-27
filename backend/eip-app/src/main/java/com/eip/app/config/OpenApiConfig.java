@@ -6,6 +6,7 @@ package com.eip.app.config;
 
 import com.eip.app.security.PermissionExempt;
 import com.eip.app.security.RequiresPermission;
+import com.eip.tenancy.rbac.Permission;
 import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
@@ -16,6 +17,8 @@ import io.swagger.v3.oas.models.media.MediaType;
 import io.swagger.v3.oas.models.media.Schema;
 import io.swagger.v3.oas.models.responses.ApiResponse;
 import io.swagger.v3.oas.models.responses.ApiResponses;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import org.springdoc.core.customizers.OperationCustomizer;
 import org.springframework.context.annotation.Bean;
@@ -49,6 +52,12 @@ public class OpenApiConfig {
 
   /** The shared {@code application/problem+json} schema component name (DEBT-011). */
   public static final String PROBLEM_SCHEMA = "ProblemDetail";
+
+  /**
+   * The custom OpenAPI extension name that carries an operation's required permission(s) (APIDesign
+   * §10, DEBT-012 residual) — drives the frontend {@code <Can>} gate.
+   */
+  public static final String PERMISSION_EXTENSION = "x-eip-permission";
 
   /**
    * Provides the OpenAPI document metadata plus the shared {@value #PROBLEM_SCHEMA} schema
@@ -111,6 +120,39 @@ public class OpenApiConfig {
             operation,
             "404",
             problemResponse("The requested resource does not exist.", "/problems/not-found", 404));
+      }
+      return operation;
+    };
+  }
+
+  /**
+   * Adds the {@value #PERMISSION_EXTENSION} extension (APIDesign §10, DEBT-012 residual) to every
+   * operation whose handler method carries {@link RequiresPermission}, so the generated OpenAPI
+   * contract — and the frontend {@code <Can>} gate that reads it — knows which permission(s)
+   * satisfy the endpoint without duplicating the annotation's declaration by hand. A separate bean
+   * from {@link #standardErrorResponsesCustomizer()}: springdoc applies every registered {@code
+   * OperationCustomizer} bean, so there is no need to fold unrelated concerns into one method.
+   * Operations with {@link PermissionExempt} or neither annotation get no extension — there is
+   * nothing to gate on.
+   *
+   * @return the operation customizer
+   */
+  @Bean
+  public OperationCustomizer permissionExtensionCustomizer() {
+    return (operation, handlerMethod) -> {
+      RequiresPermission requiresPermission =
+          handlerMethod.getMethodAnnotation(RequiresPermission.class);
+      if (requiresPermission != null) {
+        // ArrayList, not List.of(): mirrors the LinkedHashMap reasoning below (DEBT-011) — an
+        // any-of permission list is meaningful order (the annotation's declared order), and the
+        // committed OpenAPI snapshot must be byte-stable across JVM runs. List.of() itself always
+        // preserves insertion order (unlike Map.of()/Set.of()), but ArrayList keeps this extension
+        // symmetric with the rest of this class's collection choices and its rationale.
+        List<String> wireIds = new ArrayList<>(requiresPermission.value().length);
+        for (Permission permission : requiresPermission.value()) {
+          wireIds.add(permission.wireId());
+        }
+        operation.addExtension(PERMISSION_EXTENSION, wireIds);
       }
       return operation;
     };

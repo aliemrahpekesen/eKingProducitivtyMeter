@@ -680,6 +680,7 @@ export interface components {
             /** Format: uuid */
             tenantId: string;
             organizationName: string;
+            effectivePermissions: string[];
         };
         AuthConfigView: {
             mode: string;

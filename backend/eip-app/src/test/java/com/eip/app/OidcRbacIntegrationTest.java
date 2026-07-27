@@ -391,6 +391,27 @@ class OidcRbacIntegrationTest {
         .andExpect(jsonPath("$.detail", containsString("self-lockout")));
   }
 
+  /**
+   * DEBT-012 residual (frontend half): {@code GET /api/v1/session} exposes the caller's effective
+   * permission set to the SPA (driving the {@code <Can>} gate). Ordered AFTER Order 14 applied a
+   * tenant override to {@code ANALYST} (revoke {@code report.generate}, grant {@code audit.read}),
+   * so this proves the endpoint surfaces the SAME override-adjusted set the interceptor enforces —
+   * not merely the role's static defaults — sorted ascending by wire id.
+   */
+  @Test
+  @Order(17)
+  void session_exposes_the_callers_effective_permissions_including_tenant_overrides()
+      throws Exception {
+    mvc.perform(get("/api/v1/session").with(jwt().jwt(rolesAndTenant("ANALYST", tenantA))))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.tenantId").value(tenantA.toString()))
+        .andExpect(jsonPath("$.effectivePermissions").isArray())
+        .andExpect(jsonPath("$.effectivePermissions[0]").value("ai.agent.invoke")) // sorted first
+        .andExpect(jsonPath("$.effectivePermissions", hasItem("audit.read"))) // granted by override
+        .andExpect(jsonPath("$.effectivePermissions", hasItem("dashboard.view")))
+        .andExpect(jsonPath("$.effectivePermissions", not(hasItem("report.generate")))); // revoked
+  }
+
   /** The tenant's worst-first team list is deterministic across calls (same computed data). */
   private String firstTeamId() throws Exception {
     return JsonPath.read(

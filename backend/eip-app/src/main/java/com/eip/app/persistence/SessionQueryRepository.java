@@ -41,6 +41,6 @@ public class SessionQueryRepository implements GetSessionQuery {
                         """)
                     .query(String.class)
                     .optional());
-    return new SessionView(tenantId, organizationName.orElse(null));
+    return SessionView.identity(tenantId, organizationName.orElse(null));
   }
 }

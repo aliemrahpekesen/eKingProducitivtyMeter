@@ -5,10 +5,14 @@
 package com.eip.app.api;
 
 import com.eip.app.application.GetSessionQuery;
+import com.eip.app.security.EipPrincipal;
+import com.eip.app.security.EipPrincipalHolder;
 import com.eip.app.security.EipSecurityProperties;
 import com.eip.app.security.PermissionExempt;
 import com.eip.app.security.RequiresPermission;
 import com.eip.tenancy.rbac.Permission;
+import java.util.List;
+import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -45,14 +49,28 @@ public class SessionController {
   }
 
   /**
-   * Returns the current session's tenant identity.
+   * Returns the current session's tenant identity plus the caller's effective permissions.
    *
-   * @return the resolved tenant and its organisation name (read under RLS)
+   * <p>The permission set is drawn from the request principal ({@link EipPrincipalHolder}) — the
+   * very set {@code PermissionEnforcementInterceptor} enforces, including tenant-editable role
+   * overrides — mapped to stable {@link Permission#wireId()} strings and sorted ascending so the
+   * response (and the committed OpenAPI snapshot) is byte-stable. It drives the frontend {@code
+   * <Can>} gate; the backend interceptor remains the actual enforcement boundary.
+   *
+   * @return the resolved tenant, its organisation name (read under RLS), and the caller's effective
+   *     permission wire ids (empty, never null, when no principal is bound)
    */
   @GetMapping("/session")
   @RequiresPermission(Permission.DASHBOARD_VIEW)
   public SessionView session() {
-    return session.current();
+    return session.current().withEffectivePermissions(effectivePermissionWireIds());
+  }
+
+  private static List<String> effectivePermissionWireIds() {
+    return EipPrincipalHolder.current().map(EipPrincipal::permissions).orElseGet(Set::of).stream()
+        .map(Permission::wireId)
+        .sorted()
+        .toList();
   }
 
   /**

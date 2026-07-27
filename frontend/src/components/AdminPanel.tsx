@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Can } from '../auth/Can';
 import {
   useAdminConnectors,
   useAiPolicy,
@@ -110,25 +111,27 @@ function TenantsSection(): JSX.Element {
           aria-label="Tenant slug"
           required
         />
-        <button
-          type="button"
-          className="btn primary"
-          disabled={create.isPending}
-          onClick={() => {
-            create.mutate(
-              { name, slug },
-              {
-                onSuccess: (t) => {
-                  setName('');
-                  setSlug('');
-                  setTenantId(t.id);
+        <Can permission="tenant.manage">
+          <button
+            type="button"
+            className="btn primary"
+            disabled={create.isPending}
+            onClick={() => {
+              create.mutate(
+                { name, slug },
+                {
+                  onSuccess: (t) => {
+                    setName('');
+                    setSlug('');
+                    setTenantId(t.id);
+                  },
                 },
-              },
-            );
-          }}
-        >
-          Create tenant
-        </button>
+              );
+            }}
+          >
+            Create tenant
+          </button>
+        </Can>
       </form>
       {create.isError ? <ErrorState error={create.error} /> : null}
     </section>
@@ -155,14 +158,16 @@ function ConnectorsSection({ tenantId }: { tenantId: string }): JSX.Element {
           <h2>Integrations</h2>
           <span className="card-q">Connect Jira, Bitbucket, SonarQube — or load sample data</span>
         </div>
-        <button
-          type="button"
-          className="btn"
-          disabled={sample.isPending}
-          onClick={() => sample.mutate()}
-        >
-          {sample.isPending ? 'Computing…' : 'Load sample data & compute'}
-        </button>
+        <Can permission="tenant.manage">
+          <button
+            type="button"
+            className="btn"
+            disabled={sample.isPending}
+            onClick={() => sample.mutate()}
+          >
+            {sample.isPending ? 'Computing…' : 'Load sample data & compute'}
+          </button>
+        </Can>
       </header>
       {sample.isSuccess ? (
         <p className="muted">
@@ -224,40 +229,46 @@ function ConnectorsSection({ tenantId }: { tenantId: string }): JSX.Element {
               </div>
               <div className="admin-actions">
                 {syncableTypes.has(c.type) ? (
+                  <Can permission="connector.configure">
+                    <button
+                      type="button"
+                      className="btn primary"
+                      disabled={sync.isPending}
+                      onClick={() => sync.mutate(c.id)}
+                    >
+                      {sync.isPending ? 'Syncing…' : 'Sync now'}
+                    </button>
+                  </Can>
+                ) : null}
+                <Can permission="connector.configure">
                   <button
                     type="button"
-                    className="btn primary"
-                    disabled={sync.isPending}
-                    onClick={() => sync.mutate(c.id)}
+                    className="btn"
+                    disabled={test.isPending}
+                    onClick={() =>
+                      test.mutate(c.id, {
+                        onSuccess: (r) => setTestResult((prev) => ({ ...prev, [c.id]: r })),
+                      })
+                    }
                   >
-                    {sync.isPending ? 'Syncing…' : 'Sync now'}
+                    Test
                   </button>
-                ) : null}
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={test.isPending}
-                  onClick={() =>
-                    test.mutate(c.id, {
-                      onSuccess: (r) => setTestResult((prev) => ({ ...prev, [c.id]: r })),
-                    })
-                  }
-                >
-                  Test
-                </button>
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={setStatus.isPending}
-                  onClick={() =>
-                    setStatus.mutate({
-                      connectorId: c.id,
-                      status: c.status === 'DISABLED' ? 'ACTIVE' : 'DISABLED',
-                    })
-                  }
-                >
-                  {c.status === 'DISABLED' ? 'Enable' : 'Disable'}
-                </button>
+                </Can>
+                <Can permission="connector.configure">
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={setStatus.isPending}
+                    onClick={() =>
+                      setStatus.mutate({
+                        connectorId: c.id,
+                        status: c.status === 'DISABLED' ? 'ACTIVE' : 'DISABLED',
+                      })
+                    }
+                  >
+                    {c.status === 'DISABLED' ? 'Enable' : 'Disable'}
+                  </button>
+                </Can>
               </div>
             </li>
           ))}
@@ -338,9 +349,11 @@ function ConnectorForm({
         </label>
       ) : null}
       <div className="admin-actions">
-        <button type="submit" className="btn primary" disabled={register.isPending}>
-          {register.isPending ? 'Saving…' : 'Save integration'}
-        </button>
+        <Can permission="connector.configure">
+          <button type="submit" className="btn primary" disabled={register.isPending}>
+            {register.isPending ? 'Saving…' : 'Save integration'}
+          </button>
+        </Can>
         <button type="button" className="btn" onClick={onDone}>
           Cancel
         </button>
@@ -575,13 +588,15 @@ function AiPolicyForm({
           />
         </label>
         <div className="admin-actions">
-          <button
-            type="submit"
-            className="btn primary"
-            disabled={update.isPending || validationHint !== null}
-          >
-            {update.isPending ? 'Saving…' : 'Save'}
-          </button>
+          <Can permission="ai.policy.manage">
+            <button
+              type="submit"
+              className="btn primary"
+              disabled={update.isPending || validationHint !== null}
+            >
+              {update.isPending ? 'Saving…' : 'Save'}
+            </button>
+          </Can>
         </div>
       </form>
       {validationHint !== null ? (

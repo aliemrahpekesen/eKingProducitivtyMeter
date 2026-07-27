@@ -282,11 +282,20 @@ class TenantApiIntegrationTest {
   }
 
   @Test
-  void session_endpoint_returns_the_resolved_tenant_and_org() throws Exception {
+  void session_endpoint_returns_the_resolved_tenant_org_and_effective_permissions()
+      throws Exception {
+    // Header mode resolves the implicit TENANT_ADMIN principal, so effectivePermissions carries
+    // that role's wire ids — sorted ascending (deterministic contract), never the enum names.
     mvc.perform(get("/api/v1/session").header(HeaderTenantResolver.HEADER, tenantA.toString()))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.tenantId").value(tenantA.toString()))
-        .andExpect(jsonPath("$.organizationName").value("Org A"));
+        .andExpect(jsonPath("$.organizationName").value("Org A"))
+        .andExpect(jsonPath("$.effectivePermissions").isArray())
+        .andExpect(jsonPath("$.effectivePermissions[0]").value("ai.agent.invoke")) // sorted first
+        .andExpect(jsonPath("$.effectivePermissions", hasItem("tenant.manage")))
+        .andExpect(jsonPath("$.effectivePermissions", hasItem("dashboard.view")))
+        .andExpect(
+            jsonPath("$.effectivePermissions", not(hasItem("connector.secret.reveal")))); // opt-in
   }
 
   @Test
@@ -363,6 +372,24 @@ class TenantApiIntegrationTest {
             .getResponse()
             .getContentAsString();
     exportContractIfRequested(contract);
+  }
+
+  @Test
+  void openapi_contract_carries_the_x_eip_permission_extension_on_gated_operations_only()
+      throws Exception {
+    // /api/v1/connectors (GET) carries @RequiresPermission(Permission.DASHBOARD_VIEW) — the
+    // extension must be a JSON array (any-of semantics, even for a single permission) of the
+    // permission's stable wireId(), never the Java enum name.
+    mvc.perform(get("/v3/api-docs"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.paths['/api/v1/connectors'].get.x-eip-permission").isArray())
+        .andExpect(jsonPath("$.paths['/api/v1/connectors'].get.x-eip-permission.length()").value(1))
+        .andExpect(
+            jsonPath("$.paths['/api/v1/connectors'].get.x-eip-permission[0]")
+                .value("dashboard.view"))
+        // /api/v1/session/auth (GET) is @PermissionExempt — no permission gates it, so no
+        // extension is added at all (not an empty array — genuinely absent).
+        .andExpect(jsonPath("$.paths['/api/v1/session/auth'].get.x-eip-permission").doesNotExist());
   }
 
   /**
