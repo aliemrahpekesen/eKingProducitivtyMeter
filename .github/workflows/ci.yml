@@ -147,10 +147,23 @@ jobs:
           # which pulls @vitejs/plugin-react past a version whose OWN peer range (^8.0.0) outruns the
           # available vite 7.x line (tested: unmet peer), so taking the major bump now trades one
           # accepted, scoped, low-exposure finding for a genuine, unresolved peer-dependency break.
-          # Every other finding this scan surfaces (vitest RCE, brace-expansion ReDoS, js-yaml DoS)
-          # was fixed for real (see DEBT-015). Revisit when the vite 7/8 + plugin-react pairing
-          # stabilizes.
-          allow-ghsas: GHSA-fx2h-pf6j-xcff
+          # Other findings this scan surfaced (vitest RCE, an EARLIER brace-expansion ReDoS,
+          # js-yaml DoS) were fixed for real (see DEBT-015). Revisit when the vite 7/8 +
+          # plugin-react pairing stabilizes.
+          #
+          # GHSA-mh99-v99m-4gvg (brace-expansion "unbounded expansion -> OOM" DoS): allowlisted
+          # because it is UNFIXABLE BY VERSION-PINNING here. The advisory's npm version data is
+          # malformed -- it declares brace-expansion affected `<= 5.0.7` with a first-patched
+          # version of `5.0.8`, but brace-expansion's npm line tops out at 2.1.3 (there is no 5.x),
+          # so the range marks EVERY existing version (all of 1.x AND 2.x) vulnerable while the
+          # "fix" version does not exist. Verified empirically: bumping the pin 1.1.16 -> 2.1.2
+          # (the newest, deduped version) still trips this gate (the bump is kept anyway -- 2.x is
+          # the maintained line and dedupes the tree). brace-expansion is a build-time transitive
+          # dep (minimatch@3 in the eslint/vite toolchain), never in the shipped bundle -- a
+          # brace-pattern DoS needs malicious input fed to a build tool, so realistic exposure is
+          # nil. Revisit if the advisory data is corrected to a real npm range with a reachable
+          # fix (tracked: DEBT-025).
+          allow-ghsas: GHSA-fx2h-pf6j-xcff, GHSA-mh99-v99m-4gvg
 
   docs-lint:
     name: docs-lint
