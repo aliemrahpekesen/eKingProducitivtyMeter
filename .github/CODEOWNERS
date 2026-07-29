@@ -1,0 +1,81 @@
+# CODEOWNERS — repository paths → owning engineering roles.
+#
+# Source of truth: engineering-operating-system/ModuleOwnership.md §1 (ownership map) and §4
+# (Phase-0 CODEOWNERS content). Semantics: GitHub CODEOWNERS is LAST-MATCH-WINS, so more specific
+# paths appear AFTER their parent rules (RepositoryRules.md §7.3). Every path matches at least one
+# rule so the `codeowners-coverage` check passes (ModuleOwnership §6.1; RepositoryRules §7.4).
+#
+# Team aliases `@eip/r-<xx>` are the lower-cased role IDs from ModuleOwnership §1 / AIAgentCatalog;
+# membership (which agent/human holds each role) is administered by the human repository owner
+# (ModuleOwnership §7). R-CR is deliberately absent — R-CR reviews every PR as a separately enforced
+# required review, never via CODEOWNERS (ModuleOwnership §4 note 1). R-SA is not path-mapped —
+# security review routes by change class (CC-2 → G3 + R-SA sign-off), because security-relevant
+# diffs cross paths (ModuleOwnership §4 note 2).
+#
+# Reconciliations recorded in work/tasks/TASK-0007.md (location drift RESOLVED by DEBT-006 — see
+# work/debt-register.md: ModuleOwnership §1/§4 note 3 and RepositoryRules §7.1 now correctly name
+# .github/CODEOWNERS, not the repo root):
+#  - Ordering: §4's listed order places /docs/adr/ before /docs/, which under last-match-wins would
+#    misassign ADRs to R-DE. Reordered general→specific per RepositoryRules §7.3 to honor §1's map.
+#  - Coverage: /program, /sprints, /reviews and the loose root files were added after §4 was
+#    written; they are owned here per the §1 principles (program/sprint state → R-TPM; architecture
+#    readiness reviews → R-CA). The `*` default encodes the §6.3 "ambiguous → R-CA" rule.
+
+# ---- Default: any unmatched path defaults to R-CA (ModuleOwnership §6.3) ----
+*                                                   @eip/r-ca
+
+# ---- Root files ----
+/README.md                                          @eip/r-de
+/CONTRIBUTING.md                                    @eip/r-de
+/LICENSE                                            @eip/r-ca
+/Makefile                                           @eip/r-doa
+/.editorconfig                                      @eip/r-doa
+/.gitignore                                         @eip/r-doa
+
+# ---- Backend (general → specific) ----
+/backend/                                           @eip/r-ba
+/backend/buildSrc/                                  @eip/r-ba @eip/r-doa
+/backend/gradle/                                    @eip/r-ba @eip/r-doa
+/backend/settings.gradle.kts                        @eip/r-ba @eip/r-doa
+/backend/eip-core/                                  @eip/r-ba
+/backend/eip-tenancy/                               @eip/r-ba @eip/r-pa
+/backend/eip-app/                                   @eip/r-ba
+/backend/eip-workers/                               @eip/r-ba
+/backend/eip-connectors/                            @eip/r-cna
+/backend/eip-ingestion/                             @eip/r-cna @eip/r-da
+/backend/eip-analytics/                             @eip/r-da @eip/r-ba
+/backend/eip-ai/                                    @eip/r-aia
+/backend/eip-reports/                               @eip/r-ba @eip/r-aia
+/backend/eip-app/src/main/resources/db/migration/   @eip/r-dba
+
+# ---- Frontend ----
+/frontend/                                          @eip/r-fa
+
+# ---- Documentation of record (general → specific) ----
+/docs/                                              @eip/r-de
+/docs/architecture/generated/                       @eip/r-ba
+/docs/adr/                                          @eip/r-ca
+
+# ---- Simulation data packs ----
+/simulation/                                        @eip/r-cna @eip/r-qaa
+
+# ---- Development program & sprint planning ----
+/program/                                           @eip/r-tpm
+/sprints/                                           @eip/r-tpm
+
+# ---- Architecture readiness reviews ----
+/reviews/                                           @eip/r-ca
+
+# ---- Work state (tasks, reviews, handoffs, registers) ----
+/work/                                              @eip/r-tpm
+
+# ---- Infra, CI, tooling (general → specific) ----
+/infra/                                             @eip/r-doa
+/scripts/                                           @eip/r-doa
+/.github/                                           @eip/r-doa
+/.github/CODEOWNERS                                 @eip/r-ca
+
+# ---- Governance (placed last so it wins over any broader tree above) ----
+/CLAUDE.md                                          @eip/r-ca
+/engineering-operating-system/                      @eip/r-ca
+/CODEOWNERS                                         @eip/r-ca

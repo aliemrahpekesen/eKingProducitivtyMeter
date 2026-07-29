@@ -23,12 +23,16 @@ This document defines the REST API of the Engineering Intelligence Platform (EIP
 | Scope / permission | Grants |
 |---|---|
 | `tenant:manage` | Org/BU/tenant lifecycle (cross-tenant, `PLATFORM_ADMIN`) |
+| `org:read` | Read org structure (organizations, business units, teams) |
 | `rbac:manage` | Roles, permissions, member-role assignment |
 | `connector:manage` | Connector CRUD, test-connection, sync triggers, checkpoints |
 | `connector:read` | Read connector configs (secrets masked) and health |
 | `ingestion:operate` | Job control, DLQ inspect/replay |
 | `workitem:read` | Work & Delivery read surface |
-| `metric:read` | Metric definitions, metric queries, risk, forecasts |
+| `board:read` | Boards and workflow-state read surface |
+| `release:read` | Releases read surface |
+| `metric:read` | Metric definitions, metric queries |
+| `risk:read` | Risk scores, score explanations, forecasts |
 | `dashboard:configure` | Saved views write |
 | `agent:invoke` | Create agent runs; read own runs |
 | `llm:configure` / `llm:audit` | LLM provider CRUD / LLM call audit read |
@@ -53,12 +57,12 @@ Response shape names refer to OpenAPI component schemas. All list endpoints supp
 
 | Method | Path | Purpose | Key params | Response | Permission |
 |---|---|---|---|---|---|
-| GET | `/api/v1/organizations` | List organizations | `name` | `Page<OrganizationSummary>` | `tenant:manage` |
+| GET | `/api/v1/organizations` | List organizations | `name` | `Page<OrganizationSummary>` | `org:read` |
 | POST | `/api/v1/organizations` | Create organization (tenant root) | body: `OrganizationCreate` | `Organization` | `tenant:manage` |
 | GET/PUT/DELETE | `/api/v1/organizations/{id}` | Read / update / retire org | If-Match on PUT/DELETE | `Organization` | `tenant:manage` |
-| GET/POST | `/api/v1/business-units` | List / create BusinessUnits | `organizationId` | `Page<BusinessUnit>` / `BusinessUnit` | `tenant:manage` (POST), `metric:read` (GET) |
+| GET/POST | `/api/v1/business-units` | List / create BusinessUnits | `organizationId` | `Page<BusinessUnit>` / `BusinessUnit` | `tenant:manage` (POST), `org:read` (GET) |
 | GET/PUT/DELETE | `/api/v1/business-units/{id}` | Manage BusinessUnit | If-Match | `BusinessUnit` | `tenant:manage` |
-| GET/POST | `/api/v1/teams` | List / create Teams | `businessUnitId`, `name` | `Page<Team>` / `Team` | `rbac:manage` (POST), `metric:read` (GET) |
+| GET/POST | `/api/v1/teams` | List / create Teams | `businessUnitId`, `name` | `Page<Team>` / `Team` | `rbac:manage` (POST), `org:read` (GET) |
 | GET/PUT/DELETE | `/api/v1/teams/{id}` | Manage Team | If-Match | `Team` | `rbac:manage` |
 | GET/POST/DELETE | `/api/v1/teams/{id}/members` | List / add / remove Members | `memberId` (DELETE) | `Page<Member>` | `rbac:manage` |
 | GET/POST | `/api/v1/members` | List / create Members (person ↔ identity mapping incl. `ExternalRef` aliases) | `teamId`, `identity` | `Page<Member>` / `Member` | `rbac:manage` |
@@ -68,8 +72,9 @@ Response shape names refer to OpenAPI component schemas. All list endpoints supp
 | GET | `/api/v1/permissions` | Catalog of fine-grained permissions | — | `PermissionCatalog` | `rbac:manage` |
 | GET/POST | `/api/v1/users` | List / provision users (local accounts fallback) | `email`, `status` | `Page<User>` / `User` | `rbac:manage` |
 | GET/PUT | `/api/v1/users/{id}` | Read / update user (roles, status) | If-Match | `User` | `rbac:manage` |
-| POST | `/api/v1/service-tokens` | Issue service token (returned once) | body: `ServiceTokenCreate` (scopes, expiry) | `ServiceTokenIssued` | `rbac:manage` |
-| DELETE | `/api/v1/service-tokens/{id}` | Revoke service token | — | 204 | `rbac:manage` |
+| POST | `/api/v1/admin/service-tokens` | Issue service token (raw value returned exactly once) | body: role, optional permission subset, optional `expiresInDays`, optional `platformScoped` (PLATFORM_ADMIN only) | `ServiceTokenCreatedView` | `user.manage` |
+| GET | `/api/v1/admin/service-tokens` | List service tokens for the caller's scope (tenant-scoped, or platform-scoped when no tenant is bound) | — | `List<ServiceTokenView>` (no raw token/hash), newest first — matches the existing `/admin/tenants`/`/admin/connectors` unpaginated-list convention | `user.manage` |
+| DELETE | `/api/v1/admin/service-tokens/{id}` | Revoke service token | — | 204 | `user.manage` |
 
 ### 4.2 Connectors & Data Sources
 
@@ -190,7 +195,7 @@ All read-only (canonical data is connector-owned). Common filters: `teamId`, `bu
 | GET | `/api/v1/artifacts` | Artifact library (GeneratedReport instances) | `templateId`, `scopeType`, `from`,`to` | `Page<ArtifactSummary>` | `report:read` |
 | GET | `/api/v1/artifacts/{id}` | Artifact metadata + citation map | — | `Artifact` | `report:read` |
 | GET | `/api/v1/artifacts/{id}/versions` | Version history | — | `Page<ArtifactVersion>` | `report:read` |
-| GET | `/api/v1/artifacts/{id}/content` | Download rendered content | `format (md\|pdf\|html\|json\|csv\|pptx)`, `version` | binary/stream | `report:read` |
+| GET | `/api/v1/artifacts/{id}/content` | Download rendered content (png/svg cover diagram exports per FR-117) | `format (md\|pdf\|html\|json\|csv\|pptx\|png\|svg)`, `version` | binary/stream | `report:read` |
 | POST | `/api/v1/artifacts/{id}/exports` | Async export/conversion to another format | Idempotency-Key; body: `{format}` | 202 `JobRef` | `report:read` |
 
 ### 4.11 Audit
@@ -287,7 +292,7 @@ The client then opens the SSE stream at `eventsUrl` (§4.7) or polls the run res
 
 ```json
 {
-  "type": "https://docs.eip.local/problems/precondition-failed",
+  "type": "https://eip.example.com/problems/precondition-failed",
   "title": "Precondition Failed",
   "status": 412,
   "detail": "Connector was modified by another request; refresh and retry with the current ETag.",

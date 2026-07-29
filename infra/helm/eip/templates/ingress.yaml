@@ -1,0 +1,39 @@
+# Optional Ingress, disabled by default (values.yaml ingress.enabled: false) — v0.1 pilot installs
+# typically port-forward the Service or sit behind an existing enterprise load balancer/reverse
+# proxy. Routes to the backend Service; there is no bundled frontend to route to until
+# frontend.enabled is true and a frontend Service exists.
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "eip.fullname" . }}
+  labels:
+    {{- include "eip.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  {{- if .Values.ingress.tls }}
+  tls:
+    {{- toYaml .Values.ingress.tls | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                name: {{ if $.Values.frontend.enabled }}{{ include "eip.frontend.fullname" $ }}{{ else }}{{ include "eip.backend.fullname" $ }}{{ end }}
+                port:
+                  number: {{ if $.Values.frontend.enabled }}{{ $.Values.frontend.service.port }}{{ else }}{{ $.Values.service.port }}{{ end }}
+          {{- end }}
+    {{- end }}
+{{- end }}

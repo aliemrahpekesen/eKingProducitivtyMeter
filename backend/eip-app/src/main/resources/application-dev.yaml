@@ -1,0 +1,6 @@
+# dev — developer laptop against the local Compose stack (ADR-022). Human-readable logs, header
+# tenant resolution (X-EIP-Tenant, dev-only), simulation source enabled, demo data seeded via the
+# `demo` group member. Everything defaults to localhost; override via EIP_* env vars.
+logging:
+  level:
+    com.eip: INFO

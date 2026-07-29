@@ -1,0 +1,36 @@
+# Build outputs
+backend/**/build/
+backend/.gradle/
+backend/buildSrc/build/
+backend/buildSrc/.gradle/
+frontend/dist/
+frontend/node_modules/
+node_modules/
+
+# Gradle
+.gradle/
+
+# IDE / OS
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# Local env / secrets — never committed (RepositoryRules: never commit secrets or real tenant data)
+*.local
+.env
+.env.*
+!.env.example
+# Vite MODE files are per-environment config contracts (ADR-022) holding PUBLIC values only
+# (demo tenant id, localhost proxy target) — never secrets. Real secrets stay in git-ignored
+# .env / .env.local files.
+!.env.development
+!.env.test
+!.env.preprod
+!.env.production
+*.pem
+*.key
+
+# Local demo runtime (make demo-up) — pids + logs
+.demo/
+.install/

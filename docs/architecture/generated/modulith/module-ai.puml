@@ -1,0 +1,25 @@
+@startuml
+set separator none
+title Ai
+
+top to bottom direction
+
+!include <C4/C4>
+!include <C4/C4_Context>
+!include <C4/C4_Component>
+
+Container_Boundary("Modules.Modules_boundary", "Modules", $tags="") {
+  Component(Modules.Modules.Tenancy, "Tenancy", $techn="Module", $descr="", $tags="", $link="")
+  Component(Modules.Modules.Ai, "Ai", $techn="Module", $descr="", $tags="", $link="")
+  Component(Modules.Modules.Analytics, "Analytics", $techn="Module", $descr="", $tags="", $link="")
+  Component(Modules.Modules.Core, "Core", $techn="Module", $descr="", $tags="", $link="")
+}
+
+Rel(Modules.Modules.Ai, Modules.Modules.Tenancy, "uses", $techn="", $tags="", $link="")
+Rel(Modules.Modules.Ai, Modules.Modules.Analytics, "uses", $techn="", $tags="", $link="")
+Rel(Modules.Modules.Ai, Modules.Modules.Core, "uses", $techn="", $tags="", $link="")
+Rel(Modules.Modules.Analytics, Modules.Modules.Tenancy, "uses", $techn="", $tags="", $link="")
+Rel(Modules.Modules.Tenancy, Modules.Modules.Core, "depends on", $techn="", $tags="", $link="")
+
+SHOW_LEGEND(true)
+@enduml

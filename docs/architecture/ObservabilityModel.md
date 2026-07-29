@@ -25,7 +25,7 @@ flowchart LR
     end
     subgraph COL["OTel Collector"]
         RCV["OTLP receiver (gRPC 4317, TLS)"]
-        PROC["processors:<br/>batch, memory_limiter,<br/>redaction, tail_sampling (5xx)"]
+        PROC["processors:<br/>batch, memory_limiter, redaction,<br/>sampling (probabilistic + tail rules)"]
     end
     subgraph BACK["Backends"]
         PROM[("Prometheus<br/>metrics")]
@@ -61,15 +61,19 @@ All metrics are produced via Micrometer with OTel/Prometheus export, prefix `eip
 | Metric | Type | Labels | Purpose |
 |---|---|---|---|
 | `eip_ingestion_events_total` | counter | `tenantId, connector, entityType, outcome=ok\|dedup\|error` | Ingestion throughput and dedup/error ratio per connector |
-| `eip_ingestion_event_lag_seconds` | histogram | `connector` | `ingestedAt - occurredAt` distribution; drives freshness SLO |
+| `eip_ingestion_event_lag_seconds` | histogram | `connector` | `ingestedAt - occurredAt` at the raw-intake boundary; pipeline-stage diagnostics (the freshness SLO measures at canonical visibility, below) |
+| `eip_canonical_visibility_lag_seconds` | histogram | `connector, mode=webhook\|poll` | `canonical upsert time - occurredAt`: source-to-canonical-model visibility; drives the ingestion freshness SLO (NFR-012) |
 | `eip_connector_sync_duration_seconds` | histogram | `tenantId, connector, mode=full\|incremental` | Sync run latency; regression detection per connector |
 | `eip_connector_sync_runs_total` | counter | `tenantId, connector, mode, outcome=ok\|error\|rate_limited` | Sync attempt/success accounting |
 | `eip_connector_health` | gauge | `tenantId, connector` | 1 healthy / 0 unhealthy from `healthCheck()`; primary connector alert signal |
 | `eip_connector_checkpoint_age_seconds` | gauge | `tenantId, connector, stream` | Age of last committed checkpoint; stuck-sync detection |
 | `eip_connector_rate_limit_waits_total` | counter | `connector` | Backoff pressure from tool endpoints |
 | `eip_webhook_events_total` | counter | `connector, outcome=ok\|invalid_signature\|rejected` | Webhook intake volume and spoofing attempts |
-| `eip_kafka_consumer_lag` | gauge | `topic, consumer_group` | Records behind head; HPA/KEDA scaling signal for workers |
-| `eip_kafka_dlq_messages_total` | counter | `consumer_group, topic` | Poison/parked messages per `.<group>.dlq`; must-investigate signal |
+| `eip_kafka_consumer_lag` | gauge | `topic, consumer_group` | Records behind head; HPA/KEDA scaling signal for workers. Distinct from the time-lag signal below — both are kept |
+| `eip.consumer.lag_seconds` | gauge | `topic, consumer_group` | Time-lag: age (now − timestamp of last consumed record) per group/topic. Defined in `../engineering/EventModel.md` §12, cross-listed here; records-behind and time-lag are two distinct signals |
+| `eip_kafka_dlq_messages_total` | counter | `consumer_group, topic` | Poison/parked messages per `<group>.dlq`; must-investigate signal |
+| `eip_outbox_lag_seconds` | gauge | `deployable` | Outbox relay lag: now − `created_at` of the oldest unrelayed `event_outbox` row, per relaying runtime; first-class signal per `../engineering/EventModel.md` §9 (alert at > 60 s, §7) |
+| `eip_webhook_buffer_depth` | gauge | `connector` | Rows currently parked in `staging.webhook_intake_buffer`; the Kafka-outage detection signal on the webhook intake path (see `./DataFlow.md` §3) |
 | `eip_normalization_failures_total` | counter | `connector, entityType, reason` | Raw→canonical mapping failures (schema drift detection) |
 | `eip_analytics_metric_compute_duration_seconds` | histogram | `metric_family=flow\|dora\|quality\|risk\|ops\|team_health` | Metric engine cost per family |
 | `eip_analytics_metric_staleness_seconds` | gauge | `metric_family` | Time since last successful recompute; dashboard trust signal |
@@ -82,7 +86,7 @@ All metrics are produced via Micrometer with OTel/Prometheus export, prefix `eip
 | `eip_rag_index_documents` | gauge | `tenantId, store` | Corpus size; re-index progress observable |
 | `eip_report_generation_duration_seconds` | histogram | `tenantId, report_type` | Report job latency end-to-end |
 | `eip_report_jobs_total` | counter | `tenantId, report_type, outcome=ok\|failed` | Report success rate SLO input |
-| `eip_api_request_duration_seconds` | histogram | `method, route, status` | RED metrics for `/api/v1`; HPA signal for `eip-app`; route is the template, never raw path |
+| `eip_api_request_duration_seconds` | histogram | `method, route, status, tenant_present` | RED metrics for `/api/v1`; HPA signal for `eip-app`; route is the template, never raw path. `tenant_present` is a bounded boolean (never the tenant id) emitted by `eip-app`'s `ApiObservabilityFilter` (§3 label cardinality principle) |
 | `eip_api_requests_inflight` | gauge | `deployable` | Saturation on the API tier |
 | `eip_cache_hit_ratio` | gauge | `cache` | Redis/Caffeine cache effectiveness per named cache |
 | `eip_db_pool_connections_active` | gauge | `pool` | Hikari pool saturation |
@@ -128,7 +132,7 @@ sequenceDiagram
   - AI: `ai.agent.sprint_review.run` (parent), child spans `ai.llm.call` (attributes: provider, model, token counts — never prompt text), `ai.rag.retrieve`, `ai.mcp.invoke`.
   - Reports: `reports.generate.executive_summary`, `reports.export.pdf`.
   - Span attributes always include `eip.tenant_id`; never payload content, secrets, or member identities.
-- **Sampling policy.** Head sampling defaults: API traffic 10% (parent-based), background sync spans 1–10% by volume tier. **Always-on (100%)**: agent runs and LLM calls (cost/latency accountability), report jobs, DLQ handling, migrations, secret/KMS operations, and any request that ends in 5xx (tail-sampling rule in the OTel Collector when Tempo is deployed). Sampling rates are env-configurable per `../architecture/DeploymentModel.md` §11.
+- **Sampling policy.** SDKs export **100% of spans** — there is no head sampling in application SDKs. All sampling executes centrally in the OTel Collector: probabilistic policies (API traffic 10%, background sync spans 1–10% by volume tier) plus tail-sampling rules that retain **100%** of: agent runs and LLM calls (cost/latency accountability), report jobs, DLQ handling, migrations, secret/KMS operations, and any request that ends in 5xx. This is what makes the 100%-of-5xx guarantee implementable — with SDK head sampling, 90% of 5xx spans would never reach the Collector. Sizing implication: the Collector's `memory_limiter` and `tail_sampling` decision buffer must hold the full span stream for the decision window (default 10 s); the observability-stack resource rows in `../architecture/DeploymentModel.md` §5 account for this, and exporter-queue drops are meta-monitored (§8.1). Sampling percentages are env-configurable per `../architecture/DeploymentModel.md` §11; when Tempo is not deployed, spans are dropped at the Collector after metric-exemplar/log correlation — never in the SDK.
 - **Trace backend optionality.** Tempo is optional; without it, traces export nowhere but `traceId` still flows through logs, metrics exemplars, and audit events, so correlation survives in reduced form.
 
 ## 5. Structured Logging
@@ -161,8 +165,8 @@ Provisioned automatically in all topologies; JSON dashboards live in `/infra/gra
 | Dashboard | Panels |
 |---|---|
 | **System Health** | Global status row (per-deployable up/ready), API availability vs SLO, error-budget burn gauges, pod restarts, JVM heap/GC per deployable, CPU/memory vs requests, active alerts list |
-| **Ingestion & Connectors** | `eip_connector_health` heatmap (connector × tenant), sync duration p50/p95 by connector, events/sec by connector and outcome, dedup + normalization-failure rates, checkpoint age table, rate-limit waits, webhook outcomes (incl. invalid signatures), ingestion freshness (`eip_ingestion_event_lag_seconds` p95 vs SLO) |
-| **Kafka & Queues** | Consumer lag by group/topic (with HPA thresholds drawn), produce/consume throughput per `eip.` topic, DLQ depth and arrival rate per group, rebalance events, broker ISR/under-replicated partitions, oldest unconsumed message age |
+| **Ingestion & Connectors** | `eip_connector_health` heatmap (connector × tenant), sync duration p50/p95 by connector, events/sec by connector and outcome, dedup + normalization-failure rates, checkpoint age table, rate-limit waits, webhook outcomes (incl. invalid signatures), ingestion freshness (`eip_canonical_visibility_lag_seconds` p95 vs SLO, with `eip_ingestion_event_lag_seconds` as the raw-intake stage breakdown) |
+| **Kafka & Queues** | Consumer lag by group/topic (with HPA thresholds drawn), produce/consume throughput per `eip.` topic, DLQ depth and arrival rate per group, rebalance events, broker ISR/under-replicated partitions, oldest unconsumed message age, outbox relay lag (`eip_outbox_lag_seconds`), webhook intake buffer depth (`eip_webhook_buffer_depth`) |
 | **API & Latency** | RED per route (rate, error %, p50/p95/p99 from `eip_api_request_duration_seconds`), in-flight requests, top slow routes, 4xx breakdown (401/403/429 separated), idempotency-key replay hits, RPS vs HPA replica count |
 | **AI/LLM Usage & Cost** | Tokens/hour by provider+model, `eip_llm_cost_estimate` cumulative by tenant, LLM latency p95 by model, agent run outcomes stacked by agent, budget-exhaustion events, validation-failure rate, RAG retrieval latency p95, RAG corpus size and re-index progress, external vs local call split |
 | **Database & Cache** | Postgres connections vs pool max, query latency (pg_stat_statements top-N), replication lag, table/index bloat, WAL rate, vacuum activity, pgvector index size, Redis hit ratio per cache (`eip_cache_hit_ratio`), Redis memory/evictions, Redisson lock wait times |
@@ -170,15 +174,16 @@ Provisioned automatically in all topologies; JSON dashboards live in `/infra/gra
 
 ## 7. Alerting Rules
 
-Prometheus rules ship in `/infra/kubernetes` (PrometheusRule) and `/infra/docker-compose` (rules file). Every alert carries a `runbook` annotation pointing at `../operations/OperationsGuide.md` anchors.
+Prometheus rules ship in `/infra/kubernetes` (PrometheusRule) and `/infra/docker-compose` (rules file). Every alert carries a `runbook` annotation pointing at `../operations/OperationsGuide.md` anchors. This table is the **single source-of-record alert catalog**: `../operations/OperationsGuide.md` §4 runbooks use these exact alert names and anchors, and event/consumer documents (`../engineering/EventModel.md` §10/§12) reference these rules rather than defining their own. The DLQ alerting contract is `EipDlqNonEmpty` on `eip_kafka_dlq_messages_total` with the thresholds below — no other DLQ metric or threshold set exists.
 
 | Alert | Expr sketch | Severity | Runbook |
 |---|---|---|---|
 | `EipApiHighErrorRate` | 5xx ratio over 5m > 2% | critical | `../operations/OperationsGuide.md#api-errors` |
-| `EipApiLatencySloBurn` | p95 `eip_api_request_duration_seconds` > 1.5s for 10m, or fast burn (14×) on latency SLO | warning/critical | `../operations/OperationsGuide.md#api-latency` |
+| `EipApiLatencySloBurn` | p95 `eip_api_request_duration_seconds` on dashboard-serving routes > 1.5s for 10m, or fast burn (14×) on the dashboard-latency SLO | warning/critical | `../operations/OperationsGuide.md#api-latency` |
+| `EipApiNonAnalyticalLatencySloBurn` | p95 `eip_api_request_duration_seconds` on non-analytical routes (dashboard/analytics query routes excluded) > 300ms for 10m, or fast burn (14×) on the NFR-011 latency SLO | warning/critical | `../operations/OperationsGuide.md#api-latency` |
 | `EipConnectorDown` | `eip_connector_health == 0` for 15m | warning (critical at 2h) | `../operations/OperationsGuide.md#connector-down` |
 | `EipConnectorCheckpointStuck` | `eip_connector_checkpoint_age_seconds > 4×` expected sync interval | warning | `../operations/OperationsGuide.md#sync-stuck` |
-| `EipIngestionFreshnessSloBurn` | p95 `eip_ingestion_event_lag_seconds` > 900 for 15m | warning/critical | `../operations/OperationsGuide.md#ingestion-freshness` |
+| `EipIngestionFreshnessSloBurn` | p95 `eip_canonical_visibility_lag_seconds` > 60 (webhook-driven) / > poll interval + 300s (poll-driven) for 15m — aligned with the NFR-012 SLO budget so it fires before the 60s budget is exhausted | warning/critical | `../operations/OperationsGuide.md#ingestion-freshness` |
 | `EipKafkaConsumerLagGrowing` | `eip_kafka_consumer_lag` above threshold and `deriv() > 0` for 15m despite max HPA replicas | critical | `../operations/OperationsGuide.md#consumer-lag` |
 | `EipDlqNonEmpty` | `increase(eip_kafka_dlq_messages_total[10m]) > 0` | warning (critical > 100/h) | `../operations/OperationsGuide.md#dlq-drain` |
 | `EipNormalizationFailuresSpike` | failure ratio per connector > 5% over 15m | warning | `../operations/OperationsGuide.md#schema-drift` |
@@ -194,8 +199,20 @@ Prometheus rules ship in `/infra/kubernetes` (PrometheusRule) and `/infra/docker
 | `EipWebhookSignatureFailures` | `invalid_signature` rate > 10/min | warning (security) | `../operations/OperationsGuide.md#webhook-spoofing` |
 | `EipAuditSilence` | `increase(eip_audit_events_total[30m]) == 0` while API traffic > 0 | critical (security) | `../operations/OperationsGuide.md#audit-pipeline` |
 | `EipPodCrashLooping` | restarts > 3 in 15m per deployable | critical | `../operations/OperationsGuide.md#crashloop` |
+| `EipPostgresPrimaryDown` | `pg_up{role="primary"} == 0` or `absent(pg_up{role="primary"})` for 1m (CNPG: operator failover/`Cluster`-degraded metrics on K8s; postgres-exporter `pg_up` on Compose) | critical | `../operations/OperationsGuide.md#pg-primary-down` |
+| `EipKafkaBrokerDown` | broker count below expected (`kafka_brokers < <expected>` for 5m); full-outage form `absent(up{job="kafka"})` — inhibits downstream lag/DLQ/outbox alerts (inhibition note below) | critical | `../operations/OperationsGuide.md#kafka-broker-down` |
+| `EipKafkaUnderReplicatedPartitions` | `sum(kafka_server_replicamanager_underreplicatedpartitions) > 0` for 10m | warning (critical at 30m) | `../operations/OperationsGuide.md#kafka-urp` |
+| `EipDiskPressure` | Postgres/Kafka/MinIO data volume usage > 80% (`kubelet_volume_stats_*` on K8s; `node_filesystem_*` on Compose) | warning (critical > 90%) | `../operations/OperationsGuide.md#disk-pressure` |
+| `EipRedisDown` | `redis_up == 0` for 2m | warning (Redis is fail-open: degraded, not down) | `../operations/OperationsGuide.md#redis-down` |
+| `EipObjectStorageDown` | MinIO/S3 health failing for 5m (`minio_cluster_nodes_offline_total > 0`, or blackbox probe on the S3 endpoint for external/Compose) | critical | `../operations/OperationsGuide.md#object-storage-down` |
+| `EipOidcProbeFailing` | deep-health `oidc` component down / blackbox probe on the issuer JWKS endpoint failing for 5m | critical | `../operations/OperationsGuide.md#oidc-probe` |
+| `EipCertExpirySoon` | certificate expiry < 21 days — metric source per topology: cert-manager `certmanager_certificate_expiration_timestamp_seconds` (K8s), Strimzi/MinIO operator certificate metrics where enabled, blackbox `probe_ssl_earliest_cert_expiry` (Compose and BYO certs) | warning (critical < 7 days) | `../operations/OperationsGuide.md#cert-expiry` |
+| `EipOutboxRelayStalled` | `eip_outbox_lag_seconds > 60` for 5m (threshold per `../engineering/EventModel.md` §9) | critical | `../operations/OperationsGuide.md#outbox-stalled` |
+| `EipWebhookBufferGrowing` | `eip_webhook_buffer_depth > 0` and growing (`deriv(eip_webhook_buffer_depth[10m]) > 0`) for 10m | warning (critical at the configured buffer bound) | `../operations/OperationsGuide.md#webhook-buffer` |
 
 Severity policy: `critical` pages on-call; `warning` goes to the operations channel; `info` is dashboard-only. Security-tagged alerts additionally route to the security channel per `../architecture/SecurityModel.md` §14.
+
+Outage inhibition: the full-outage forms (`EipKafkaBrokerDown` via `absent()`, `EipPostgresPrimaryDown`) are wired as Alertmanager `inhibit_rules` sources — a Kafka full outage inhibits `EipKafkaConsumerLagGrowing`, `EipDlqNonEmpty`, and `EipOutboxRelayStalled`; a Postgres primary outage inhibits `EipDbPoolSaturated` and `EipPostgresReplicationLag` — so on-call receives the root-cause page, not a downstream alert storm. With these infrastructure rules the catalog satisfies its own G6 rule ("a failure mode without an alert fails G6", `../../engineering-operating-system/ObservabilityRequirements.md` §6): every infrastructure failure mode in `./DeploymentModel.md` §9's failover table has a corresponding rule above.
 
 ## 8. SLOs for the Platform Itself
 
@@ -203,13 +220,14 @@ SLOs are measured from the metrics above, evaluated over a rolling 30 days, with
 
 | SLO | SLI definition | Target (30d) | Error budget (30d) |
 |---|---|---|---|
-| API availability | Non-5xx responses / all responses on `/api/v1` (`eip_api_request_duration_seconds` count by status) | 99.5% (enterprise 99.9%) | 3h 39m (enterprise 43m) of full outage-equivalent |
+| API availability | Non-5xx responses / all responses on `/api/v1` (`eip_api_request_duration_seconds` count by status) | 99.5% (enterprise 99.9%) | 3h 36m (enterprise 43m 12s) of full outage-equivalent |
+| API latency (non-analytical) | Share of 5-min windows where p95 of `eip_api_request_duration_seconds` on non-analytical `/api/v1` routes (dashboard/analytics query routes excluded) is < 300 ms (NFR-011) | 99% of 5-min windows compliant | 1% of windows may exceed |
 | Dashboard latency | Share of dashboard-serving API requests with p95-eligible duration < 1.5s | 95% of 5-min windows compliant | 36h of degraded windows |
-| Ingestion freshness | Share of domain events with `ingestedAt - occurredAt` ≤ 15 min (webhook-driven) / ≤ 1 sync interval + 15 min (poll-driven), from `eip_ingestion_event_lag_seconds` | 99% | 1% of events may exceed freshness |
+| Ingestion freshness | Share of source events visible in the canonical model (`eip_canonical_visibility_lag_seconds`, measured `occurredAt` → canonical upsert) within ≤ 60 s p95 (webhook-driven) / ≤ poll interval + 5 min p95 (poll-driven), per NFR-012 | 99% | 1% of events may exceed freshness |
 | Report success rate | `eip_report_jobs_total{outcome="ok"}` / all terminal report jobs | 99% | 1% failed jobs (excluding user-cancelled) |
 | AI job completion | Agent runs completing without platform-caused failure (`outcome!="ok"` excluding validation/budget outcomes attributable to tenant policy) | 98% | 2% |
 
-Burn-rate alert windows (applied to the availability, freshness, and report-success SLOs):
+Burn-rate alert windows (applied to the availability, non-analytical API latency, freshness, and report-success SLOs):
 
 | Window pair | Burn rate threshold | Budget consumed if sustained | Action |
 |---|---|---|---|
@@ -236,7 +254,7 @@ Spring Boot Actuator-based, wired to Kubernetes probes for every deployable (`ei
 | Endpoint | Probe | Semantics |
 |---|---|---|
 | `/actuator/health/liveness` | livenessProbe | Process is not deadlocked (event-loop/threadpool watchdog). Never checks dependencies — a Postgres outage must not restart pods |
-| `/actuator/health/readiness` | readinessProbe | Ready for work: DB pool connective, Kafka client connected, Redis reachable, migrations at expected version. Workers additionally require consumer assignment. Failing readiness sheds traffic/pauses consumption without restart |
+| `/actuator/health/readiness` | readinessProbe | Ready for work: PostgreSQL reachable (pool can obtain a connection) and Flyway migrations at the expected version — the **only** hard readiness dependencies. Kafka and Redis are degraded-not-unready: their status is surfaced via `/actuator/health` component detail and metrics (§3) but never fails readiness, so a broker/cache blip cannot shed the API tier (NFR-020; consumers pause and resume internally). Failing readiness (DB/migrations) sheds traffic without restart |
 | `/actuator/health/startup` | startupProbe | Startup completed: config validated, KMS master key unwrap succeeded, truststore loaded; generous `failureThreshold` to tolerate slow first boot (JIT, migrations wait) |
 | `/actuator/health/deep` (auth-gated) | operators/diagnostics only | Per-subsystem detail: `db`, `kafka` (per consumer group + lag snapshot), `redis`, `objectStorage`, `vectorStore`, `kms`, `oidc` (JWKS reachable), `llm` (per configured provider, cached probe), `connectors` (aggregate of `healthCheck()` results), `mcp` (client connections). Returns component status + latency; never returns secrets or endpoints' credentials |
 
@@ -252,7 +270,7 @@ Every audit event (see `../architecture/SecurityModel.md` §11) records the acti
 Rules that make this reliable:
 
 1. Audit writes happen inside the active span context; if no context exists (rare batch paths), a root span is created first so `traceId` is never `-` for auditable actions.
-2. Auditable flows are always-sampled (§4): traces backing audit events are never dropped by head sampling.
+2. Auditable flows are always-sampled (§4): the Collector's tail rules retain them at 100%, so traces backing audit events are never dropped by sampling.
 3. Metrics exemplars (where the backend supports them) attach `traceId` to latency histogram samples, letting Grafana panels deep-link from a spike to a representative trace, and from there to audit.
 4. Retention alignment: trace retention (default 14 days) is shorter than audit retention (25 months) by design; the audit record remains the durable anchor and stores enough context (`actor`, `target`, `details`) to stand alone after traces expire.
 

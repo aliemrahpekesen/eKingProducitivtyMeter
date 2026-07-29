@@ -62,7 +62,7 @@ Integration tests run against real dependencies via Testcontainers, one shared c
 |---|---|---|
 | PostgreSQL 16 + pgvector | `pgvector/pgvector:pg16` | Flyway migrations applied; RLS enabled exactly as production |
 | Kafka (KRaft) | `apache/kafka` KRaft mode | Topics auto-created with `eip.` prefix; per-test consumer groups |
-| Redis 7 | `redis:7` | Redisson locks, rate-limit state, cache tests |
+| Redis 7 | `redis:7-alpine` | Redisson locks, rate-limit state, cache tests |
 | MinIO | `minio/minio` | S3 abstraction tests, artifact storage, raw blob staging |
 | Mock OIDC | `ghcr.io/navikt/mock-oauth2-server` | Issues tokens with tenant/role claims mirroring Keycloak realm mapping |
 
@@ -72,7 +72,7 @@ Conventions:
 - **Dataset builders:** every module exposes fluent builders in `src/testFixtures` (Gradle test fixtures), e.g. `aTenant().withTeam(aTeam().withSprint(...))`, `aWorkItem().ofType(STORY).inState("In Progress").blockedFor(days(3))`, `aPullRequest().opened(t0).merged(t0.plusHours(30))`. Builders write through real repositories so RLS and auditing are exercised. No raw SQL fixtures except for migration tests.
 - **RLS verification pattern:** every repository integration test class includes at least one test that writes as `TENANT_A` and asserts invisibility as `TENANT_B`.
 - **Kafka tests** assert the full envelope (`eventId, tenantId, source, entityType, entityId, eventType, occurredAt, ingestedAt, schemaVersion, payload, traceparent`) and idempotent consumption: publishing the same `eventId` twice must produce exactly one state change.
-- **DLQ tests:** poison messages must land on `.<group>.dlq` with error metadata, and replay must succeed after the fix (mirrors the runbook in `../operations/OperationsGuide.md`).
+- **DLQ tests:** poison messages must land on `<group>.dlq` with error metadata, and replay must succeed after the fix (mirrors the runbook in `../operations/OperationsGuide.md`).
 
 ### 3.1 Database migration testing
 
@@ -121,7 +121,7 @@ Every connector — built-in or custom — must pass `ConnectorContractTestKit`,
 | K4 | Incremental checkpoint resume | `incrementalSync(checkpoint)` after a simulated crash mid-stream resumes from the persisted checkpoint with zero loss and zero duplicate canonical writes |
 | K5 | Rate-limit honoring | Fixture returns 429/`Retry-After`; connector backs off (exponential + jitter), never exceeds the configured request budget, and records rate-limit metrics |
 | K6 | Dedup on re-sync | A `fullSync()` over already-ingested data results in idempotent upserts: canonical entity count unchanged, `ExternalRef` mapping stable, no duplicate domain events |
-| K7 | Simulation determinism | With simulation/mock mode enabled and a fixed seed, two runs emit byte-identical event sequences (ordering per `tenantId+entityId` key included) |
+| K7 | Simulation determinism | With simulation/mock mode enabled and a fixed seed, two runs emit byte-identical event sequences (ordering per `tenantId:entityId` key included) |
 
 The kit also asserts `healthCheck()` state transitions and that webhook intake (where supported) and polling converge to the same canonical state.
 
@@ -219,6 +219,7 @@ Gatling scenarios (in `/backend/eip-app/src/gatling`) run nightly against a Comp
 | Scenario | Load shape | Target (from NFRs) |
 |---|---|---|
 | Ingestion throughput | Simulation connector firehose | Sustain 100,000 events/hour with consumer lag < 60 s and zero DLQ growth |
+| Ingestion burst | Simulation connector firehose at 3× the sustained rate: 300,000 events/hour for 15 minutes (NFR-003) | Zero acknowledged-event loss (backpressure via Kafka permitted); consumer lag returns to baseline (< 60 s) after the burst ends |
 | Metric query latency | 50 concurrent users hitting metric APIs | p95 < 500 ms, p99 < 1.5 s |
 | Concurrent dashboard load | 200 users opening dashboards (cold + warm cache) | p95 initial render API bundle < 2 s; Redis hit rate > 80% warm |
 | Report generation under load | 20 concurrent agent report jobs (fake LLM) | No starvation of interactive APIs; job queue drains within SLO |
@@ -226,19 +227,21 @@ Gatling scenarios (in `/backend/eip-app/src/gatling`) run nightly against a Comp
 
 Regression rule: >10% degradation vs. the stored baseline on any target fails the nightly and pages the owning stream.
 
+NFR-013 (AI/agent latency and token/cost budgets) is deliberately **not** certified by these scenarios: the report-generation load test runs against `FakeLlmProvider`, whose latency is not representative of a real model. NFR-013 is validated out-of-band by the optional, non-blocking local-model job in the AI evals stage (§8, §14) against a local Ollama/vLLM model; its results are trend-tracked and reported, never merge-gating.
+
 ## 12. Security testing checklist
 
 - [ ] **AuthZ matrix tests:** generated test matrix of (role × permission-guarded endpoint) from the RBAC catalog in `../product/Personas.md` §1; every cell asserted allow/deny; unmapped endpoints fail the build.
 - [ ] **Tenant isolation tests:** RLS repository tests (§3), API-level cross-tenant probes, RAG retrieval isolation (§8), artifact storage prefix isolation in MinIO, Kafka consumer filtering.
 - [ ] **Secret exposure scans:** gitleaks on every PR (source + WireMock recordings + simulation packs); runtime tests assert secrets are masked in UI payloads, logs, and error responses; audit records exist for every secret read.
-- [ ] **Dependency and image scanning:** OWASP Dependency-Check / `gradle dependencyCheckAnalyze` + npm audit on PR; Trivy scan of all built images; criticals block release, highs require documented waiver.
+- [ ] **Dependency and image scanning:** OWASP Dependency-Check / `gradle dependencyCheckAnalyze` + `pnpm audit` on PR; Trivy scan of all built images; criticals block release, highs require documented waiver.
 - [ ] **Prompt injection test cases for RAG/MCP:** corpus of adversarial documents ("ignore previous instructions", tool-invocation lures, data-exfiltration prompts, cross-tenant reference bait) ingested into RAG; tests assert agents do not execute injected instructions, do not call non-allow-listed MCP capabilities, and the Validation Agent flags contaminated outputs.
 - [ ] **AuthN edge cases:** expired/blank/foreign-issuer tokens, local-account fallback lockout, OIDC clock skew.
 - [ ] **Anti-surveillance guard:** static test asserting no API or export surfaces per-individual ranked productivity lists (team-level grain enforced by metric registry tests).
 
 ## 13. Test data management
 
-- **Seeded simulation packs** in `/simulation/packs/<name>` with a manifest (seed, tenants, teams, date range, event counts). Packs are versioned; golden datasets (§7) pin exact pack versions. `packs/demo-small` boots in CI; `packs/enterprise-large` feeds nightly performance runs.
+- **Seeded simulation packs** in `/simulation/packs/<name>` with a manifest (seed, tenants, teams, date range, event counts). The canonical catalog is `/simulation/packs/{demo-small, demo-midsize, demo-troubled, enterprise-large}`. Packs are versioned; golden datasets (§7) pin exact pack versions. `/simulation/packs/demo-small` boots in CI (smoke); `/simulation/packs/enterprise-large` feeds nightly performance and load runs.
 - **Anonymized fixtures policy:** any fixture derived from real systems (e.g., WireMock recordings) must pass the scrub script and a reviewer checklist (no names, emails, hostnames, ticket text, or tokens) before commit; provenance is recorded in the fixture's README. Real customer data never enters the repo, CI, or developer machines. Synthetic data is always preferred over anonymized data.
 - Dataset builders (§3) are the only sanctioned way to create entities in integration tests; direct inserts bypass RLS/audit and are rejected in review.
 
@@ -283,7 +286,7 @@ Release gates additionally require: full nightly suite green on the release cand
 
 ## 17. Local developer workflow
 
-The suites a developer runs locally mirror the CI stages exactly (same Gradle/npm tasks, same containers), so "green locally, red in CI" is treated as a harness bug.
+The suites a developer runs locally mirror the CI stages exactly (same Gradle/pnpm tasks, same containers), so "green locally, red in CI" is treated as a harness bug.
 
 | Command | Runs | When to run |
 |---|---|---|
@@ -292,12 +295,12 @@ The suites a developer runs locally mirror the CI stages exactly (same Gradle/np
 | `./gradlew check` | Units + Modulith verify + ArchUnit + schema/OpenAPI contract checks | Before every push |
 | `./gradlew connectorKit --tests '*<Connector>*'` | Contract kit K1–K7 for one connector | Any connector change |
 | `./gradlew goldenTest` | Golden dataset replay (§7) | Any metric engine or normalizer change |
-| `npm run test` | Vitest + coverage | Before every frontend push |
-| `npm run e2e:smoke` | Playwright E1, E3, E7 against `make dev` stack | Before pushing cross-cutting changes |
+| `pnpm test` | Vitest + coverage | Before every frontend push |
+| `pnpm e2e:smoke` | Playwright E1, E3, E7 against the `make dev-up` stack | Before pushing cross-cutting changes |
 | `scripts/run-eval-harness --fake` | AI evals with FakeLlmProvider | Any agent, prompt, or RAG change |
 | `scripts/scrub-recordings` | Sanitize newly captured WireMock recordings | Before committing any recording |
 
-Pre-push expectation: `./gradlew check` (or `npm run test` for frontend-only changes) locally; everything heavier is CI's job. The Compose dev stack (`make dev`) is the only supported way to run E2E locally — no bespoke local setups, so failures reproduce identically everywhere.
+Pre-push expectation: `./gradlew check` (or `pnpm test` for frontend-only changes) locally; everything heavier is CI's job. The Compose dev stack (`make dev-up`) is the only supported way to run E2E locally — no bespoke local setups, so failures reproduce identically everywhere.
 
 ## 18. Mutation and property-based testing
 

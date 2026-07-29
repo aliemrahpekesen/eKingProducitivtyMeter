@@ -1,0 +1,37 @@
+{
+  "_comment": "Branch-protection ruleset for the repository's default/base branch as config-as-code (TASK-0002, AC-4). This repo has no `main`; its base branch is `claude/engineering-productivity-platform-04kbet`, so the target is `~DEFAULT_BRANCH` (resolves to that branch). Enforces PR-only merges, one R-CR approval, and the CI gate checks as required status checks. Apply once the repo is pushed — see ../README.md. Job names here MUST match .github/workflows/ci.yml (backend, frontend, security).",
+  "name": "main-protection",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": ["~DEFAULT_BRANCH"],
+      "exclude": []
+    }
+  },
+  "rules": [
+    { "type": "deletion" },
+    { "type": "non_fast_forward" },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 1,
+        "dismiss_stale_reviews_on_push": true,
+        "require_code_owner_review": true,
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": true
+      }
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "required_status_checks": [
+          { "context": "backend" },
+          { "context": "frontend" },
+          { "context": "security" }
+        ]
+      }
+    }
+  ]
+}

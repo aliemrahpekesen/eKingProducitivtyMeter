@@ -1,0 +1,127 @@
+# Default values for the eip chart (v0.1 minimal packaging — see Chart.yaml header and
+# ../../../docs/infrastructure/HelmDeployment.md). Air-gap principle (DockerCompose.md §1,
+# KubernetesOpenShift.md §4): this chart pulls NOTHING beyond the eip-app (and optional frontend)
+# image — PostgreSQL 16+pgvector, Kafka (KRaft), Redis, an OIDC IdP (Keycloak or enterprise), and
+# MinIO/S3 are NOT subcharts or bundled dependencies. Point every `backend.env` value below at
+# your own managed or on-prem instance of each.
+
+# -- eip-app image. No published image exists yet (v0.1 has no Dockerfile in this repo) — set
+# repository/tag to your build or mirror before installing. Never use a floating tag
+# (VersioningStrategy.md: `latest` is prohibited everywhere).
+image:
+  repository: eip/eip-app
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+# -- Pull secret(s) for a private/mirrored registry (air-gap installs). Empty by default.
+imagePullSecrets: []
+# - name: eip-registry-credentials
+
+replicaCount: 1
+
+# -- Container port. eip-app does NOT split API vs. actuator-management traffic onto separate
+# ports today (application.yaml sets no management.server.port, so /actuator/* is served on the
+# same port as /api/v1) — the aspirational split documented in KubernetesOpenShift.md §8
+# (8080 API / 8081 management) is not implemented yet. This chart tracks the real application.
+containerPort: 8080
+
+service:
+  type: ClusterIP
+  port: 8080
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: "2"
+    memory: 1Gi
+
+# -- Ingress is optional and disabled by default (v0.1: most pilot installs port-forward or front
+# the Service with an existing enterprise load balancer/reverse proxy). Enable and fill in a host
+# once you have a controller + certificate story (see HelmDeployment.md).
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: eip.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  # - secretName: eip-tls
+  #   hosts:
+  #     - eip.example.com
+
+# -- Backend runtime configuration. Variable NAMES mirror config/environments/prod.env exactly
+# (ADR-022, the environment-profile scheme) so an operator moving from a local prod/preprod
+# rehearsal to this chart recognizes every knob — see backend/eip-app/src/main/resources/
+# application.yaml for how each is consumed. springProfilesActive is fixed to prod: this chart has
+# no seeded/demo mode.
+backend:
+  springProfilesActive: prod
+  env:
+    # --- Database (PostgreSQL 16 + pgvector; RLS enforced by the `eip_app` NOBYPASSRLS role,
+    # DatabasePlan §2/§5). EIP_APP_DB_PASSWORD is provisioned via secrets.* below, never here.
+    EIP_DB_URL: "jdbc:postgresql://CHANGE_ME:5432/eip"
+    EIP_APP_DB_USER: "eip_app"
+    EIP_MIGRATOR_DB_USER: "eip_migrator"
+    # --- Kafka (KRaft, EventModel eip.* topics). EIP_KAFKA_BOOTSTRAP is the exact Spring property
+    # env var (application.yaml spring.kafka.bootstrap-servers), NOT the aspirational
+    # EIP_KAFKA_BOOTSTRAP_SERVERS name in DockerCompose.md's not-yet-built compose.yaml spec.
+    EIP_KAFKA_BOOTSTRAP: "CHANGE_ME:9092"
+    # --- Security (SecurityModel §3). Fixed to oidc: header/demo tenant resolution must never
+    # serve cluster traffic (ProductionTenantResolutionGuard, DEBT-012, refuses boot otherwise).
+    EIP_SECURITY_MODE: "oidc"
+    EIP_OIDC_ISSUER: "https://CHANGE_ME/realms/eip"
+    # --- Observability (ObservabilityModel; OTel Collector OTLP/HTTP receiver). Point at your
+    # cluster's collector Service/gateway.
+    EIP_OTLP_TRACES_ENDPOINT: "http://otel-collector.eip-observability.svc.cluster.local:4318/v1/traces"
+
+# -- Secret-bearing values (DEBT-005 CHANGE_ME convention — see config/environments/prod.env).
+# NEVER set real secrets in this file or with `--set` on the command line (shell history, `helm
+# get values`); use `--set-file`, an inline `--set secrets.xxx=$(...)` from a secret manager
+# pipe, or (preferred) provision the `eip-secrets` Secret out-of-band and point
+# secrets.existingSecret at it — see docs/infrastructure/HelmDeployment.md. The CHANGE_ME defaults
+# below are intentional: they reach ProductionSecretsGuard (com.eip.app.config, DEBT-005) exactly
+# as a local prod/preprod install's CHANGE_ME would, and eip-app refuses to boot rather than start
+# with a placeholder secret.
+secrets:
+  # -- Name of a pre-existing Secret (kubectl create secret / External Secrets Operator) carrying
+  # keys EIP_APP_DB_PASSWORD, EIP_MIGRATOR_DB_PASSWORD, EIP_SECRETS_MASTER_KEY. When set, the
+  # chart's own secret.yaml template is not rendered and appDbPassword/migratorDbPassword/
+  # secretsMasterKey below are ignored.
+  existingSecret: ""
+  appDbPassword: "CHANGE_ME"
+  migratorDbPassword: "CHANGE_ME"
+  # Envelope-encryption KEK (ADR-014) — base64 of exactly 32 key bytes, e.g. `openssl rand -base64
+  # 32`. Never reuse EipSecretsProperties.DEV_ONLY_MASTER_KEY; ProductionSecretsGuard rejects it by
+  # name.
+  secretsMasterKey: "CHANGE_ME"
+
+# -- v0.1: the frontend is served/deployed separately (see docs/infrastructure/LocalInstall.md);
+# no frontend image is published from this repo yet. The templates below are ready but inert
+# while disabled — flip to true once a frontend image exists and is reachable at this chart's
+# `frontend.image.repository`.
+frontend:
+  enabled: false
+  image:
+    repository: eip/frontend
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  containerPort: 8080
+  service:
+    type: ClusterIP
+    port: 8080
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+
+nameOverride: ""
+fullnameOverride: ""

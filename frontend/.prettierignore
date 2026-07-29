@@ -1,0 +1,9 @@
+dist
+node_modules
+coverage
+pnpm-lock.yaml
+
+# openapi-typescript output — committed as-generated (its own formatting), never Prettier-reformatted,
+# so CI's `generate:api:check` diff (raw generator output vs. committed file) never false-positives on
+# style alone.
+src/api/generated.ts

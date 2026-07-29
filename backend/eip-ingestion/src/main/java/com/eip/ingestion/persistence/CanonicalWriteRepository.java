@@ -1,0 +1,567 @@
+/*
+ * Copyright the Engineering Intelligence Platform (EIP) authors.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package com.eip.ingestion.persistence;
+
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.sql.Types;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import org.jspecify.annotations.Nullable;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.stereotype.Repository;
+
+/**
+ * Canonical-model write adapter (ADR-019: eip-ingestion is the single canonical writer). All writes
+ * are {@code JdbcTemplate} batch upserts on natural keys — set-based, so re-normalizing the same
+ * staged data is idempotent and the statement count is independent of row count. External-ref
+ * identity anchors resolve in three statements (select existing, batch-insert missing with {@code
+ * ON CONFLICT DO NOTHING}, re-select), never per record.
+ */
+@Repository
+public class CanonicalWriteRepository {
+
+  private final JdbcClient jdbc;
+  private final JdbcTemplate jdbcTemplate;
+
+  public CanonicalWriteRepository(JdbcClient jdbc, JdbcTemplate jdbcTemplate) {
+    this.jdbc = jdbc;
+    this.jdbcTemplate = jdbcTemplate;
+  }
+
+  /** An external-ref identity candidate for a work item. */
+  public record ExternalRefCandidate(
+      String sourceSystem, String sourceInstance, String externalId, String externalKey) {}
+
+  /** One canonical work-item upsert row. */
+  public record WorkItemRow(
+      UUID id,
+      String type,
+      String title,
+      UUID projectId,
+      UUID stateId,
+      String status,
+      @Nullable UUID teamId,
+      Timestamp createdInSource,
+      @Nullable Timestamp resolvedAt) {}
+
+  /** One work-item state-transition upsert row. */
+  public record TransitionRow(
+      UUID workItemId, int seq, @Nullable String fromState, String toState, Timestamp occurredAt) {}
+
+  /** One pull-request upsert row. {@code mergedAt} is null for a still-open pull request. */
+  public record PullRequestRow(
+      @Nullable UUID teamId,
+      @Nullable UUID workItemId,
+      String sourceKey,
+      String title,
+      String sourceBranch,
+      String status,
+      Timestamp createdInSource,
+      @Nullable Timestamp mergedAt) {}
+
+  /** One code-review upsert row. */
+  public record CodeReviewRow(
+      UUID pullRequestId,
+      String sourceKey,
+      String outcome,
+      Timestamp requestedAt,
+      Timestamp completedAt) {}
+
+  /** One build upsert row. */
+  public record BuildRow(
+      @Nullable UUID pullRequestId,
+      String sourceKey,
+      String status,
+      Timestamp startedAt,
+      Timestamp finishedAt) {}
+
+  /** One quality-gate upsert row. */
+  public record QualityGateRow(
+      @Nullable UUID buildId,
+      @Nullable UUID pullRequestId,
+      String sourceKey,
+      String status,
+      Timestamp evaluatedAt) {}
+
+  /**
+   * Returns the tenant's active teams keyed by name.
+   *
+   * @return team ids by team name
+   */
+  public Map<String, UUID> teamIdsByName() {
+    return keyedIds("SELECT name, id FROM core.team WHERE deleted_at IS NULL");
+  }
+
+  /**
+   * Resolves stable work-item entity ids through {@code core.external_ref} (AD-14 identity
+   * anchors), creating missing anchors in one batch.
+   *
+   * @param candidates the identities present in the staged data
+   * @return entity ids keyed by immutable external id
+   */
+  public Map<String, UUID> resolveWorkItemIds(List<ExternalRefCandidate> candidates) {
+    Map<String, UUID> existing = workItemRefIds();
+    List<ExternalRefCandidate> missing =
+        candidates.stream().filter(c -> !existing.containsKey(c.externalId())).toList();
+    if (!missing.isEmpty()) {
+      jdbcTemplate.batchUpdate(
+          """
+          INSERT INTO core.external_ref
+            (tenant_id, entity_type, entity_id, source_system, source_instance, external_id,
+             external_key, last_seen_at)
+          VALUES (current_setting('app.tenant_id')::uuid, 'WORK_ITEM', ?, ?, ?, ?, ?, now())
+          ON CONFLICT (tenant_id, source_system, source_instance, entity_type, external_id)
+            DO NOTHING
+          """,
+          missing,
+          missing.size(),
+          (ps, c) -> {
+            ps.setObject(1, UUID.randomUUID());
+            ps.setString(2, c.sourceSystem());
+            ps.setString(3, c.sourceInstance());
+            ps.setString(4, c.externalId());
+            ps.setString(5, c.externalKey());
+          });
+    }
+    return workItemRefIds();
+  }
+
+  /**
+   * Ensures teams exist for source-named team labels, creating missing ones under an "Imported"
+   * organisation/business unit (control-plane bootstrap for freshly connected sources).
+   *
+   * @param names the team names present in the staged data
+   * @return the refreshed team-id-by-name map
+   */
+  public Map<String, UUID> ensureImportedTeams(java.util.Set<String> names) {
+    UUID businessUnitId =
+        jdbc.sql(
+                "SELECT id FROM core.business_unit WHERE deleted_at IS NULL ORDER BY created_at LIMIT 1")
+            .query(UUID.class)
+            .optional()
+            .orElseGet(
+                () -> {
+                  UUID orgId =
+                      jdbc.sql(
+                              """
+                              INSERT INTO core.organization (tenant_id, name, slug)
+                              VALUES (current_setting('app.tenant_id')::uuid, 'Imported', 'imported')
+                              RETURNING id
+                              """)
+                          .query(UUID.class)
+                          .single();
+                  return jdbc.sql(
+                          """
+                          INSERT INTO core.business_unit (tenant_id, organization_id, name)
+                          VALUES (current_setting('app.tenant_id')::uuid, :orgId, 'Imported')
+                          RETURNING id
+                          """)
+                      .param("orgId", orgId)
+                      .query(UUID.class)
+                      .single();
+                });
+    java.util.List<String> missing = new java.util.ArrayList<>(names);
+    jdbcTemplate.batchUpdate(
+        """
+        INSERT INTO core.team (tenant_id, business_unit_id, name, type)
+        VALUES (current_setting('app.tenant_id')::uuid, ?, ?, 'STREAM_ALIGNED')
+        """,
+        missing,
+        missing.size(),
+        (ps, name) -> {
+          ps.setObject(1, businessUnitId);
+          ps.setString(2, name);
+        });
+    return teamIdsByName();
+  }
+
+  private Map<String, UUID> workItemRefIds() {
+    return keyedIds(
+        "SELECT external_id, entity_id FROM core.external_ref WHERE entity_type = 'WORK_ITEM'");
+  }
+
+  /**
+   * Looks up EXISTING canonical work-item ids by their immutable external id — never creates a
+   * missing anchor (unlike {@link #resolveWorkItemIds}): a {@code delete} for an identity never
+   * ingested as an {@code upsert} has no canonical row to mark deleted (DEBT-020 item 3).
+   *
+   * @return entity ids keyed by external id, for every WORK_ITEM anchor currently known
+   */
+  public Map<String, UUID> existingWorkItemIdsByExternalId() {
+    return workItemRefIds();
+  }
+
+  /**
+   * Batch-upserts canonical work items on their stable ids. The {@code DO UPDATE ... WHERE ... IS
+   * DISTINCT FROM} guard makes PostgreSQL report an affected-row count of {@code 0} for a
+   * conflicting row whose tracked columns are unchanged (no update executes) and {@code 1} for a
+   * fresh insert or a row that actually changed — the returned list is exactly the ids the caller
+   * should treat as "changed this run" (NormalizationService's outbox-emission trigger). The guard
+   * includes {@code deleted_at}, and the {@code SET} clause always clears it to {@code NULL}: an
+   * upsert for a previously deleted identity is a REVIVAL (DEBT-020 item 3) — it un-deletes the row
+   * and counts as changed, so the caller emits an {@code upserted} event for it same as any other
+   * change. Requires the PGJDBC default {@code reWriteBatchedInserts=false} — batch rewriting would
+   * report {@code Statement.SUCCESS_NO_INFO} instead of real per-row counts and silently suppress
+   * every outbox emission.
+   *
+   * @param rows the work-item rows
+   * @return the ids of rows that were newly inserted or actually changed (including revivals)
+   */
+  public List<UUID> upsertWorkItems(List<WorkItemRow> rows) {
+    if (rows.isEmpty()) {
+      return List.of();
+    }
+    int[][] counts =
+        jdbcTemplate.batchUpdate(
+            """
+            INSERT INTO work.work_item
+              (id, tenant_id, type, title, project_id, current_state_id, status, team_id, blocked,
+               created_in_source, resolved_at)
+            VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, false, ?, ?)
+            ON CONFLICT (id) DO UPDATE SET
+              type = EXCLUDED.type, title = EXCLUDED.title, status = EXCLUDED.status,
+              team_id = EXCLUDED.team_id, resolved_at = EXCLUDED.resolved_at, deleted_at = NULL,
+              updated_at = now()
+            WHERE ROW(work_item.type, work_item.title, work_item.status, work_item.team_id,
+                      work_item.resolved_at, work_item.deleted_at)
+              IS DISTINCT FROM ROW(EXCLUDED.type, EXCLUDED.title, EXCLUDED.status,
+                                   EXCLUDED.team_id, EXCLUDED.resolved_at, NULL::timestamptz)
+            """,
+            rows,
+            rows.size(),
+            (ps, r) -> {
+              ps.setObject(1, r.id());
+              ps.setString(2, r.type());
+              ps.setString(3, r.title());
+              ps.setObject(4, r.projectId());
+              ps.setObject(5, r.stateId());
+              ps.setString(6, r.status());
+              setUuidOrNull(ps, 7, r.teamId());
+              ps.setTimestamp(8, r.createdInSource());
+              ps.setTimestamp(9, r.resolvedAt());
+            });
+    List<UUID> changed = new ArrayList<>();
+    int i = 0;
+    for (int[] chunk : counts) {
+      for (int count : chunk) {
+        if (count > 0) {
+          changed.add(rows.get(i).id());
+        }
+        i++;
+      }
+    }
+    return changed;
+  }
+
+  /**
+   * Marks canonical work items deleted. {@code deleted_at} is a bookkeeping timestamp — the
+   * source's {@code delete} assertion carries no deletion instant, so "now" is the sanctioned,
+   * documented approximation (DEBT-020 item 3, v0.1). No outbox event is emitted for a deletion
+   * (the event-type vocabulary stays {@code upserted} only; a dedicated {@code deleted} event is
+   * v0.2 follow-up) — that is the caller's responsibility, not this method's.
+   *
+   * @param workItemIds the canonical ids to mark deleted
+   */
+  public void markWorkItemsDeleted(List<UUID> workItemIds) {
+    if (workItemIds.isEmpty()) {
+      return;
+    }
+    jdbcTemplate.batchUpdate(
+        "UPDATE work.work_item SET deleted_at = now() WHERE id = ? AND deleted_at IS NULL",
+        workItemIds,
+        workItemIds.size(),
+        (ps, id) -> ps.setObject(1, id));
+  }
+
+  /**
+   * Batch-upserts work-item state transitions on {@code (tenant, work item, seq)}.
+   *
+   * @param rows the transition rows
+   */
+  public void upsertTransitions(List<TransitionRow> rows) {
+    jdbcTemplate.batchUpdate(
+        """
+        INSERT INTO work.work_item_transition
+          (tenant_id, work_item_id, seq, from_state, to_state, occurred_at)
+        VALUES (current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?)
+        ON CONFLICT (tenant_id, work_item_id, seq) DO UPDATE SET
+          from_state = EXCLUDED.from_state, to_state = EXCLUDED.to_state,
+          occurred_at = EXCLUDED.occurred_at
+        """,
+        rows,
+        rows.size(),
+        (ps, r) -> {
+          ps.setObject(1, r.workItemId());
+          ps.setInt(2, r.seq());
+          ps.setString(3, r.fromState());
+          ps.setString(4, r.toState());
+          ps.setTimestamp(5, r.occurredAt());
+        });
+  }
+
+  /**
+   * Batch-upserts pull requests on {@code (tenant, source_key)}.
+   *
+   * @param rows the pull-request rows
+   */
+  public void upsertPullRequests(List<PullRequestRow> rows) {
+    jdbcTemplate.batchUpdate(
+        """
+        INSERT INTO scm.pull_request
+          (tenant_id, team_id, work_item_id, source_key, title, source_branch, status,
+           created_in_source, merged_at)
+        VALUES (current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (tenant_id, source_key) DO UPDATE SET
+          team_id = EXCLUDED.team_id, work_item_id = EXCLUDED.work_item_id,
+          title = EXCLUDED.title, source_branch = EXCLUDED.source_branch,
+          status = EXCLUDED.status, created_in_source = EXCLUDED.created_in_source,
+          merged_at = EXCLUDED.merged_at, deleted_at = NULL
+        WHERE ROW(pull_request.team_id, pull_request.work_item_id, pull_request.title,
+                  pull_request.source_branch, pull_request.status,
+                  pull_request.created_in_source, pull_request.merged_at, pull_request.deleted_at)
+          IS DISTINCT FROM ROW(EXCLUDED.team_id, EXCLUDED.work_item_id, EXCLUDED.title,
+                               EXCLUDED.source_branch, EXCLUDED.status,
+                               EXCLUDED.created_in_source, EXCLUDED.merged_at, NULL::timestamptz)
+        """,
+        rows,
+        rows.size(),
+        (ps, r) -> {
+          setUuidOrNull(ps, 1, r.teamId());
+          setUuidOrNull(ps, 2, r.workItemId());
+          ps.setString(3, r.sourceKey());
+          ps.setString(4, r.title());
+          ps.setString(5, r.sourceBranch());
+          ps.setString(6, r.status());
+          ps.setTimestamp(7, r.createdInSource());
+          ps.setTimestamp(8, r.mergedAt());
+        });
+  }
+
+  /**
+   * Returns pull-request ids keyed by source key (for stitching reviews/builds, and for resolving
+   * {@code op='delete'} rows to their existing canonical id — DEBT-018 item 4 — since a
+   * soft-deleted row still carries its {@code source_key}).
+   *
+   * @return pull-request ids by source key
+   */
+  public Map<String, UUID> pullRequestIdsBySourceKey() {
+    return keyedIds("SELECT source_key, id FROM scm.pull_request");
+  }
+
+  /**
+   * Marks canonical pull requests deleted (DEBT-018 item 4, mirrors {@link #markWorkItemsDeleted}).
+   * {@code deleted_at} is a bookkeeping timestamp — the source's {@code delete} assertion carries
+   * no deletion instant.
+   *
+   * @param pullRequestIds the canonical ids to mark deleted
+   */
+  public void markPullRequestsDeleted(List<UUID> pullRequestIds) {
+    if (pullRequestIds.isEmpty()) {
+      return;
+    }
+    jdbcTemplate.batchUpdate(
+        "UPDATE scm.pull_request SET deleted_at = now() WHERE id = ? AND deleted_at IS NULL",
+        pullRequestIds,
+        pullRequestIds.size(),
+        (ps, id) -> ps.setObject(1, id));
+  }
+
+  /**
+   * Batch-upserts code reviews on {@code (tenant, source_key)}.
+   *
+   * @param rows the code-review rows
+   */
+  public void upsertCodeReviews(List<CodeReviewRow> rows) {
+    jdbcTemplate.batchUpdate(
+        """
+        INSERT INTO scm.code_review
+          (tenant_id, pull_request_id, source_key, outcome, requested_at, completed_at)
+        VALUES (current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?)
+        ON CONFLICT (tenant_id, source_key) DO UPDATE SET
+          pull_request_id = EXCLUDED.pull_request_id, outcome = EXCLUDED.outcome,
+          requested_at = EXCLUDED.requested_at, completed_at = EXCLUDED.completed_at,
+          deleted_at = NULL
+        WHERE ROW(code_review.pull_request_id, code_review.outcome, code_review.requested_at,
+                  code_review.completed_at, code_review.deleted_at)
+          IS DISTINCT FROM ROW(EXCLUDED.pull_request_id, EXCLUDED.outcome,
+                               EXCLUDED.requested_at, EXCLUDED.completed_at, NULL::timestamptz)
+        """,
+        rows,
+        rows.size(),
+        (ps, r) -> {
+          ps.setObject(1, r.pullRequestId());
+          ps.setString(2, r.sourceKey());
+          ps.setString(3, r.outcome());
+          ps.setTimestamp(4, r.requestedAt());
+          ps.setTimestamp(5, r.completedAt());
+        });
+  }
+
+  /**
+   * Returns code-review ids keyed by source key — used only to resolve {@code op='delete'} rows to
+   * their existing canonical id (DEBT-018 item 4); no downstream stream stitches on this map.
+   *
+   * @return code-review ids by source key
+   */
+  public Map<String, UUID> codeReviewIdsBySourceKey() {
+    return keyedIds("SELECT source_key, id FROM scm.code_review");
+  }
+
+  /**
+   * Marks canonical code reviews deleted (DEBT-018 item 4, mirrors {@link #markWorkItemsDeleted}).
+   *
+   * @param codeReviewIds the canonical ids to mark deleted
+   */
+  public void markCodeReviewsDeleted(List<UUID> codeReviewIds) {
+    if (codeReviewIds.isEmpty()) {
+      return;
+    }
+    jdbcTemplate.batchUpdate(
+        "UPDATE scm.code_review SET deleted_at = now() WHERE id = ? AND deleted_at IS NULL",
+        codeReviewIds,
+        codeReviewIds.size(),
+        (ps, id) -> ps.setObject(1, id));
+  }
+
+  /**
+   * Batch-upserts builds on {@code (tenant, source_key)}.
+   *
+   * @param rows the build rows
+   */
+  public void upsertBuilds(List<BuildRow> rows) {
+    jdbcTemplate.batchUpdate(
+        """
+        INSERT INTO cicd.build (tenant_id, pull_request_id, source_key, status, started_at,
+                                finished_at)
+        VALUES (current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?)
+        ON CONFLICT (tenant_id, source_key) DO UPDATE SET
+          pull_request_id = EXCLUDED.pull_request_id, status = EXCLUDED.status,
+          started_at = EXCLUDED.started_at, finished_at = EXCLUDED.finished_at,
+          deleted_at = NULL
+        WHERE ROW(build.pull_request_id, build.status, build.started_at, build.finished_at,
+                  build.deleted_at)
+          IS DISTINCT FROM ROW(EXCLUDED.pull_request_id, EXCLUDED.status, EXCLUDED.started_at,
+                               EXCLUDED.finished_at, NULL::timestamptz)
+        """,
+        rows,
+        rows.size(),
+        (ps, r) -> {
+          setUuidOrNull(ps, 1, r.pullRequestId());
+          ps.setString(2, r.sourceKey());
+          ps.setString(3, r.status());
+          ps.setTimestamp(4, r.startedAt());
+          ps.setTimestamp(5, r.finishedAt());
+        });
+  }
+
+  /**
+   * Returns build ids keyed by source key (for stitching quality gates, and for resolving {@code
+   * op='delete'} rows to their existing canonical id — DEBT-018 item 4).
+   *
+   * @return build ids by source key
+   */
+  public Map<String, UUID> buildIdsBySourceKey() {
+    return keyedIds("SELECT source_key, id FROM cicd.build");
+  }
+
+  /**
+   * Marks canonical builds deleted (DEBT-018 item 4, mirrors {@link #markWorkItemsDeleted}).
+   *
+   * @param buildIds the canonical ids to mark deleted
+   */
+  public void markBuildsDeleted(List<UUID> buildIds) {
+    if (buildIds.isEmpty()) {
+      return;
+    }
+    jdbcTemplate.batchUpdate(
+        "UPDATE cicd.build SET deleted_at = now() WHERE id = ? AND deleted_at IS NULL",
+        buildIds,
+        buildIds.size(),
+        (ps, id) -> ps.setObject(1, id));
+  }
+
+  /**
+   * Batch-upserts quality gates on {@code (tenant, source_key)}.
+   *
+   * @param rows the quality-gate rows
+   */
+  public void upsertQualityGates(List<QualityGateRow> rows) {
+    jdbcTemplate.batchUpdate(
+        """
+        INSERT INTO quality.quality_gate
+          (tenant_id, build_id, pull_request_id, source_key, status, evaluated_at)
+        VALUES (current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?)
+        ON CONFLICT (tenant_id, source_key) DO UPDATE SET
+          build_id = EXCLUDED.build_id, pull_request_id = EXCLUDED.pull_request_id,
+          status = EXCLUDED.status, evaluated_at = EXCLUDED.evaluated_at, deleted_at = NULL
+        WHERE ROW(quality_gate.build_id, quality_gate.pull_request_id, quality_gate.status,
+                  quality_gate.evaluated_at, quality_gate.deleted_at)
+          IS DISTINCT FROM ROW(EXCLUDED.build_id, EXCLUDED.pull_request_id, EXCLUDED.status,
+                               EXCLUDED.evaluated_at, NULL::timestamptz)
+        """,
+        rows,
+        rows.size(),
+        (ps, r) -> {
+          setUuidOrNull(ps, 1, r.buildId());
+          setUuidOrNull(ps, 2, r.pullRequestId());
+          ps.setString(3, r.sourceKey());
+          ps.setString(4, r.status());
+          ps.setTimestamp(5, r.evaluatedAt());
+        });
+  }
+
+  /**
+   * Returns quality-gate ids keyed by source key — used only to resolve {@code op='delete'} rows to
+   * their existing canonical id (DEBT-018 item 4); no downstream stream stitches on this map.
+   *
+   * @return quality-gate ids by source key
+   */
+  public Map<String, UUID> qualityGateIdsBySourceKey() {
+    return keyedIds("SELECT source_key, id FROM quality.quality_gate");
+  }
+
+  /**
+   * Marks canonical quality gates deleted (DEBT-018 item 4, mirrors {@link #markWorkItemsDeleted}).
+   *
+   * @param qualityGateIds the canonical ids to mark deleted
+   */
+  public void markQualityGatesDeleted(List<UUID> qualityGateIds) {
+    if (qualityGateIds.isEmpty()) {
+      return;
+    }
+    jdbcTemplate.batchUpdate(
+        "UPDATE quality.quality_gate SET deleted_at = now() WHERE id = ? AND deleted_at IS NULL",
+        qualityGateIds,
+        qualityGateIds.size(),
+        (ps, id) -> ps.setObject(1, id));
+  }
+
+  private Map<String, UUID> keyedIds(String sql) {
+    Map<String, UUID> ids = new HashMap<>();
+    jdbc.sql(sql)
+        .query(
+            (rs, rowNum) -> {
+              ids.put(rs.getString(1), rs.getObject(2, UUID.class));
+              return Boolean.TRUE;
+            })
+        .list();
+    return ids;
+  }
+
+  private static void setUuidOrNull(PreparedStatement ps, int index, @Nullable UUID value)
+      throws SQLException {
+    if (value == null) {
+      ps.setNull(index, Types.OTHER);
+    } else {
+      ps.setObject(index, value);
+    }
+  }
+}

@@ -4,6 +4,8 @@ Model Context Protocol (MCP) integration for the Engineering Intelligence Platfo
 
 Related documents: `AgentArchitecture.md`, `RAGArchitecture.md`, `../architecture/SecurityModel.md`.
 
+Requirements traceability: this document implements PRD FR-104 (MCP client role with per-agent allow-lists), FR-105 (MCP server role exposing allow-listed capabilities with per-capability RBAC and audit), FR-106 (deny-by-default capability exposure, per-tenant enablement), FR-107 (full audit of all MCP interactions in both roles), and FR-108 (tenant isolation and RBAC parity with the REST API).
+
 ## 1. MCP Primer
 
 The Model Context Protocol is an open protocol for connecting AI applications to external systems. It is JSON-RPC 2.0 carried over two standard transports — stdio (for locally spawned servers) and streamable HTTP (for remote servers) — and defines three primitive types a server can expose: **tools** (model-invocable functions with JSON Schema input/output declarations), **resources** (addressable content the client can read), and **prompts** (parameterized prompt templates). A client performs an initialization handshake (capability negotiation, protocol version), then discovers primitives via `tools/list`, `resources/list`, and `prompts/list`, and invokes them via `tools/call` and resource reads. For EIP the practical value is symmetrical: enterprise MCP servers (internal wikis, ITSM systems, bespoke data services) become tools available to EIP agents without writing custom connectors, and EIP's own analytical capabilities become available to enterprise AI assistants and agent frameworks that speak MCP.
@@ -25,6 +27,8 @@ Responsibilities:
 | Invocation | Allow-listed tools are published into the `ToolRegistry` (see `AgentArchitecture.md` Section 4) with the `MCP` tool family; per-run visibility is the usual intersection of agent definition, tenant config, and the initiating principal's RBAC. |
 | Per-call controls | Timeout per tool (default 15 s, admin-tunable), retry policy (idempotent-declared tools only), circuit breaker per server (open after N consecutive failures, half-open probes), per-tenant rate limits (Redis-backed). |
 | Audit | Every call audited: `mcp_client_call (id, tenantId, principal, runId, serverId, toolName, requestRedacted, responseRedacted, latencyMs, outcome, circuitState, timestamp, traceparent)`. |
+
+Scope note: the initial client role consumes only the **tools** primitive. External **resources** and **prompts** primitives are recorded during discovery but never consumed — they are explicitly out of scope for the initial client role, and adopting either would require the same allow-listing, screening, and audit design that tools received before any agent can see them.
 
 ### 2.2 Schema validation of tool results
 
@@ -51,6 +55,7 @@ MCP tool results are **untrusted input**, exactly like RAG content from external
 - An injection screen runs over results before prompt insertion: heuristic and pattern-based detection of instruction-like content ("ignore previous instructions", role-play redirection, tool-invocation requests embedded in data); hits are flagged, high-confidence hits redacted, and all hits audited.
 - Agents cannot chain an MCP result directly into a mutating action: the only mutating tool (`writeArtifact`) stages output for validation, and MCP-derived claims in user-facing outputs are subject to the Validation Agent's citation/fact checks with the MCP call as the recorded source.
 - Tool descriptions from external servers are also sanitized at discovery time (description-based injection), and any change to a previously allow-listed tool's description or schema suspends the allow-listing pending admin re-approval ("rug pull" defense).
+- Defenses cover the **outbound** direction too — data exfiltration through tool arguments sent to registered external servers: (a) **argument minimization** — outbound arguments are strictly schema-constrained to the tool's declared parameters and validated before dispatch, so a model cannot smuggle free-form payloads through undeclared or oversized fields; (b) **outbound DLP screen** — the same secret/PII detectors used at ingestion run over outbound argument values before any network call: detected secrets block the call with a structured error, PII handling follows the tenant redaction policy; (c) **content-class audit** — the `mcp_client_call` audit row records the content classes present in outbound arguments (e.g., metric values, work-item identifiers, free text), so security review can detect exfiltration patterns without retaining raw arguments beyond redaction policy.
 
 ## 3. EIP as MCP Server
 
@@ -59,10 +64,11 @@ MCP tool results are **untrusted input**, exactly like RAG content from external
 The `McpServerEndpoint` (in `eip-ai`, mounted by `eip-app`) exposes selected internal capabilities over MCP streamable HTTP at `/api/v1/mcp`. Design rules:
 
 - **Capability flags:** every exposed tool sits behind an individual capability flag, default **off**, enabled per tenant by an admin. Nothing is exposed implicitly.
-- **Authentication:** service tokens (issued in the admin UI, stored hashed, rotatable, expiring) presented as bearer credentials; each token maps to an RBAC **principal** with explicit roles/permissions and a tenant binding. All authorization decisions use the platform RBAC exactly as for human users.
+- **Authentication:** platform service tokens only — the same service tokens defined in `../architecture/SecurityModel.md` §3 (stored hashed, rotatable, expiring), presented as bearer credentials; each token maps to an RBAC **principal** with explicit roles/permissions and a tenant binding. OIDC principals do not authenticate to `/api/v1/mcp` in v1 — they use the REST API; the MCP endpoint is token-only, and `SecurityModel.md` §9 states the same rule. All authorization decisions use the platform RBAC exactly as for human users.
+- **Delegation model (v1: none).** The service token's principal is the **effective principal** for every capability call — there is no on-behalf-of; EIP cannot distinguish the individual end users behind a calling assistant. Named risk: **confused deputy** — a token shared by a multi-user assistant grants every downstream user the union of the token's read scope, including the ACL grants that `eip.retrieve_citations` resolves for the token principal (`RAGArchitecture.md` Section 8). Deployment guidance is therefore normative: issue **per-audience tokens** (one per assistant/integration, minimally scoped), and the admin UI warns at issue and rotation time when a token's grant scope exceeds a configured breadth threshold. On-behalf-of via OAuth token exchange is **roadmap, not rejected**: the token schema (principal binding + capability subset) does not foreclose adding a delegated-subject claim later.
 - **Tenant scoping:** a token is bound to exactly one tenant; every query executes under that tenant's RLS context. Cross-tenant tokens do not exist.
 - **Rate limits:** per-token and per-tenant limits (Redis-backed), plus concurrency caps on generative capabilities.
-- **Audit:** every call audited: `mcp_server_call (id, tenantId, principal(token), toolName, paramsRedacted, resultSummary, latencyMs, outcome, timestamp, traceparent)`.
+- **Audit:** every call audited: `mcp_server_call (id, tenantId, principal(token), toolName, schemaVersion, paramsRedacted, resultSummary, latencyMs, outcome, spawnedRunId?, timestamp, traceparent)`. `spawnedRunId` is set when a call enqueues an agent run (`eip.trigger_report_generation`), linking the MCP audit row to the resulting run so an externally triggered report is traceable end-to-end: MCP call → agent run → individual LLM calls.
 
 ### 3.2 Exposed tools
 
@@ -74,7 +80,7 @@ The `McpServerEndpoint` (in `eip-ai`, mounted by `eip-app`) exposes selected int
 | `eip.list_generated_reports` | `{type?, scopeId?, from?, to?, cursor?}` | `{reports[]: {reportId, type, title, createdAt, url}, nextCursor?}` | `reports:read` | GeneratedReport catalog. |
 | `eip.trigger_report_generation` | `{templateId, scopeParams, formats[]}` | `{runId, status: queued}` | `reports:generate` | Enqueues an async agent run on `eip.ai.jobs`; caller polls `eip.list_generated_reports` or a `runId` status resource. Idempotency key supported. Quota-gated; unavailable when no LLM provider is configured. |
 
-The server also exposes read-only MCP **resources** for run status (`eip://runs/{runId}`) and report artifacts (`eip://reports/{reportId}`), subject to the same RBAC. No prompts are exposed in the initial scope.
+The server also exposes read-only MCP **resources** for run status (`eip://runs/{runId}`) and report artifacts (`eip://reports/{reportId}`), subject to the same RBAC. Resource reads carry the same NFR-042 audit bar as tool calls — they return run status and full report content: every read is audited as `mcp.server.resource_read` (resource URI, principal, outcome, `traceparent`), and every `tools/list` enumeration is audited as `mcp.server.tools_listed` (principal, count of tools returned). Both events are part of the platform audit taxonomy (`../architecture/SecurityModel.md` §11). No prompts are exposed in the initial scope.
 
 Design notes on the exposed surface:
 
@@ -82,11 +88,19 @@ Design notes on the exposed surface:
 - Metric results always include caveats — an external assistant consuming `eip.query_metrics` receives the same anti-misuse framing a human dashboard user sees, preserving the platform's anti-ranking stance beyond its own UI.
 - `eip.trigger_report_generation` is the only mutating capability in the initial scope; expansion of mutating capabilities requires a security review per capability (see `../architecture/SecurityModel.md`).
 
+Capability versioning and deprecation:
+
+- Every exposed tool declares a **`schemaVersion`** (semver) covering its input and output schemas. The version is published in `tools/list` metadata and stamped on every `mcp_server_call` audit row, so the exact contract in force for any historical call is reconstructable.
+- **Non-breaking changes** (additive optional fields, new enum values declared extensible) increment MINOR; existing clients continue uninterrupted.
+- **Breaking changes** (removed/renamed fields, type or semantics changes) increment MAJOR and ship as a new capability version served **alongside** the previous MAJOR for a deprecation window (default: two platform minor releases, minimum 90 days). During the window, calls to the deprecated version still succeed but carry a deprecation notice in result metadata, are counted in a dedicated metric, and the admin UI lists the tokens still calling deprecated versions.
+- At window end the old MAJOR is retired: calls fail with a structured version-retired JSON-RPC error naming the replacement version. Retirement dates are announced in the deprecation notice from day one.
+- Deprecation state changes are configuration changes: versioned, audited, and surfaced on the MCP Server Capabilities screen (Section 4).
+
 ### 3.3 Service token lifecycle
 
 | Stage | Behavior |
 |---|---|
-| Issue | Admin creates a token bound to (tenant, RBAC principal, capability subset, expiry ≤ 1 year); secret shown once, stored hashed (Argon2id). |
+| Issue | Admin creates a token bound to (tenant, RBAC principal, capability subset, expiry — default 90 days, max 365); secret shown once, stored as a **SHA-256 hash**. MCP service tokens *are* the platform service tokens of `../architecture/SecurityModel.md` §3, with identical lifecycle and hashing: tokens are high-entropy random secrets, so a fast deterministic hash is the right primitive for per-call lookup — Argon2id is reserved for user passwords, where the input is low-entropy. Issuing a broad-scope token triggers the breadth warning (Section 3.1). |
 | Use | Bearer auth on `/api/v1/mcp`; last-used timestamp tracked; every call audited under the token principal. |
 | Rotate | New secret issued for the same principal with overlap window (default 24 h) so clients can switch without downtime; rotation audited. |
 | Revoke | Immediate: hash invalidated, in-flight calls complete, subsequent calls 401 + audit event. |
@@ -115,7 +129,7 @@ Example client-role registration (secrets are vault references, never inline):
       "toolName": "search_change_requests",
       "enabled": true,
       "requiredPermission": "mcp:itsm:read",
-      "visibleToAgents": ["Incident Analysis", "Delivery Risk", "Configuration Assistant"],
+      "visibleToAgents": ["Incident Analysis Agent", "Delivery Risk Agent", "Configuration Assistant Agent"],
       "resultSchemaRef": "schemas/itsm-search-result.json",
       "idempotent": true
     }
@@ -147,6 +161,8 @@ Example server-role capability configuration:
 }
 ```
 
+A capability **absent** from the tenant configuration is **disabled** — absence and `enabled: false` are equivalent, and there is no implicit default-on for newly shipped capabilities: a platform upgrade that adds a capability leaves it off for every tenant until an admin enables it explicitly.
+
 Both screens surface a read-only "effective access" view per token / per agent, computed from the intersection of capability flags, allow-lists, and RBAC — the same resolution the runtime performs — so admins can verify configuration without test calls.
 
 ## 5. Security Model
@@ -156,8 +172,8 @@ Full details in `../architecture/SecurityModel.md`; MCP-specific application:
 - **Allow-lists everywhere:** external tools require explicit allow-listing (client role); internal capabilities require explicit capability flags (server role). Deny-by-default in both directions.
 - **Egress rules:** the `McpClientGateway` only connects to registered server origins; deployment-level egress policy (NetworkPolicy/firewall) should mirror the registered set. Air-gapped installs simply register only in-perimeter servers — MCP introduces no mandatory external egress.
 - **Secrets:** all MCP credentials in the secret vault (AES-256-GCM envelope encryption, pluggable KMS SPI), masked in UI, access audited, rotation supported.
-- **Audit taxonomy:** MCP events use the platform audit taxonomy — `mcp.client.call`, `mcp.client.discovery`, `mcp.client.config_change`, `mcp.server.call`, `mcp.server.auth_failure`, `mcp.server.token_issued/rotated/revoked` — all tenant-scoped, immutable, exportable, and trace-correlated via `traceparent`.
-- **Least privilege:** MCP service tokens should carry the minimum permission set; the admin UI warns on broad-scope tokens. Agent-side, an external tool is only reachable when agent definition, tenant allow-list, and initiating principal's RBAC all permit it.
+- **Audit taxonomy:** MCP events use the platform audit taxonomy — `mcp.client.call`, `mcp.client.discovery`, `mcp.client.config_change`, `mcp.server.call`, `mcp.server.resource_read`, `mcp.server.tools_listed`, `mcp.server.auth_failure`, `mcp.server.token_issued/rotated/revoked` — all tenant-scoped, immutable, exportable, and trace-correlated via `traceparent`.
+- **Least privilege / delegation:** MCP service tokens should carry the minimum permission set. There is no on-behalf-of in v1, so the token principal is the effective principal for every downstream user of a shared assistant — the confused-deputy risk of Section 3.1; issue per-audience tokens, and the admin UI warns when a token's grant scope exceeds the configured breadth threshold. Agent-side, an external tool is only reachable when agent definition, tenant allow-list, and initiating principal's RBAC all permit it.
 
 ## 6. Lifecycle and Health
 
@@ -282,9 +298,15 @@ This makes failure-path tests deterministic and reviewable: the scenario file *i
 
 ## 10. Acceptance Criteria
 
-- [ ] Given a discovered but not allow-listed external tool, when any agent run attempts to use it, then resolution fails with an authorization error and an audit event; no network call is made.
-- [ ] Given an allow-listed tool whose schema changes at the source, when drift is detected, then the allow-listing is suspended and new calls are rejected until admin re-approval.
-- [ ] Given a valid service token bound to tenant A, when it calls any exposed tool, then results contain only tenant A data and the call is audited with the token principal.
-- [ ] Given a disabled capability flag, when an external client lists tools, then the tool is absent, and direct calls to it are rejected.
-- [ ] Given an external MCP result containing instruction-like content, when it enters an agent context, then it is provenance-labeled as untrusted data, screened, and any resulting user-facing claim is fact-checked by the Validation Agent.
-- [ ] Given no LLM provider configured, when an external client calls non-generative tools, then they succeed; when it calls `eip.trigger_report_generation`, then it receives a structured llm-unavailable error.
+These criteria trace to FR-104–FR-108.
+
+- [ ] Given a discovered but not allow-listed external tool, when any agent run attempts to use it, then resolution fails with an authorization error and an audit event; no network call is made (FR-104, FR-107).
+- [ ] Given an allow-listed tool whose schema changes at the source, when drift is detected, then the allow-listing is suspended and new calls are rejected until admin re-approval (FR-104).
+- [ ] Given a valid service token bound to tenant A, when it calls any exposed tool, then results contain only tenant A data and the call is audited with the token principal (FR-107, FR-108).
+- [ ] Given a disabled capability flag, when an external client lists tools, then the tool is absent, and direct calls to it are rejected (FR-106).
+- [ ] Given an external MCP result containing instruction-like content, when it enters an agent context, then it is provenance-labeled as untrusted data, screened, and any resulting user-facing claim is fact-checked by the Validation Agent (FR-104).
+- [ ] Given no LLM provider configured, when an external client calls non-generative tools, then they succeed; when it calls `eip.trigger_report_generation`, then it receives a structured llm-unavailable error (FR-105).
+- [ ] Given an outbound tool call whose arguments contain a detected secret, when the gateway screens the arguments, then the call is blocked before any network dispatch and the block is audited with the outbound argument content classes (FR-107; Section 2.4).
+- [ ] Given an exposed tool whose contract changes incompatibly, when the new MAJOR `schemaVersion` ships, then the previous MAJOR keeps serving through the deprecation window with deprecation notices, and calls after retirement receive a structured version-retired error naming the replacement (FR-105).
+- [ ] Given `eip.trigger_report_generation` enqueues a run, when its audit row is written, then `spawnedRunId` links the MCP call to the resulting agent run and its LLM-call audit trail (FR-107).
+- [ ] Given any read of `eip://runs/{runId}` or `eip://reports/{reportId}`, or any `tools/list` call, when it completes (success or denial), then a `mcp.server.resource_read` / `mcp.server.tools_listed` audit event records the resource URI or enumeration, the token principal, and the outcome (FR-107; Section 3.2).

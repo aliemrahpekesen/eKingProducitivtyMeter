@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<!DOCTYPE module PUBLIC
+    "-//Checkstyle//DTD Checkstyle Configuration 1.3//EN"
+    "https://checkstyle.org/dtds/configuration_1_3.dtd">
+
+<!--
+  EIP Checkstyle config. Formatting is owned by Spotless + Google Java Format (CodingStandards §8),
+  so this config deliberately avoids formatting rules and enforces only structural hygiene that
+  Spotless does not cover. Expands as the codebase grows; kept lenient on the Phase-0 skeleton.
+-->
+<module name="Checker">
+  <property name="severity" value="error"/>
+  <property name="fileExtensions" value="java"/>
+
+  <!-- No tabs (editorconfig + Spotless enforce spaces). -->
+  <module name="FileTabCharacter">
+    <property name="eachLine" value="true"/>
+  </module>
+
+  <module name="TreeWalker">
+    <!-- Import hygiene. -->
+    <module name="RedundantImport"/>
+    <module name="UnusedImports"/>
+    <module name="AvoidStarImport"/>
+    <!-- Structural hygiene. -->
+    <module name="EmptyBlock">
+      <property name="option" value="text"/>
+      <property name="tokens" value="LITERAL_CATCH"/>
+    </module>
+    <module name="OneTopLevelClass"/>
+    <module name="MissingOverride"/>
+    <module name="EqualsHashCode"/>
+    <module name="StringLiteralEquality"/>
+  </module>
+</module>

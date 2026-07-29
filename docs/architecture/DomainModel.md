@@ -32,8 +32,9 @@ All entity names below match the canonical vocabulary of the EIP design brief. T
 | entityId | UUIDv7 | yes | Internal ID of the referenced entity |
 | sourceSystem | string | yes | Connector identity, e.g. `jira`, `github`, `gitlab`, `sonarqube` |
 | sourceInstance | string | yes | Instance discriminator (base URL hash / configured connector id) — enterprises run multiple Jiras |
-| externalId | string | yes | Native ID in the source (`PROJ-1234`, GitHub node ID, Sonar issue key) |
-| externalKey | string | no | Human-readable secondary key where distinct from `externalId` |
+| externalId | string | yes | **Immutable** native ID in the source (Jira numeric issue `id`, GitHub node ID, Sonar issue key) — never a human-readable key the source can rename |
+| externalKey | string | no | Human-readable, **mutable** source key (`PROJ-1234`) — display and correlation-heuristic use only, never identity |
+| keyAliases | string[] | no | Prior `externalKey` values retained on source key change (project rename/move); consulted by the step-3 correlation parsers |
 | url | string | no | Deep link into the source tool |
 | lastSeenAt | timestamptz | yes | Last time the connector observed this identity |
 
@@ -43,9 +44,11 @@ All entity names below match the canonical vocabulary of the EIP design brief. T
 2. Hit → update the existing canonical entity (idempotent upsert; dedup on event id).
 3. Miss → run type-specific correlation heuristics before creating a new entity:
    - `Commit`: match by `(repository, sha)` across mirrors of the same repo.
-   - `PullRequest` ↔ `WorkItem`: parse issue keys from branch name, PR title, and commit trailers (`PROJ-1234`, `Fixes #42`) to create `relatesTo` links, never to merge identities.
-   - `Repository`: match by normalized clone URL when a repo appears via both GitHub and a CI connector.
+   - `PullRequest` ↔ `WorkItem`: parse issue keys from branch name, PR title, and commit trailers (`PROJ-1234`, `Fixes #42`), matched against `externalKey` **and** `keyAliases` (old keys persist in commit messages and PR titles), to create `RELATES_TO` `EntityLink` rows (§2.4), never to merge identities.
+   - `Repository`: correlate by the immutable source repo id where available; normalized clone-URL matching is a fallback only, with rename aliases retained (`keyAliases`) so renamed repos keep correlating.
 4. Still miss → create the entity with a fresh UUIDv7 and attach the `ExternalRef`.
+
+**Key/alias-change rule.** `externalId` never changes for the lifetime of the source record. When the source changes a human-readable key (e.g., a Jira project rename turns `PROJ-1234` into `NEW-1234`), the normalizer updates `externalKey` and appends the prior key to `keyAliases`; the step-3 correlation parsers match against both, because old keys persist indefinitely in commit messages, PR titles, and documents. The same rule applies to repository renames (old clone URLs / full names become aliases).
 
 ### 2.3 User identity merging (Member resolution)
 
@@ -55,7 +58,35 @@ People appear under different identities per tool: Jira `accountId` + email, Git
 2. **Verified email match**: normalized (lowercased, trimmed, plus-suffix-stripped per policy) email equality merges tool identities into one `Member`. Corporate alias domains are configurable per tenant (`@corp.com` ≡ `@corp.example`).
 3. **Commit-email graph**: Git commit author/committer emails link to a Member if that email is a verified email of exactly one GitHub/GitLab identity already merged; noreply emails (`*@users.noreply.github.com`) resolve via the embedded login.
 4. **Manual override**: admins can merge/split identities in the UI; overrides win over heuristics and are audited.
-5. Each merged identity is kept as a `MemberIdentity` row (a specialization of ExternalRef semantics: `sourceSystem`, `externalId`, `email`, `displayName`, `confidence`, `mergedBy: HEURISTIC|ADMIN`). Merging is reversible: splitting re-partitions identities without rewriting historical facts, because facts (commits, work items) reference `MemberIdentity` and derive `Member` through it.
+5. Each merged identity is kept as a `MemberIdentity` row (a specialization of ExternalRef semantics: `sourceSystem`, `externalId`, `email`, `displayName`, `confidence`, `mergedBy: HEURISTIC|ADMIN`).
+6. **Attribution model and merge/split semantics.** Immutable facts reference `MemberIdentity` and derive `Member` through the mapping (`Commit.authorIdentityId`) — merge/split never rewrites them. Mutable facts reference `Member` directly for join-cheap analytics (`WorkItem.assigneeMemberId`/`reporterMemberId`, `PullRequest.authorMemberId`, `CodeReview.reviewerMemberId`). A merge or split therefore triggers an audited bulk **ReattributionJob** that re-points those direct FKs, with bounded semantics: batched (≤10k rows per transaction), idempotent, resumable, rate-limited against dashboard load, emits per-batch audit events plus a completion event with per-table row counts; events arriving mid-job are attributed with the post-change mapping, so the job converges. Splitting is fully supported but is an explicit, audited bulk reattribution of the direct FKs — not a free re-partition of identities.
+7. **PII containment (FR-142).** Person PII (`Member.displayName`, `Member.primaryEmail`, `MemberIdentity.email`, `MemberIdentity.displayName`) lives **only** in these mapping rows. Facts, metric series, and audit events carry pseudonymous `memberId`/`memberIdentityId` references — never names, emails, or free person-text. Erasure therefore hard-deletes or crypto-shreds the mapping rows and runs the per-store redaction list in `../engineering/DatabasePlan.md` §10.1; append-only stores (hash-chained audit, transitions) remain intact and verifiable because they were pseudonymous from the start (`./SecurityModel.md` §11).
+
+### 2.4 Correlation links (EntityLink)
+
+Cross-entity correlation edges produced by the step-3 heuristics (FR-036) are stored as first-class rows — never re-derived from free text at read time:
+
+| Attribute | Type | Req | Semantics |
+|---|---|---|---|
+| id | UUIDv7 | yes | Internal PK |
+| tenantId | UUIDv7 | yes | Owning tenant |
+| fromType / fromId | enum + UUIDv7 | yes | Source endpoint (canonical entity name + internal id) |
+| toType / toId | enum + UUIDv7 | yes | Target endpoint |
+| linkType | enum | yes | `RELATES_TO` \| `REFERENCES` \| `SHIPS` \| `REALIZES` |
+| provenance | JSONB | yes | Parser, source field, matched key/alias — every link is explainable |
+| confidence | numeric 0–1 | yes | Heuristic confidence; 1.0 for explicit source links |
+| createdAt | timestamptz | yes | First correlation time |
+
+Unique per `(tenantId, fromType, fromId, toType, toId, linkType)`. Covered edges and the materialization decision:
+
+| Edge | linkType | Materialization |
+|---|---|---|
+| WorkItem ↔ PullRequest | `RELATES_TO` | Materialized (key parsing per §2.2 step 3) |
+| WorkItem ↔ Commit | `REFERENCES` | Materialized **only** for direct commit-trailer references (≈ ≤1 per commit). Transitive Commit↔WorkItem via PR membership is derived at query time and never materialized — otherwise cardinality reaches ~10⁸ rows at the 100k-repo scale envelope. |
+| Release ↔ WorkItem | `SHIPS` | Materialized (§7 `Release }o--o{ WorkItem`) |
+| Initiative ↔ Epic | `REALIZES` | Materialized (§4 `Initiative → EPIC` WorkItems) |
+
+Physical table: `core.entity_link` (`../engineering/DatabasePlan.md` §2/§3). Links are advisory and soft (per §14 rule 6): deleting either endpoint orphan-cleans the edge asynchronously; links never cascade into entity mutations.
 
 ## 3. Bounded Contexts Overview
 
@@ -105,9 +136,11 @@ classDiagram
 | Product | id; tenantId; organizationId FK (req); name (req); description (opt) | Long-lived product; owns Projects and a Roadmap. |
 | Project | id; tenantId; productId FK (req); name (req); key string (req, e.g. Jira project key mirror); status enum ACTIVE\|ON_HOLD\|DONE\|CANCELLED (req) | Delivery container; WorkItems and Sprints belong to a Project. |
 | Roadmap | id; tenantId; productId FK (req); name (req) | Ordered set of Initiatives with target quarters. |
-| Initiative | id; tenantId; roadmapId FK (req); name (req); targetStart/targetEnd date (opt); status enum (req) | Strategic slice; links to EPIC-type WorkItems. |
+| Initiative | id; tenantId; roadmapId FK (req); name (req); targetStart/targetEnd date (opt); status enum (req) | Strategic slice; links to EPIC-type WorkItems via `EntityLink REALIZES` rows (§2.4). |
 
 **Invariants:** a Member has ≥1 MemberIdentity or an oidcSubject; Team membership intervals must not overlap for the same (member, team); deleting an Organization is forbidden (soft-delete only, cascades logically).
+
+**Physical placement.** `Product`, `Project`, `Roadmap`, and `Initiative` are modeled in this context (they scope planning) but are physically stored in the `work` schema and written by `eip-ingestion` normalizers — `../engineering/DatabasePlan.md` §2 is the single authoritative table→schema→owning-module catalog and this document defers to it.
 
 ## 5. Work Management Context
 
@@ -125,7 +158,9 @@ classDiagram
   WorkItem "0..1" --> "*" WorkItem : parent/children
   WorkItem "*" --> "0..1" Sprint
   Project "1" --> "*" Board
-  Board "1" --> "*" WorkflowState
+  Project "1" --> "*" WorkflowState
+  Board "1" --> "*" BoardColumn
+  BoardColumn "*" --> "*" WorkflowState : maps
   WorkItem --> WorkflowState : currentState
   WorkItem "1" --> "*" Dependency : outgoing
   WorkItem "1" --> "*" Risk
@@ -136,8 +171,9 @@ classDiagram
 |---|---|---|
 | WorkItem | id; tenantId; type enum EPIC\|FEATURE\|STORY\|TASK\|BUG\|INCIDENT_TICKET (req); title (req); description text (opt); projectId FK (req); parentId FK (opt); currentStateId FK→WorkflowState (req); status enum (derived category, see §5.1); priority enum P1..P4 (opt); severity enum (opt, BUG/INCIDENT_TICKET only); storyPoints numeric (opt); estimateSeconds bigint (opt); sprintId FK (opt); assigneeMemberId FK (opt); reporterMemberId FK (opt); teamId FK (opt); labels string[] (opt); dueDate date (opt); createdInSource timestamptz (req); resolvedAt timestamptz (opt); blocked bool (req, derived); customFields JSONB (opt) | Unified supertype for all plannable work. Type-specific rules in §5.2. |
 | Sprint | id; tenantId; projectId FK (req); name (req); goal text (opt); startAt/endAt timestamptz (req); state enum FUTURE\|ACTIVE\|CLOSED (req); committedPoints numeric (opt, snapshot at start) | Timebox; source for velocity and sprint predictability. |
-| Board | id; tenantId; projectId FK (req); name (req); type enum SCRUM\|KANBAN (req); columnOrder UUIDv7[] (req) | Visual flow surface; maps WorkflowStates to columns. |
-| WorkflowState | id; tenantId; boardId FK (req); name (req, e.g. "In Review"); category enum TODO\|IN_PROGRESS\|DONE (req); wipLimit int (opt); isBlockedState bool (req, default false) | Normalized WIP state. Source workflows map onto these; category drives cycle/lead time. |
+| Board | id; tenantId; projectId FK (req); name (req); type enum SCRUM\|KANBAN (req) | Visual flow surface — a *view* over the project workflow. Columns and their state mapping live in BoardColumn; a Board never defines workflow states. |
+| BoardColumn | id; tenantId; boardId FK (req); name (req); position int (req); wipLimit int (opt); stateIds UUIDv7[] (req, → WorkflowState) | Board column→state mapping. One column may aggregate several WorkflowStates; WIP limits are column (board-view) properties, not workflow properties. |
+| WorkflowState | id; tenantId; projectId FK (req); sourceWorkflowRef string (opt, source workflow id); name (req, e.g. "In Review"); category enum TODO\|IN_PROGRESS\|DONE (req); isBlockedState bool (req, default false) | Normalized WIP state, **scoped to the project workflow — not to a board** (in Jira, statuses belong to project workflows; boards are views over them). Source workflows map onto these; category drives cycle/lead time. |
 | Dependency | id; tenantId; fromWorkItemId FK (req); toWorkItemId FK (req); type enum BLOCKS\|IS_BLOCKED_BY\|RELATES_TO\|DUPLICATES (req); crossTeam bool (derived); active bool (req) | Directed edge for dependency-risk analytics. |
 | Risk | id; tenantId; subjectType enum WORK_ITEM\|PROJECT\|RELEASE (req); subjectId FK (req); title (req); probability enum LOW\|MEDIUM\|HIGH (req); impact enum LOW\|MEDIUM\|HIGH (req); score numeric (derived); status enum OPEN\|MITIGATING\|ACCEPTED\|CLOSED (req); mitigation text (opt); raisedBy enum HUMAN\|AGENT (req) | Risk register entry; Delivery Risk agent writes AGENT-raised rows. |
 | WorkItemTransition | id; tenantId; workItemId FK (req); fromStateId/toStateId FK (req); occurredAt timestamptz (req); actorMemberId FK (opt) | Append-only state history; source of blocked time, cycle time, flow efficiency. |
@@ -167,6 +203,7 @@ stateDiagram-v2
 
 ### 5.2 Invariants and validation rules
 
+- `currentStateId` always resolves against the item's **project workflow** states (WorkflowState.projectId = WorkItem.projectId): it is well-defined for items on zero boards (ubiquitous in Jira) and unambiguous for items visible on multiple boards, because boards are views and never define state.
 - `parentId` type hierarchy: EPIC ← FEATURE ← STORY ← TASK; BUG and INCIDENT_TICKET may parent to any of EPIC/FEATURE/STORY. Cycles are rejected.
 - An EPIC cannot belong to a Sprint; STORY/TASK/BUG may.
 - `resolvedAt` is set iff normalized status is DONE or CANCELLED; clearing on reopen is mandatory.
@@ -196,7 +233,7 @@ erDiagram
 | PullRequest | id; tenantId; repositoryId FK (req); number int (req); title (req); state enum OPEN\|MERGED\|CLOSED (req); draft bool (req); authorMemberId FK (opt); sourceBranch/targetBranch (req); createdAt/mergedAt/closedAt timestamptz; firstReviewAt timestamptz (opt); additions/deletions int; commentCount int; mergeCommitSha (opt) | Unit of change for review-bottleneck and DORA lead-time metrics. |
 | CodeReview | id; tenantId; pullRequestId FK (req); reviewerMemberId FK (req); state enum APPROVED\|CHANGES_REQUESTED\|COMMENTED\|DISMISSED (req); submittedAt timestamptz (req) | One review submission event. |
 
-**Invariants:** `mergedAt` set iff `state=MERGED`; `firstReviewAt = min(CodeReview.submittedAt)`; a Commit's `(repositoryId, sha)` is globally unique per tenant; PR↔WorkItem links are `RELATES_TO` edges derived from key parsing (§2.2) and are advisory, never destructive.
+**Invariants:** `mergedAt` set iff `state=MERGED`; `firstReviewAt = min(CodeReview.submittedAt)`; a Commit's `(repositoryId, sha)` is globally unique per tenant; PR↔WorkItem links are `RELATES_TO` edges derived from key parsing (§2.2), stored as `EntityLink` rows (§2.4), and are advisory, never destructive.
 
 ## 7. Build & Release Context
 
@@ -220,7 +257,7 @@ erDiagram
 | Deployment | id; tenantId; environmentId FK (req); artifactId FK (req); serviceId FK (opt); status enum PENDING\|IN_PROGRESS\|SUCCEEDED\|FAILED\|ROLLED_BACK (req); startedAt/finishedAt timestamptz; deployerMemberId FK (opt); causedIncident bool (derived) | Grain for deployment frequency and change failure rate. |
 | Release | id; tenantId; name/version (req); projectId FK (opt); status enum PLANNED\|IN_PROGRESS\|RELEASED\|CANCELLED (req); targetDate date (opt); releasedAt timestamptz (opt); readinessScore numeric (derived) | Business-visible release; Release Notes agent input. |
 
-**Invariants:** `finishedAt ≥ startedAt`; `causedIncident = true` iff an `Incident` links to the Deployment within the configured attribution window (default 48h, per-tenant); a `Release.releasedAt` requires ≥1 SUCCEEDED Deployment to a PROD-tier Environment.
+**Invariants:** `finishedAt ≥ startedAt`; `causedIncident = true` iff an `Incident` links to the Deployment within the configured attribution window (default 48h, per-tenant); a `Release.releasedAt` requires ≥1 SUCCEEDED Deployment to a PROD-tier Environment; `Release ↔ WorkItem` ("ships") edges are stored as `EntityLink SHIPS` rows (§2.4).
 
 ## 8. Quality Context
 
@@ -252,7 +289,7 @@ erDiagram
 | ApiEndpoint | id; tenantId; serviceId FK (req); method (req); pathTemplate (req); deprecated bool (req) | Endpoint inventory for SLO scoping. |
 | Incident | id; tenantId; title (req); severity enum SEV1..SEV4 (req); status enum (see §9.1); serviceId FK (opt); deploymentId FK (opt, suspected cause); detectedAt (req); acknowledgedAt/mitigatedAt/resolvedAt timestamptz; postmortemDocumentId FK (opt); workItemId FK (opt, follow-up INCIDENT_TICKET) | Operational incident; MTTR and change-failure-rate input. |
 | Alert | id; tenantId; source (req, e.g. `prometheus`, `grafana`); fingerprint (req); name (req); severity (req); state enum FIRING\|RESOLVED (req); startsAt/endsAt timestamptz; incidentId FK (opt); labels JSONB | Alert instances; alert-noise metric input. |
-| Metric | id; tenantId; name (req, e.g. `flow.cycle_time_p50`); grain enum TEAM\|PROJECT\|SERVICE\|REPO\|SPRINT\|TENANT (req); unit (req); definitionRef (req: link to metric catalog entry with purpose/formula/inputs/caveats/gaming risks) | Metric *definition*; values are `MetricValue` time series (physical design in DatabasePlan §4). |
+| Metric | id; tenantId; name (req, e.g. `flow.cycle_time_p50`); grain enum TEAM\|PROJECT\|SERVICE\|REPO\|SPRINT\|TENANT (req); unit (req); definitionRef (req: link to metric catalog entry with purpose/formula/inputs/caveats/gaming risks); activeVersion smallint (req, default 1 — incremented whenever formula/inputs change; prior versions remain valid for the facts they computed, FR-062) | Metric *definition* (physical: `analytics.metric_definition`); values are `MetricValue` time series carrying the `definitionVersion` that computed them (physical: `analytics.metric_fact`, DatabasePlan §3/§8). Dashboards read the `activeVersion` series by default; superseded versions stay queryable for FR-062 comparisons until their GC window lapses (DatabasePlan §10). |
 | LogReference | id; tenantId; incidentId FK (opt); serviceId FK (opt); system enum LOKI\|ELASTIC\|OTHER (req); query text (req); fromTs/toTs timestamptz (req); url (opt) | Pointer to logs — EIP stores references, never raw log bodies. |
 | TraceReference | id; tenantId; incidentId FK (opt); serviceId FK (opt); traceId (req); system enum TEMPO\|JAEGER\|OTHER (req); url (opt) | Pointer to a distributed trace. |
 | SlaSlo | id; tenantId; serviceId FK (req); kind enum SLA\|SLO (req); name (req); objective numeric (req, e.g. 99.9); window (req, e.g. `30d`); indicator JSONB (req: metric query); errorBudgetPolicy text (opt) | Objective definition; SLO-health metric evaluates attainment. |
@@ -291,6 +328,8 @@ stateDiagram-v2
 
 **Invariants:** `artifactKeys` non-empty iff status=READY; reports are immutable once READY (regeneration creates a new row); every GeneratedReport must be reproducible from `parameters` + template version.
 
+**Process vs artifact states.** `GeneratedReport.status` is the *artifact* lifecycle (QUEUED|GENERATING|READY|FAILED). The report-generation *process* runs its own state machine in `reports.report_job` (`PENDING → RUNNING → VALIDATING → RENDERED → DELIVERED | FAILED`, see `./DataFlow.md` §7). The two map deterministically: PENDING ↔ QUEUED; RUNNING and VALIDATING ↔ GENERATING; RENDERED and DELIVERED ↔ READY; FAILED ↔ FAILED.
+
 ## 12. Source-Tool Field Mapping Examples
 
 Normalizers are table-driven; these two mappings are the reference examples (full per-connector maps live with each connector in `eip-connectors`).
@@ -299,15 +338,16 @@ Normalizers are table-driven; these two mappings are the reference examples (ful
 
 | Jira field | WorkItem attribute | Transform |
 |---|---|---|
-| `key` (e.g. PROJ-1234) | ExternalRef.externalId + externalKey | Verbatim; `sourceSystem=jira`, `url=<base>/browse/<key>` |
+| `id` (immutable numeric issue id) | ExternalRef.externalId | Verbatim; `sourceSystem=jira` — the identity anchor; never the renameable `key` |
+| `key` (e.g. PROJ-1234) | ExternalRef.externalKey (+ keyAliases on rename, §2.2) | Human-readable, mutable; `url=<base>/browse/<key>` |
 | `fields.issuetype.name` | type | Epic→EPIC; New Feature→FEATURE; Story→STORY; Task/Sub-task→TASK; Bug→BUG; Incident→INCIDENT_TICKET; per-tenant override map for custom types |
 | `fields.summary` | title | Verbatim |
 | `fields.description` (ADF) | description | ADF → Markdown |
-| `fields.status` + `statusCategory` | currentStateId (WorkflowState) | Status name → WorkflowState per board; `statusCategory.key` (new/indeterminate/done) → category TODO/IN_PROGRESS/DONE |
+| `fields.status` + `statusCategory` | currentStateId (WorkflowState) | Status → WorkflowState per **project workflow** (statuses belong to project workflows; boards are views — board column mapping lives in BoardColumn, §5); `statusCategory.key` (new/indeterminate/done) → category TODO/IN_PROGRESS/DONE |
 | `fields.priority.name` | priority | Highest→P1, High→P2, Medium→P3, Low/Lowest→P4 |
 | `fields.customfield_<storyPoints>` | storyPoints | Configured custom-field id per Jira instance |
 | `fields.assignee.accountId` | assigneeMemberId | Via MemberIdentity resolution (§2.3) |
-| `fields.parent.key` / epic link | parentId | Resolved through ExternalRef lookup; deferred link if parent not yet synced |
+| `fields.parent.key` / epic link | parentId | Resolved through ExternalRef lookup (externalKey/keyAliases → externalId, §2.2); deferred link if parent not yet synced |
 | `fields.sprint` (board API) | sprintId | Sprint ExternalRef by Jira sprint id |
 | `fields.labels` | labels | Verbatim array |
 | `fields.created` / `resolutiondate` | createdInSource / resolvedAt | ISO-8601 → timestamptz UTC |
@@ -332,11 +372,11 @@ Normalizers are table-driven; these two mappings are the reference examples (ful
 | `review_comments` + `comments` | commentCount | Sum |
 | `reviews[]` (REST/GraphQL) | CodeReview rows | One per submission; APPROVED/CHANGES_REQUESTED/COMMENTED/DISMISSED map 1:1 |
 | earliest review `submitted_at` | firstReviewAt | min() over CodeReview |
-| branch name / title / body issue keys | WorkItem RELATES_TO links | Regex `[A-Z][A-Z0-9]+-\d+` and `#\d+` → ExternalRef lookup |
+| branch name / title / body issue keys | WorkItem RELATES_TO links | Regex `[A-Z][A-Z0-9]+-\d+` and `#\d+` → externalKey/keyAliases lookup (§2.2) → `EntityLink RELATES_TO` rows (§2.4) |
 
 ## 13. Domain Events per Context
 
-Every canonical entity mutation publishes to a context topic using the standard envelope (§1.6). Consumers (analytics, RAG indexer, report engine) subscribe per context; ordering is per key `tenantId+entityId`; delivery is at-least-once with idempotent consumers deduplicating on `eventId`.
+Every canonical entity mutation publishes to a context topic using the standard envelope (§1, principle 6). Consumers (analytics, RAG indexer, report engine) subscribe per context; ordering is per key `tenantId:entityId` on domain topics (key composition varies by topic family, see `../engineering/EventModel.md` §7); delivery is at-least-once with idempotent consumers deduplicating on `eventId`.
 
 | Context | Kafka topic | entityType values | Representative eventType values |
 |---|---|---|---|
@@ -348,7 +388,7 @@ Every canonical entity mutation publishes to a context topic using the standard 
 | Analytics outputs | `eip.analytics.metrics` | Metric (values) | `metric.computed` |
 | AI / Reports | `eip.ai.jobs`, `eip.ai.results`, `eip.reports.jobs` | GeneratedReport, agent jobs | `report.requested`, `report.ready` |
 
-Failed processing lands in the consumer group's DLQ (`.<group>.dlq`) with the original envelope intact for replay.
+Failed processing lands in the consumer group's DLQ (`<group>.dlq`) with the original envelope intact for replay.
 
 ## 14. Cross-Cutting Validation Rules
 
@@ -356,5 +396,5 @@ Failed processing lands in the consumer group's DLQ (`.<group>.dlq`) with the or
 2. Normalizers must be idempotent: re-processing the same raw payload yields byte-identical canonical state (dedup on `eventId`; upsert keyed by ExternalRef).
 3. Timestamps are stored UTC; `occurredAt` (source time) is never overwritten by `ingestedAt`.
 4. No entity may hold plaintext credentials or tokens; connector secrets live only in the secrets subsystem (AES-256-GCM envelope encryption).
-5. Derived fields (`blocked`, `durationSeconds`, `causedIncident`, `readinessScore`, `Risk.score`) are recomputed by `eip-analytics` consumers, never written by connectors.
+5. Derived fields (`blocked`, `durationSeconds`, `causedIncident`, `readinessScore`, `Risk.score`) are computed by `eip-analytics` (agent-raised `Risk` rows by `eip-ai`) but written to canonical tables only through `eip-ingestion`'s exported `CanonicalEnrichmentService` — `eip-ingestion` is the single canonical writer (ADR-019). Enrichment writes touch only enrichment-owned columns/rows, never normalizer-owned fields, and normalizer upserts never clear enrichment columns. Connectors never write derived fields.
 6. Referential links across bounded contexts are soft (UUID + existence check at read time) to keep module extraction possible; hard FKs exist only inside a context's schema (see `../engineering/DatabasePlan.md` §3).

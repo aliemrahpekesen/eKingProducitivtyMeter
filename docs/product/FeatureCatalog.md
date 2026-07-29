@@ -4,7 +4,7 @@ Complete, ID-stable catalog of features for the **Engineering Intelligence Platf
 
 Conventions:
 
-- **Priority**: P0 = platform cannot ship without it; P1 = required for the core value proposition; P2 = valuable, deferrable past 1.0 scope discussion.
+- **Priority**: per-phase semantics, aligned with the PRD — P0 = must-have for the phase where the capability first ships; P1 = required for the core value proposition; P2 = valuable, deferrable past 1.0 scope discussion.
 - **Phase**: implementation phase 0-5 per the canonical roadmap (see `./Roadmap.md`).
 - **Dependencies**: hard prerequisites, by FEAT ID.
 
@@ -12,30 +12,32 @@ Conventions:
 
 | # | Capability area | Features | P0 | P1 | P2 |
 |---|-----------------|----------|----|----|----|
-| 2 | Platform & Tenancy | 11 | 9 | 2 | 0 |
+| 2 | Platform & Tenancy | 12 | 9 | 3 | 0 |
 | 3 | Admin & Configuration | 18 | 6 | 11 | 1 |
 | 4 | Connectors | 20 | 4 | 4 | 12 |
 | 5 | Ingestion & Normalization | 9 | 8 | 1 | 0 |
-| 6 | Analytics & Metrics | 9 | 4 | 5 | 0 |
-| 7 | Dashboards | 11 | 5 | 6 | 0 |
-| 8 | AI Agents | 21 | 4 | 8 | 9 |
+| 6 | Analytics & Metrics | 9 | 5 | 4 | 0 |
+| 7 | Dashboards | 12 | 5 | 7 | 0 |
+| 8 | AI Agents | 21 | 8 | 4 | 9 |
 | 9 | RAG | 6 | 4 | 2 | 0 |
-| 10 | MCP | 3 | 0 | 3 | 0 |
+| 10 | MCP | 3 | 3 | 0 | 0 |
 | 11 | Report Generation Center & Artifacts Library | 22 | 4 | 8 | 10 |
-| 12 | Security & Audit | 6 | 5 | 1 | 0 |
+| 12 | Security & Audit | 7 | 5 | 2 | 0 |
 | 13 | Observability | 6 | 5 | 1 | 0 |
-| | **Total** | **142** | **58** | **52** | **32** |
+| | **Total** | **145** | **66** | **47** | **32** |
+
+Note: the **#** column is the number of the document section where each capability area's feature table appears.
 
 ### 1.1 ID conventions
 
-- IDs are allocated in per-area blocks with gaps reserved for growth (e.g., Platform 001-019, Admin 020-049, Connectors 050-074). An ID, once published, is never reused or renumbered; retired features are marked deprecated in place.
+- IDs are allocated in per-area blocks with gaps reserved for growth (e.g., Platform 001-019, Admin 020-049, Connectors 050-074). An ID, once published, is never reused or renumbered; retired features are marked deprecated in place. Features added after the initial catalog (FEAT-211 onward) are appended after the highest previously published ID rather than inserted into their area's original block.
 - A feature's phase is the phase in which it reaches its exit criteria (see `./Roadmap.md`); earlier partial work may land behind flags.
 
 ### 1.2 Feature count by phase
 
 | Phase | 0 – Foundations | 1 – Ingestion core | 2 – Analytics & dashboards | 3 – AI core | 4 – Agents/MCP/outputs | 5 – Hardening |
 |-------|-----------------|--------------------|----------------------------|-------------|------------------------|---------------|
-| Features | 20 | 19 | 28 | 25 | 34 | 16 |
+| Features | 20 | 19 | 26 | 32 | 32 | 16 |
 
 ### 1.3 Area-level dependency flow
 
@@ -72,6 +74,7 @@ The load-bearing foundation: multi-tenancy, identity, authorization, the API con
 | FEAT-009 | High availability & horizontal scaling | Stateless API replicas, partitioned Kafka consumers, Redisson distributed locks for singleton jobs, and connection-pool/backpressure tuning validated under load. Documented capacity model. | P1 | 5 | FEAT-008 |
 | FEAT-010 | Backup/restore & upgrade paths | Documented and scripted backup/restore for PostgreSQL, MinIO, and Kafka offsets; Flyway-based forward-only schema upgrades; tested version-to-version upgrade procedure. | P0 | 5 | FEAT-006 |
 | FEAT-011 | Frontend application shell | React 18 + TypeScript + Vite single-page app with TanStack Query, shared component library, ECharts dashboard primitives, theming, and i18n-ready message catalogs. | P0 | 0 | FEAT-005 |
+| FEAT-213 | Per-tenant API rate limiting | Per-tenant request rate limits enforced on the REST API: requests exceeding the configured limit receive 429 problem+json with a `Retry-After` header, other tenants are unaffected, and per-tenant quota consumption is surfaced to tenant admins (complements FR-130). | P1 | 3 | FEAT-005 |
 
 ## 3. Admin & Configuration
 
@@ -91,9 +94,9 @@ Everything a platform or tenant administrator configures, in one coherent admin 
 | FEAT-029 | Agent workflow configuration | Enable/disable agents per tenant, configure their triggers (manual, scheduled, event-driven), tool allow-lists, budgets, guardrail policies, and default output templates. | P1 | 3 | FEAT-130 |
 | FEAT-030 | Template management | Manage report and prompt templates: versioned templates with variables, tenant-level overrides of shipped defaults, and preview rendering against sample data. | P1 | 3 | FEAT-171 |
 | FEAT-031 | Metric definition management | View shipped metric definitions (purpose, formula, inputs, grain, caveats/limitations, gaming risks) and manage tenant-level parameters such as WorkflowState-to-stage mapping, working calendars, and thresholds. | P1 | 2 | FEAT-090 |
-| FEAT-032 | Risk rule configuration | Configure delivery-risk scoring rules and thresholds (epic delivery risk, project delay prediction, dependency risk, release readiness score), including weighting, suppression, and per-Project overrides. | P1 | 2 | FEAT-094, FEAT-097 |
+| FEAT-032 | Risk rule configuration | Configure delivery-risk scoring rules and thresholds (epic delivery risk, project delay prediction, dependency risk, release readiness score), including weighting, suppression, and per-Project overrides. | P1 | 3 | FEAT-094, FEAT-097 |
 | FEAT-033 | Data retention policies | Per-tenant retention configuration for raw staging data, domain events, metrics time series, audit logs, LLM call logs, and generated artifacts, with scheduled enforcement jobs and legal-hold exemption. | P1 | 2 | FEAT-035 |
-| FEAT-034 | Notification channel administration | Configure notification channels (SMTP email, generic webhook, Slack/Teams-compatible webhook) and subscription rules for alerts, report delivery, job failures, and risk threshold breaches. | P1 | 4 | FEAT-023 |
+| FEAT-034 | Notification channel administration | Configure notification channels (SMTP email, generic webhook, Slack/Teams-compatible webhook) and subscription rules for alerts, report delivery, job failures, and risk threshold breaches. Ships in Phase 2 for operational alerts (FEAT-210); report-delivery usage arrives with FR-112 in Phase 4. | P1 | 2 | FEAT-023 |
 | FEAT-035 | Scheduled jobs administration | Manage scheduled jobs (connector syncs, metric recomputation, RAG re-index, report generation, retention enforcement): cron-style schedules, run history, manual trigger, pause/resume, and failure visibility. | P0 | 1 | FEAT-006 |
 | FEAT-036 | Queue/cache/storage settings | Operator-facing configuration and status for Kafka (topic prefix `eip.`, consumer groups, DLQs), Redis (cache TTLs, lock namespaces), and S3-compatible object storage (MinIO default; buckets, lifecycle). | P1 | 1 | FEAT-076 |
 | FEAT-037 | Observability settings | Configure OTel exporter endpoints, sampling rates, log levels per module, and metric scrape exposure; toggle optional Tempo/Loki pipelines. | P2 | 2 | FEAT-205 |
@@ -139,7 +142,7 @@ The data spine: collectors land source payloads in raw staging, normalizers prod
 | FEAT-078 | Sync engine with checkpointing | Orchestrates `fullSync()` and `incrementalSync(checkpoint)` per connector+stream with a checkpoint table, so interrupted syncs resume from the last committed checkpoint without data loss or duplication. | P0 | 1 | FEAT-050, FEAT-075 |
 | FEAT-079 | Webhook intake | Authenticated webhook endpoints per connector instance (signature verification, replay protection) that enqueue events onto `eip.raw.<connector>` for near-real-time freshness between scheduled syncs. | P1 | 1 | FEAT-050, FEAT-076 |
 | FEAT-080 | Idempotent processing & dedup | At-least-once delivery with idempotent consumers: dedup on `eventId`, idempotent upserts keyed by `ExternalRef`, and per-key ordering (tenantId+entityId), guaranteeing re-ingestion never creates duplicates. | P0 | 1 | FEAT-076, FEAT-077 |
-| FEAT-081 | Dead-letter queues & replay | Per-consumer-group DLQs (`.<group>.dlq`) with an operator UI to inspect, fix-forward, and replay poisoned messages; alerting on DLQ growth. | P0 | 1 | FEAT-076, FEAT-120 |
+| FEAT-081 | Dead-letter queues & replay | Per-consumer-group DLQs (`<group>.dlq`) with an operator UI to inspect, fix-forward, and replay poisoned messages; alerting on DLQ growth. | P0 | 1 | FEAT-076, FEAT-120 |
 | FEAT-082 | Rate limiting & retry | Outbound rate limiting per connector instance (Redis-backed) and retry with exponential backoff + jitter that respects source-system rate-limit headers. | P0 | 1 | FEAT-050 |
 | FEAT-083 | Cross-tool entity correlation | Correlates entities across tools (e.g., Commit/PullRequest to WorkItem via branch names and message keys; Deployment to Release; Incident to Service) to enable end-to-end lead time and DORA metrics. | P0 | 1 | FEAT-077 |
 
@@ -152,11 +155,11 @@ The canonical metric set — flow, DORA, quality, delivery risk, ops, and team h
 | FEAT-090 | Metric engine & definitions | Computes metrics from domain events into queryable time series. Every metric definition ships with purpose, formula, inputs, grain, caveats/limitations, and gaming risks, surfaced in UI tooltips and the metric catalog. | P0 | 2 | FEAT-076, FEAT-077 |
 | FEAT-091 | Flow metrics | Velocity, throughput, cycle time, lead time, WIP, flow efficiency, blocked time, sprint predictability (commitment vs done), and scope churn, computed per Team/Board/Sprint from WorkflowState transitions. | P0 | 2 | FEAT-090 |
 | FEAT-092 | DORA metrics | Deployment frequency, lead time for changes, change failure rate, and MTTR, computed from correlated SCM, CI/CD, and Incident data at Service/Team/Organization grain. | P0 | 2 | FEAT-090, FEAT-083 |
-| FEAT-093 | Quality metrics | Coverage, code smells, duplication, quality gate status, escaped defects, bug aging, technical debt ratio, and security finding aging, primarily from SonarQube and WorkItem data. | P1 | 2 | FEAT-090, FEAT-056 |
-| FEAT-094 | Delivery risk metrics | Epic delivery risk, project delay prediction, dependency risk, and release readiness score, combining flow trends, scope churn, Dependency graphs, and QualityGate signals with stated uncertainty. | P1 | 2 | FEAT-090, FEAT-091 |
+| FEAT-093 | Quality metrics | Coverage, code smells, duplication, quality gate status, escaped defects, bug aging, technical debt ratio, and security finding aging, primarily from SonarQube and WorkItem data. | P0 | 2 | FEAT-090, FEAT-056 |
+| FEAT-094 | Delivery risk metrics | Epic delivery risk, project delay prediction, dependency risk, and release readiness score, combining flow trends, scope churn, Dependency graphs, and QualityGate signals with stated uncertainty. | P1 | 3 | FEAT-090, FEAT-091 |
 | FEAT-095 | Ops metrics | Incident frequency/impact, SLO health, and alert noise from Incident, SlaSlo, Prometheus, and Alert data. | P1 | 2 | FEAT-090, FEAT-059 |
 | FEAT-096 | Team health metrics | Load balance, review bottlenecks, and knowledge concentration (bus factor) — computed and displayed at team level only, with explicit anti-toxic-ranking design: no individual leaderboards, no cross-person comparison views, context and limitations always shown. | P1 | 2 | FEAT-090 |
-| FEAT-097 | Risk scoring engine | Rule- and threshold-based scoring runtime that evaluates configurable risk rules (FEAT-032) over metrics and entities, producing Risk records and alerts with explanations. | P1 | 2 | FEAT-090, FEAT-094 |
+| FEAT-097 | Risk scoring engine | Rule- and threshold-based scoring runtime that evaluates configurable risk rules (FEAT-032) over metrics and entities, producing Risk records and alerts with explanations. | P1 | 3 | FEAT-090, FEAT-094 |
 | FEAT-098 | Metrics API & time series store | `/api/v1` metric query endpoints (dimensions, time ranges, roll-ups by Team/BusinessUnit/Organization) over PostgreSQL time-series tables, publishing computed values on `eip.analytics.metrics`. | P0 | 2 | FEAT-090, FEAT-005 |
 
 ## 7. Dashboards
@@ -168,14 +171,15 @@ User-facing and operator-facing visualization built on one shared framework (ECh
 | FEAT-110 | Dashboard framework | Shared dashboard infrastructure: ECharts chart library components, filter bar (Organization/BusinessUnit/Team/Project/Sprint/time range), drill-down navigation, metric caveat tooltips, and export to image. | P0 | 2 | FEAT-011, FEAT-098 |
 | FEAT-111 | Admin dashboard | Tenant administration overview: users, teams, data sources and their health, sync status, scheduled jobs, storage/queue usage, and recent audit highlights. | P0 | 1 | FEAT-011, FEAT-024 |
 | FEAT-112 | Productivity dashboard | Team-level flow overview: velocity, throughput, cycle/lead time trends, WIP, flow efficiency, and blocked time, always with context and limitations — explicitly not an individual-ranking view. | P0 | 2 | FEAT-110, FEAT-091 |
-| FEAT-113 | Delivery risk dashboard | Portfolio view of epic delivery risk, project delay predictions, dependency risk, and release readiness scores with drill-down to contributing signals and risk-rule explanations. | P1 | 2 | FEAT-110, FEAT-094, FEAT-097 |
+| FEAT-113 | Delivery risk dashboard | Portfolio view of epic delivery risk, project delay predictions, dependency risk, and release readiness scores with drill-down to contributing signals and risk-rule explanations. | P1 | 3 | FEAT-110, FEAT-094, FEAT-097 |
 | FEAT-114 | Sprint dashboard | Live sprint view: burndown/burnup, commitment vs done, scope churn, blocked items, and sprint predictability, refreshed from incremental sync and webhooks. | P0 | 2 | FEAT-110, FEAT-091 |
 | FEAT-115 | Kanban dashboard | Flow-based view: cumulative flow diagram, WIP by WorkflowState, aging work-in-progress, cycle time scatterplot and percentiles. | P1 | 2 | FEAT-110, FEAT-091 |
-| FEAT-116 | Release dashboard | Release readiness: scope completion, QualityGate status, open Risks and Dependencies, deployment pipeline status, and readiness score per Release. | P1 | 2 | FEAT-110, FEAT-094 |
+| FEAT-116 | Release dashboard | Release readiness: scope completion, QualityGate status, open Risks and Dependencies, deployment pipeline status, and readiness score per Release. | P1 | 3 | FEAT-110, FEAT-094 |
 | FEAT-117 | Quality dashboard | Coverage, code smells, duplication, quality gates, escaped defects, bug aging, technical debt ratio, and security finding aging trends per Repository/Project. | P1 | 2 | FEAT-110, FEAT-093 |
 | FEAT-118 | Operational health dashboard | Incident frequency/impact, MTTR, SLO health, and alert noise per Service/Environment. | P1 | 2 | FEAT-110, FEAT-095 |
 | FEAT-119 | System health dashboard | EIP self-health for operators: API latency/error rates, worker throughput, Kafka lag, Redis and PostgreSQL health, LLM provider availability, sourced from platform observability. | P0 | 1 | FEAT-011, FEAT-205 |
 | FEAT-120 | Job/queue/cache/connector monitors | Operational monitors: scheduled job runs and failures, Kafka topic/DLQ depth and consumer lag, Redis cache hit rates, and per-connector sync status, checkpoint age, and error history. | P1 | 1 | FEAT-119, FEAT-035 |
+| FEAT-212 | Accessibility conformance (WCAG 2.1 AA) | Dashboards and the admin console conform to WCAG 2.1 AA: full keyboard navigation, sufficient contrast, and screen-reader labels on charts and tables. Automated accessibility scans gate CI. | P1 | 2 | FEAT-011, FEAT-110 |
 
 ## 8. AI Agents
 
@@ -183,15 +187,15 @@ Agent infrastructure plus the 18 canonical agents: Data Ingestion, Data Quality,
 
 | ID | Name | Description | Priority | Phase | Dependencies |
 |----|------|-------------|----------|-------|--------------|
-| FEAT-130 | Agent runtime | Plan/execute agent orchestration in `eip-ai` (Java + LangChain4j): tool-calling, token/cost budgets, guardrails (allowed tools, output validation, PII redaction policy), retries, and audit of every LLM call (prompt, model, tokens, cost, latency; prompts redacted per policy). Optional Python AI workers isolated behind Kafka/REST. | P0 | 3 | FEAT-006, FEAT-076, FEAT-198 |
+| FEAT-130 | Agent runtime | Plan/execute agent orchestration in `eip-ai` (Java + LangChain4j): tool-calling, token/cost budgets, guardrails (allowed tools, output validation, PII redaction policy), retries, and audit of every LLM call (prompt, model, tokens, cost, latency; prompts redacted per policy). Optional Python AI workers isolated behind Kafka/REST (optional Python workers: Phase 4, FR-089). | P0 | 3 | FEAT-006, FEAT-076, FEAT-198 |
 | FEAT-131 | LLM provider SPI | Pluggable providers: Ollama, vLLM (OpenAI-compatible), OpenAI-compatible generic, Anthropic-compatible, and custom enterprise endpoint. Works fully air-gapped with local LLMs. | P0 | 3 | FEAT-130 |
 | FEAT-132 | Model routing & failover | Per-tenant and per-agent model routing with ordered fallback chains, token budgets, health-based circuit breaking, and transparent failover when a provider is down or over budget. | P0 | 3 | FEAT-131, FEAT-026 |
 | FEAT-133 | Data Ingestion Agent | Assists ingestion operations: diagnoses failing syncs, proposes field mappings for generic connectors, and drafts connector configurations from source-system samples. | P2 | 4 | FEAT-130, FEAT-050 |
 | FEAT-134 | Data Quality Agent | Scans canonical data for gaps, staleness, mapping anomalies, and broken correlations; produces data-quality findings that annotate affected metrics and dashboards. | P1 | 4 | FEAT-130, FEAT-077 |
 | FEAT-135 | Engineering Metrics Agent | Explains metric movements in natural language with cited underlying data, answers metric questions, and flags trend changes worth attention — always including caveats and uncertainty. | P1 | 4 | FEAT-130, FEAT-098 |
-| FEAT-136 | Delivery Risk Agent | Analyzes epics, dependencies, and flow trends to narrate delivery risks, delay predictions, and mitigation options; feeds the risk report and delivery risk dashboard annotations. | P1 | 3 | FEAT-130, FEAT-094 |
-| FEAT-137 | Sprint Review Agent | Produces sprint review narratives and presentation content from Sprint, WorkItem, and metric data: accomplishments, misses, scope churn, blockers, and carry-over, with source citations. | P1 | 3 | FEAT-130, FEAT-091, FEAT-158 |
-| FEAT-138 | Release Notes Agent | Generates release notes from merged PullRequests, resolved WorkItems, and Deployment/Release data, grouped by audience (technical/customer-facing) with traceable citations. | P1 | 3 | FEAT-130, FEAT-083 |
+| FEAT-136 | Delivery Risk Agent | Analyzes epics, dependencies, and flow trends to narrate delivery risks, delay predictions, and mitigation options; feeds the risk report and delivery risk dashboard annotations. | P0 | 3 | FEAT-130, FEAT-094 |
+| FEAT-137 | Sprint Review Agent | Produces sprint review narratives and presentation content from Sprint, WorkItem, and metric data: accomplishments, misses, scope churn, blockers, and carry-over, with source citations. | P0 | 3 | FEAT-130, FEAT-091, FEAT-158 |
+| FEAT-138 | Release Notes Agent | Generates release notes from merged PullRequests, resolved WorkItems, and Deployment/Release data, grouped by audience (technical/customer-facing) with traceable citations. | P0 | 3 | FEAT-130, FEAT-083 |
 | FEAT-139 | Documentation Agent | Drafts and updates user manuals and technical documentation from Repository content, Documents, and ApiEndpoint inventories, via RAG over ingested sources. | P2 | 4 | FEAT-130, FEAT-158 |
 | FEAT-140 | Use Case Diagram Agent | Generates use case diagrams (Mermaid/PlantUML sources rendered to artifacts) from requirements-bearing WorkItems and Documents. | P2 | 4 | FEAT-130, FEAT-158 |
 | FEAT-141 | Architecture Diagram Agent | Generates architecture and dependency diagrams from Repository, Service, ApiEndpoint, and Deployment topology data, with human-editable diagram sources. | P2 | 4 | FEAT-130, FEAT-158 |
@@ -201,7 +205,7 @@ Agent infrastructure plus the 18 canonical agents: Data Ingestion, Data Quality,
 | FEAT-145 | Team Health Agent | Produces team-level health narratives (load balance, review bottlenecks, bus factor) with explicit anti-surveillance guardrails: no individual attribution in outputs. | P2 | 4 | FEAT-130, FEAT-096 |
 | FEAT-146 | RAG Retrieval Agent | The retrieval tool used by other agents: permission-aware, tenant-isolated vector search with metadata filters, returning chunks with source citations. | P0 | 3 | FEAT-130, FEAT-158 |
 | FEAT-147 | Report Composition Agent | Assembles multi-section reports from other agents' outputs and templates, enforcing structure, citation completeness, and length budgets before hand-off to the report engine. | P1 | 3 | FEAT-130, FEAT-170 |
-| FEAT-148 | Validation Agent | Reviews generated outputs against source data before publication: verifies claims trace to citations, flags hallucination risk, and blocks or annotates outputs that fail validation policy. | P1 | 4 | FEAT-130, FEAT-147 |
+| FEAT-148 | Validation Agent | Reviews generated outputs against source data before publication: verifies claims trace to citations, flags hallucination risk, and blocks or annotates outputs that fail validation policy. | P0 | 3 | FEAT-130, FEAT-147 |
 | FEAT-149 | Security Review Agent | Aggregates SecurityFindings and configuration posture into security review narratives and drafts the security findings report; never auto-remediates. | P2 | 4 | FEAT-130, FEAT-093 |
 | FEAT-150 | Configuration Assistant Agent | Conversational assistant for administrators: explains settings, drafts connector/metric/risk-rule configurations, and validates proposed changes — applying nothing without explicit admin confirmation and RBAC checks. | P2 | 4 | FEAT-130, FEAT-024 |
 
@@ -224,9 +228,9 @@ EIP participates in the Model Context Protocol in both directions: as an MCP cli
 
 | ID | Name | Description | Priority | Phase | Dependencies |
 |----|------|-------------|----------|-------|--------------|
-| FEAT-165 | MCP client | EIP connects to registered enterprise MCP servers and exposes their tools to agents, subject to per-agent tool allow-lists and budgets. | P1 | 4 | FEAT-130, FEAT-028 |
-| FEAT-166 | MCP server | EIP exposes selected, allow-listed internal capabilities (metric queries, report triggers, entity lookups) as an MCP server for enterprise AI clients. | P1 | 4 | FEAT-005, FEAT-028 |
-| FEAT-167 | MCP RBAC & audit | Per-capability RBAC on both MCP directions plus full audit of MCP tool invocations (caller, capability, parameters per redaction policy, outcome). | P1 | 4 | FEAT-165, FEAT-166, FEAT-197 |
+| FEAT-165 | MCP client | EIP connects to registered enterprise MCP servers and exposes their tools to agents, subject to per-agent tool allow-lists and budgets. | P0 | 4 | FEAT-130, FEAT-028 |
+| FEAT-166 | MCP server | EIP exposes selected, allow-listed internal capabilities (metric queries, report triggers, entity lookups) as an MCP server for enterprise AI clients. | P0 | 4 | FEAT-005, FEAT-028 |
+| FEAT-167 | MCP RBAC & audit | Per-capability RBAC on both MCP directions plus full audit of MCP tool invocations (caller, capability, parameters per redaction policy, outcome). | P0 | 4 | FEAT-165, FEAT-166, FEAT-197 |
 
 ## 11. Report Generation Center & Artifacts Library
 
@@ -269,6 +273,7 @@ Security features that are product surface (secrets handling, audit, governance)
 | FEAT-198 | LLM call audit | Dedicated audit of every LLM invocation: prompt (redacted per policy), model, provider, tokens, cost, latency, agent, and triggering user/job. | P0 | 3 | FEAT-197, FEAT-130 |
 | FEAT-199 | Security hardening & certification checklist | Enterprise hardening: dependency and container scanning gates, TLS everywhere, CSP headers, penetration-test remediation, and a documented security certification checklist for customer security reviews. | P0 | 5 | FEAT-195, FEAT-197 |
 | FEAT-200 | Metric governance guardrails | Enforced anti-goals: no individual-surveillance or stack-ranking views; individual-grain queries restricted; every metric surface shows context, uncertainty, and limitations; governance settings audited. | P0 | 2 | FEAT-090, FEAT-197 |
+| FEAT-211 | Member data erasure & DSAR handling | Tenant-scoped data-subject erasure and DSAR export for Member-linked data: deletion/anonymization propagated across the canonical model, RAG/vector indexes, generated artifacts, and caches, with audit-preserving redaction (works-council/GDPR). | P1 | 2 | FEAT-002, FEAT-197 |
 
 ## 13. Observability
 

@@ -1,0 +1,21 @@
+# EIP Helm chart (M5 Wave S2, DEBT-002/DEBT-005 packaging + supply-chain hardening). This is a
+# minimal, v0.1-scoped chart for eip-app-only pilot/evaluation clusters — the eventual GA
+# production topology (HA, autoscaling, operator-managed data services) is Kustomize-based and
+# specified in ../../../docs/architecture (see ../../../docs/infrastructure/KubernetesOpenShift.md
+# §1, which remains the source of truth Kustomize is generated from; this chart must never
+# diverge from it). See ../../../docs/infrastructure/HelmDeployment.md for install/upgrade/air-gap
+# procedures.
+apiVersion: v2
+name: eip
+description: Engineering Intelligence Platform (EIP) — minimal Helm packaging for eip-app (v0.1)
+type: application
+version: 0.1.0
+appVersion: "0.1"
+keywords:
+  - engineering-intelligence
+  - devops-analytics
+  - flow-metrics
+# home/sources intentionally omitted — this is an internal, on-premise platform (no public repo
+# to link); operators run this chart from a private mirror per docs/infrastructure/HelmDeployment.md.
+maintainers:
+  - name: EIP Platform Team

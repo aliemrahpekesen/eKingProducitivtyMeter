@@ -1,0 +1,126 @@
+# eip-app runtime config. Production shape: the app connects as the RLS-enforced `eip_app`
+# (NOBYPASSRLS) role; Flyway runs its DDL as the privileged `eip_migrator` role (DatabasePlan §2/§5).
+# Values default for local dev and are overridden by env / the test harness.
+spring:
+  application:
+    name: eip-app
+  profiles:
+    group:
+      # Environment profiles (ADR-022): dev/test also activate the `demo` seeding feature profile,
+      # so a fresh environment comes up with the deterministic simulation dataset already computed.
+      # preprod/prod never seed.
+      dev: demo
+      test: demo
+  threads:
+    virtual:
+      enabled: true # Java 21 virtual threads for blocking MVC/JDBC IO (BackendPlan §4)
+  datasource:
+    url: ${EIP_DB_URL:jdbc:postgresql://localhost:5432/eip}
+    username: ${EIP_APP_DB_USER:eip_app}
+    password: ${EIP_APP_DB_PASSWORD:eip_app}
+  flyway:
+    enabled: true
+    url: ${EIP_DB_URL:jdbc:postgresql://localhost:5432/eip}
+    user: ${EIP_MIGRATOR_DB_USER:eip_migrator}
+    password: ${EIP_MIGRATOR_DB_PASSWORD:eip_migrator}
+    locations: classpath:db/migration
+  # Transactional outbox → Kafka spine (DEBT-017, BackendPlan §6). With Kafka unreachable the app
+  # still boots and serves HTTP: the producer fails fast (short send timeout below) so the outbox
+  # relay just counts the attempt and retries on its next poll, and the listener container retries
+  # its connection in the background — neither blocks startup or the API.
+  kafka:
+    bootstrap-servers: ${EIP_KAFKA_BOOTSTRAP:localhost:29092}
+    producer:
+      acks: all
+      properties:
+        # Bounds how long a send() call can block discovering cluster metadata when the broker is
+        # down — without this the default (60s) would make a single outbox row's publish attempt
+        # block far longer than the relay's own short send timeout expects.
+        max.block.ms: 5000
+    consumer:
+      auto-offset-reset: earliest
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # OIDC issuer (SecurityModel §3), consulted only when eip.security.mode=oidc below (the
+          # oidc-conditional JwtDecoder bean reads this property directly; Boot's own resource-server
+          # auto-configuration is not otherwise engaged). Compose's dev Keycloak serves the realm
+          # under the /auth relative path (infra/docker-compose/docker-compose.yml KC_HTTP_RELATIVE_PATH).
+          issuer-uri: ${EIP_OIDC_ISSUER:http://localhost:8180/auth/realms/eip}
+
+# Transactional outbox → Kafka spine (DEBT-017): default ON; set eip.events.enabled=false to
+# disable the relay/publisher/consumer entirely (e.g. an environment with no Kafka at all).
+eip:
+  security:
+    # header (default) | oidc (SecurityModel §3, M5 Wave S1a). header preserves the dev/demo
+    # X-EIP-Tenant convenience with an implicit TENANT_ADMIN principal; oidc requires a valid JWT
+    # (issuer above) and derives tenant (eip_tenant claim) + roles (realm_access.roles) from it.
+    # config/environments/{dev,test}.env set header explicitly; {preprod,prod}.env set oidc — and
+    # ProductionTenantResolutionGuard (DEBT-012) refuses prod/preprod boot without it.
+    mode: ${EIP_SECURITY_MODE:header}
+  events:
+    enabled: true
+    relay-delay-ms: 1000
+  # Incremental sync + auto-sync (TASK-0021 Wave 2C). scheduled-enabled defaults ON; set to false
+  # to disable ScheduledSyncRunner entirely (e.g. a test that drives sync explicitly and would
+  # otherwise race the scheduled pass). auto-delay-ms is the fixed delay between passes.
+  sync:
+    scheduled-enabled: true
+    auto-delay-ms: 300000
+  # Deterministic weekly report generation (TASK-0022, ADR-023). scheduled-enabled defaults ON;
+  # set to false to disable ScheduledReportRunner entirely (e.g. a test that would otherwise risk
+  # racing the weekly pass). schedule-cron is a standard Spring cron expression (seconds-first);
+  # the default fires once a week, Monday 06:00 server time.
+  reports:
+    scheduled-enabled: true
+    schedule-cron: "0 0 6 * * MON"
+  # Hash-chained audit log (DEBT-024 Wave 3A, SecurityModel §11): the async per-tenant chainer
+  # assigns prev_hash/hash on rows the write path inserted unchained, and the verifier re-walks
+  # each tenant's chain recomputing hashes to catch tampering. enabled defaults ON; set to false to
+  # disable both schedulers entirely (e.g. a test that drives chaining/verification explicitly and
+  # would otherwise race the scheduled passes).
+  audit:
+    enabled: true
+    chainer-delay-ms: 5000
+    chainer-batch-size: 500
+    verify-cron: "0 0 * * * *"
+    verify-max-rows: 50000
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+
+# Observability (TASK-0012, ObservabilityModel / BackendPlan §12): actuator health/info/prometheus,
+# Micrometer RED metrics, and OpenTelemetry tracing exported over OTLP to the Compose collector.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true # liveness/readiness groups for K8s probes (BackendPlan §12.6)
+  metrics:
+    tags:
+      deployable: eip-app # common label on every metric (ObservabilityModel §3)
+    distribution:
+      # eip_api_request_duration_seconds is a histogram (ObservabilityModel §3): publish native
+      # buckets so Prometheus histogram_quantile() can compute p50/p95, with a bucket at the
+      # API p95 budget (300 ms, CLAUDE.md key budgets).
+      percentiles-histogram:
+        eip.api.request.duration: true
+      slo:
+        eip.api.request.duration: 300ms
+  prometheus:
+    metrics:
+      export:
+        enabled: true # expose /actuator/prometheus for scrape (explicit, not via defaults fallback)
+  tracing:
+    sampling:
+      probability: 1.0 # SDKs export 100%; sampling executes in the collector (ObservabilityModel §4)
+  otlp:
+    tracing:
+      # Points at the Compose OTel Collector OTLP/HTTP receiver; overridable per deployment.
+      endpoint: ${EIP_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}

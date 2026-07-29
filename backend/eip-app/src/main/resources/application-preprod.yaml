@@ -1,0 +1,9 @@
+# preprod — production rehearsal (ADR-022). No data seeding (operators load their own tenants),
+# structured JSON logs, full tracing. Tenant resolution is STILL the dev header resolver because
+# OIDC has not landed (DEBT-012) — acceptable only for rehearsal networks; prod refuses to boot
+# until OIDC exists (ProductionTenantResolutionGuard). The simulation source stays available: it
+# is v0.1's only connector (flips off when real connectors land — DEBT-018).
+logging:
+  structured:
+    format:
+      console: logstash

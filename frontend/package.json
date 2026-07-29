@@ -1,0 +1,60 @@
+{
+  "name": "eip-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=9"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . --max-warnings 0",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "generate:api": "openapi-typescript ../backend/eip-app/openapi/eip-openapi-v1.json -o src/api/generated.ts --properties-required-by-default --empty-objects-unknown",
+    "generate:api:check": "openapi-typescript ../backend/eip-app/openapi/eip-openapi-v1.json -o src/api/generated.ts --properties-required-by-default --empty-objects-unknown --check"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "5.62.7",
+    "echarts": "6.1.0",
+    "oidc-client-ts": "3.5.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.15.0",
+    "@testing-library/dom": "10.4.0",
+    "@testing-library/jest-dom": "6.6.3",
+    "@testing-library/react": "16.1.0",
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "@vitejs/plugin-react": "4.3.4",
+    "eslint": "9.15.0",
+    "eslint-config-prettier": "9.1.0",
+    "eslint-plugin-react-hooks": "5.0.0",
+    "eslint-plugin-react-refresh": "0.4.14",
+    "globals": "15.12.0",
+    "jsdom": "25.0.1",
+    "openapi-typescript": "7.13.0",
+    "prettier": "3.4.2",
+    "typescript": "5.6.3",
+    "typescript-eslint": "8.16.0",
+    "vite": "5.4.21",
+    "vitest": "3.2.7"
+  },
+  "pnpm": {
+    "overrides": {
+      "brace-expansion@1": "2.1.2",
+      "brace-expansion@2": "2.1.2",
+      "js-yaml@4": "4.3.0",
+      "postcss@8": "8.5.18"
+    }
+  }
+}

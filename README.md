@@ -4,7 +4,30 @@
 
 EIP integrates with enterprise SDLC tools — Jira, Confluence, GitHub, GitLab, Bitbucket, SonarQube, Artifactory, Kubernetes/OpenShift, Docker registries, Prometheus, Grafana, OpenTelemetry, CI/CD systems, and custom internal project/demand tools — to collect, normalize, correlate, and analyze engineering data. It measures productivity, delivery health, sprint/kanban flow, release readiness, code quality, operational maturity, blockers, risks, delays, dependencies, incidents, and technical debt, and generates dashboards, reports, and AI-composed narrative outputs (sprint reviews, release notes, executive summaries, and more).
 
-> **Repository status:** This repository currently contains the **product specification workspace** — the complete documentation set that guides implementation. Application source code is intentionally not created yet; it will be built phase by phase according to [docs/implementation/PhaseBasedImplementationPlan.md](docs/implementation/PhaseBasedImplementationPlan.md).
+> **Repository status:** The **product specification workspace** (`/docs`), the **Engineering Operating System** (`/engineering-operating-system`), and the **development program** (`/program`, `/sprints`) are complete. Implementation is underway at **Phase 0 (v0.1)**: the monorepo scaffold (nine backend Gradle modules + the frontend Vite app), the CI pipeline, and the local Docker Compose dev stack now exist. Substantive module content is built phase by phase per [docs/implementation/PhaseBasedImplementationPlan.md](docs/implementation/PhaseBasedImplementationPlan.md).
+
+## Getting started
+
+New here? **[CONTRIBUTING.md](CONTRIBUTING.md)** takes you from a clean clone to a booted stack and an open PR — prerequisites, `make dev-up`, build & local-validation commands, service URLs, troubleshooting, and the contribution flow.
+
+```bash
+make dev-up          # boot the local infra stack (Postgres, Kafka, Redis, MinIO, Keycloak, OTel, Prometheus, Grafana)
+make backend-build   # cd backend && ./gradlew build   (Java 21 toolchain auto-provisioned)
+make frontend-build  # pnpm --dir frontend install && build
+make dev-down        # tear down
+```
+
+**See the product in one command** — `make demo-up` starts Postgres + the backend (`demo` profile,
+RLS enforced) + the frontend with a **fixed demo tenant preloaded**, then open
+**http://localhost:5173**. It serves clearly-labelled **simulation** data (no real connector
+ingestion). Stop with `make demo-down`.
+
+```bash
+make demo-up         # Postgres + eip-app (demo) + frontend, fixed demo tenant preloaded → http://localhost:5173
+make demo-down       # stop the demo backend + Postgres
+```
+
+Every AI engineering session starts by reading **[/CLAUDE.md](CLAUDE.md)** (the operating manual).
 
 ## Product purpose
 

@@ -48,7 +48,7 @@ sequenceDiagram
 
 - **Touched components:** `/infra/docker-compose` or `/infra/kubernetes`, Keycloak, `eip-app`, `eip-tenancy`, `eip-connectors`, `eip-ingestion`, `eip-workers`, Kafka, PostgreSQL, MinIO, Redis (rate-limit state, locks via Redisson), frontend, Grafana.
 - **Outcome:** Both connectors green; canonical model populated; incremental sync scheduled; first dashboards live.
-- **Failure/edge paths:** `testConnection()` fails → actionable RFC 7807 error (DNS, TLS, credential, permission) with no partial connector activation. Rate limiting mid-sync → backoff + jitter, checkpoint preserved, sync resumes automatically. Worker crash → at-least-once redelivery; idempotent upserts (dedup on `eventId`) prevent duplicates. Poison message → routed to the consumer group DLQ (`.<group>.dlq`), visible in the DLQ inspector (see J-… and UC-004).
+- **Failure/edge paths:** `testConnection()` fails → actionable RFC 7807 error (DNS, TLS, credential, permission) with no partial connector activation. Rate limiting mid-sync → backoff + jitter, checkpoint preserved, sync resumes automatically. Worker crash → at-least-once redelivery; idempotent upserts (dedup on `eventId`) prevent duplicates. Poison message → routed to the consumer group DLQ (`<group>.dlq`), visible in the DLQ inspector (see UC-008 and UC-004).
 
 ## 2. Journey J-02 — Engineering Manager reviews sprint health and drills into blockers
 
@@ -144,7 +144,7 @@ flowchart LR
 
 - **Persona:** SRE / Ops Engineer (Priya).
 - **Trigger:** PagerDuty-style alert at 02:10; Incident INC-4312 opened for checkout Service latency SLO burn.
-- **Preconditions:** Kubernetes, Prometheus, and OTLP intake connectors active; Deployment events flowing on `eip.domain.cicd`; Incident records ingested (via Jira incident tickets as `INCIDENT_TICKET` WorkItems or ops connector).
+- **Preconditions:** Core correlation inputs active (available from Phase 2): Incident records ingested via Jira incident tickets as `INCIDENT_TICKET` WorkItems, Deployment events flowing on `eip.domain.cicd` via the Generic CI/CD connector, and SLO/alert signals via the Prometheus connector. The Kubernetes and OTLP intake connectors are optional enrichment (Phase 5) — they add richer Alert, LogReference, and TraceReference correlation; the full form of this journey as written assumes them.
 
 **Steps:**
 1. Priya opens the Incident timeline for the checkout Service: Incidents, Alerts, Deployments, and SLO burn plotted on one axis, with LogReference and TraceReference links out to Loki/Tempo.
@@ -174,7 +174,7 @@ sequenceDiagram
     K-->>FE: analysis ready, cited
 ```
 
-- **Touched components:** `eip-connectors` (Kubernetes, Prometheus, OpenTelemetry OTLP intake, Generic CI/CD), `eip-ingestion`, `eip-analytics` (ops metrics, correlation), `eip-ai` (Incident Analysis agent), `eip-reports`, frontend, Kafka.
+- **Touched components:** `eip-connectors` (Jira `INCIDENT_TICKET` intake, Generic CI/CD, Prometheus; Kubernetes and OpenTelemetry OTLP intake as optional Phase-5 enrichment), `eip-ingestion`, `eip-analytics` (ops metrics, correlation), `eip-ai` (Incident Analysis agent), `eip-reports`, frontend, Kafka.
 - **Outcome:** Change-to-incident correlation in under a minute; cited post-incident analysis attached to the Incident; DORA/ops metrics updated.
 - **Failure/edge paths:** No candidate Deployment in the window → timeline says so explicitly; the agent must not invent a causal change (Validation agent enforces). Clock skew between sources → correlation uses `occurredAt` with tolerance bands and shows uncertainty. OTLP intake backlog during the incident → freshness watermark on the timeline.
 
@@ -242,7 +242,7 @@ sequenceDiagram
 | J-03 | Sprint review presentation via Sprint Review agent | Team Lead / Scrum Master | Phase 3 |
 | J-04 | Release readiness + release notes | Release Manager | Phase 3 |
 | J-05 | Quarterly engineering health report | VP Engineering / CTO | Phase 4 |
-| J-06 | Incident impact correlated to deployments | SRE / Ops Engineer | Phase 2 (metrics) / Phase 4 (Incident Analysis agent) |
+| J-06 | Incident impact correlated to deployments | SRE / Ops Engineer | Phase 2 (core correlation: Jira `INCIDENT_TICKET` + Generic CI/CD + Prometheus) / Phase 4 (Incident Analysis agent) / Phase 5 (full form with Kubernetes + OTLP enrichment) |
 | J-07 | Local LLM (Ollama) + Confluence RAG setup | Platform Administrator | Phase 3 |
 | J-08 | AI usage and secret access audit | CISO / Security Officer | Phase 0 (audit core) / Phase 3 (LLM audit) |
 | J-09 | Simulation mode evaluation/demo | Platform Administrator + evaluators | Phase 1 (sim connectors) onward |

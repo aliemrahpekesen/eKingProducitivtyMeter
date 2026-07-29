@@ -100,7 +100,7 @@ Default home view per role (clonable saved views, `/api/v1/dashboards` seeds):
 | LLM provider config | `/admin/llm-providers` | Deniz | Provider table (Ollama/vLLM/OpenAI-compatible/Anthropic-compatible/custom), schema-driven config form, test probe, model routing matrix, token budget editor, LLM call audit table | `/llm-providers*`, `/llm-providers/{id}/test`, `/model-routes`, `/llm-calls` |
 | MCP config | `/admin/mcp` | Deniz, Helena | Upstream server list + handshake test, tool allow-list editor, exposed-capabilities table with per-capability RBAC binding, invocation audit | `/mcp/servers*`, `/mcp/servers/{id}/test`, `/mcp/exposed-capabilities*`, `/mcp/invocations` |
 | Report generation center | `/reports/generate` | Mira, Jonas, Kenji | Template gallery, scope picker (team/sprint/release/org), schedule editor, generation job list with progress | `/report-templates*`, `/report-jobs*` |
-| Artifacts library | `/reports/artifacts` | All report consumers | Artifact table with filters, version history panel, inline preview (md/html), export menu (md/pdf/html/json/csv/pptx), citation inspector | `/artifacts*`, `/artifacts/{id}/versions`, `/content`, `/exports` |
+| Artifacts library | `/reports/artifacts` | All report consumers | Artifact table with filters, version history panel, inline preview (md/html), export menu (md/pdf/html/json/csv/pptx/png/svg), citation inspector | `/artifacts*`, `/artifacts/{id}/versions`, `/content`, `/exports` |
 | Audit log viewer | `/admin/audit` | Helena (CISO / Security Officer) | Filterable audit table (actor/action/resource/time/outcome), before/after diff viewer, compliance export | `/audit-events*`, `/audit-events/exports` |
 | System health | `/admin/system` | Deniz, Priya | Dependency health board (DB/Kafka/Redis/MinIO/vector store), worker heartbeats, feature flags panel | `/system/health`, `/system/info`, `/system/feature-flags` |
 | Background job monitor | `/admin/jobs` | Deniz, Priya | Job/run tables with live status, cancel, run detail (timings, counts, traceId link) | `/jobs*`, `/job-runs/{runId}` |
@@ -111,6 +111,8 @@ Default home view per role (clonable saved views, `/api/v1/dashboards` seeds):
 | Saved views manager | `/dashboards/views` | All dashboard users | Saved view list, share dialog, set-as-home | `/dashboards*`, `/dashboards/{id}/share` |
 
 Every metric surface renders the anti-surveillance invariant: definition popover with purpose, formula, inputs, grain, caveats/limitations, and gaming risks (from `/metric-definitions`); no screen ranks named individuals.
+
+In the artifacts library, generated report HTML is sanitized against a strict allow-list before it is rendered in the inline preview — a stored-XSS defense for AI-generated content.
 
 ## 4. Dashboard architecture
 
@@ -199,7 +201,7 @@ const { status } = useSse(run.eventsUrl, {
 
 - WCAG 2.1 AA target: full keyboard operability (grid and table navigation included), visible focus, ARIA landmarks per shell region, `aria-live` for job/agent status changes, color-contrast-checked token palette; charts get accessible data-table alternatives (toggle on every widget).
 - axe checks run in component tests (`../testing/TestingStrategy.md`); violations fail CI.
-- i18n-ready from day one: all strings through react-i18next with ICU plurals, `en` as source locale, locale-aware dates/numbers (`Intl`), no string concatenation of translatable fragments; RTL not in v1 scope but no hard-coded directional CSS.
+- i18n-ready from day one: all strings through react-i18next with ICU plurals, `en-US` as source locale, locale-aware dates/numbers (`Intl`), no string concatenation of translatable fragments; RTL not in v1 scope but no hard-coded directional CSS.
 
 ## 9. Error, loading, and empty-state conventions
 
